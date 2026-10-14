@@ -1,11 +1,13 @@
 "use strict";
 /* Real naive build: scaffold Angular → npm install → ng build → publish to prototype/build/.
-   Driven from spec (the capability graph + decisions). Streams progress to build-status.json.
+   Driven from capability-graph/specs/api.json (the API layer spec). Streams progress to build-status.json.
    Invoked (detached) by POST /api/build. Takes minutes (fresh scaffold + install + compile). */
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const { angularFiles, DEFAULT_COMPONENT_FILES } = require("./lib/angular-app");
+const { DEFAULT_PATHS, loadInputs, inputHashes, canon } = require("./lib/specs");
+const API_SPEC = path.join(DEFAULT_PATHS.specsDir, "api.json");
 
 const ROOT = path.join(__dirname, "..");                    // repo root
 const WORK_ROOT = path.join(__dirname, "_build");           // holds per-build workspaces
@@ -14,8 +16,6 @@ const WORK = path.join(WORK_ROOT, "run-" + RUN_ID);         // fresh, unique per
 const APP = path.join(WORK, "eqbuild");
 const OUT = path.join(ROOT, "prototype", "build");          // published site
 const STATUS = path.join(__dirname, "build-status.json");
-const GRAPH = path.join(ROOT, "capability-graph", "new-inventory-entry.json");
-const DECISIONS = process.argv[2] || path.join(__dirname, "decisions.json");
 
 // Ordered phases with a rough typical duration (sec) and a % band; the bar
 // interpolates within each phase by elapsed time so it moves during long steps.
@@ -58,35 +58,17 @@ function run(cmd, args, cwd) {
   });
 }
 
-// ---- derive the app config from the spec (graph + decisions) ----
-function enumOpts(s){ return String(s||"").split(";").map(x=>x.trim()).filter(Boolean).map(p=>{const i=p.indexOf("=");return i>0?[p.slice(0,i).trim(),p.slice(i+1).trim()]:[p,p];}); }
-function fieldCfg(d){
-  const b={k:d.id.replace(/^FLD\./,""),label:d.name,fno:d.field};
-  if(d.field===".01") return {...b,type:"readonly"};
-  if(d.enumValues) return {...b,type:"select",options:enumOpts(d.enumValues)};
-  if(d.pointsTo){ const small=(typeof d.lookupCount==="number"&&d.lookupCount<=60); return {...b,type:small?"lookupSelect":"lookupType",table:d.lookupTable||"",sample:d.sample||null}; }
-  if(/date/i.test(d.name)||/Date/.test(d.type||"")) return {...b,type:"date"};
-  if(/Numeric/.test(d.type||"")||/value|cost/i.test(d.name)) return {...b,type:"number"};
-  const m=/\((\d+)\s*-\s*(\d+)\)/.exec(d.type||""); return {...b,type:"text",maxlen:m?+m[2]:null};
-}
-function buildConfig(g, s){
-  g = g || JSON.parse(fs.readFileSync(GRAPH,"utf8"));
-  if(!s){ try{ s=JSON.parse(fs.readFileSync(DECISIONS,"utf8")); }catch(e){ s={}; } }
-  const dec=s.dec||{}, scope=s.scope||{};
-  const c=g.capabilities[0];
-  const omit=new Set((c.data||[]).filter(d=>d.kind==="field"&&dec[d.id]==="Omit").map(d=>d.id));
-  const byId=id=>(c.data||[]).find(d=>d.id===id);
-  const pages=(c.formScreens||[]).filter(s=>s.fields&&s.fields.length).map(s=>({title:s.title,fields:s.fields.map(byId).filter(d=>d&&!omit.has(d.id)).map(fieldCfg)}));
-  const OQ={"OQ.WorkOrderPolicy":"Create an incoming inspection work order?","OQ.PMEnrollmentPolicy":"Enroll the item in the PM program?","OQ.FAConfirmation":"Send the FA document to Austin once eligible?"};
-  const oq=(c.openQuestions||[]).filter(q=>dec[q.id]==="Required input"&&OQ[q.id]).map(q=>({k:q.id,label:OQ[q.id]}));
-  const sideEffects=(c.sideEffects||[]).filter(s=>dec[s.id]!=="Drop").map(s=>({name:s.name,disp:dec[s.id]||"",deferred:(scope[s.id]||"Build now")==="Defer"}));
-  return {capability:c.name||"Register Equipment",command:"RegisterEquipment",pages,oq,sideEffects};
+// The build reads ONLY the API layer spec, and refuses one generated from inputs that have since changed.
+function buildConfig(specFile = API_SPEC, paths = DEFAULT_PATHS){
+  const spec = JSON.parse(fs.readFileSync(specFile, "utf8"));
+  if (canon(inputHashes("api", loadInputs(paths))) !== canon(spec.inputs)) throw new Error("api spec is stale — its inputs changed since it was generated; regenerate (POST /api/build does this) and retry");
+  return spec.detail;
 }
 
 async function main(){
   ticker = setInterval(tick, 1000);
   try{
-    setStep("Reading spec (capability graph + decisions)");
+    setStep("Reading spec (capability-graph/specs/api.json)");
     const cfg = buildConfig();
     log(`spec → ${cfg.pages.length} screens, ${cfg.pages.reduce((n,p)=>n+p.fields.length,0)} fields`);
 

@@ -105,11 +105,6 @@ const CFG:any = /*__CONFIG__*/;
               <div class="row" *ngFor="let f of p.fields"><span class="k">{{f.label}}</span><span class="v">{{display(f)}}</span></div>
             </div>
           </div>
-          <div class="oq"><h3>Ensuing workflows <span class="nb">Phase 2 · not in this build</span></h3>
-            <label *ngFor="let q of cfg.oq"><input type="checkbox" [(ngModel)]="model[q.k]"> {{q.label}}</label>
-            <div *ngIf="!cfg.oq.length" style="color:var(--dim);font-size:12.5px">No per-item decisions.</div>
-            <div *ngFor="let s of cfg.sideEffects" style="font-size:12px;margin-top:4px">{{s.deferred?'⏸ ':''}}{{s.name}} — {{s.disp}} <span class="nb">Phase 2</span></div>
-          </div>
           <div class="bn info" *ngIf="saving">Saving…</div>
           <div class="bn ok" *ngIf="ok">✓ Saved. IEN: {{ok.equipmentIEN}} · status {{ok.status}} · lifecycle {{ok.lifecycleStatus}}</div>
           <div class="bn err" *ngIf="err">Submit failed — {{err}}</div>
