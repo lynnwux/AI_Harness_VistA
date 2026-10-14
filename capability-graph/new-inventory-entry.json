@@ -323,7 +323,7 @@
             "conditions": []
           },
           "required": false,
-          "legacyInput": "OPTIONAL — ASKSER lets the clerk press <return> to skip. On a matching canonical serial (FC index: UPPERCASE, punctuation-stripped, 30 chars) it lists existing matches and asks to reconfirm (default NO); a duplicate is ALLOWED on override. Not enforced-unique."
+          "legacyInput": "OPTIONAL — ASKSER lets the clerk press <return> to skip. On a matching canonical serial (FC index: uppercased, spaces and punctuation stripped, one trailing space appended, cut to 30 characters) it lists existing matches and asks to reconfirm (default NO); a duplicate is ALLOWED on override. Not enforced-unique."
         },
         {
           "id": "FLD.serialC",
@@ -1809,7 +1809,31 @@
             "conditions": [
               "prompt gated by ^ENG(6910.2 'ASK INCOMING INSPECTION W.O.'"
             ]
-          }
+          },
+          "targetKind": "vistaWrite",
+          "legacyInvocation": "conditional",
+          "legacyEvidence": [
+            {
+              "routine": "ENEQ1",
+              "line": "ADDEQ",
+              "says": "The work-order prompt appears only if site parameter ASK INCOMING INSPECTION W.O. (file 6910.2) exists with piece 2 set; the default answer is YES when piece 2 = 2, otherwise NO. On YES it calls IIWO^ENWONEW3(ENNXL)."
+            },
+            {
+              "routine": "ENWONEW3",
+              "line": "IIWO (line 5)",
+              "says": "Shop: the site's incoming-inspection section (^DIC(6910,1,0) piece 13), else the item's responsible shop (^ENG(6914,ien,4)), else the temporary work-order section (piece 6). The clerk is asked if it is still blank or if they hold key ENEDPM (non-holders are restricted to receiving areas). No shop means no work order."
+            },
+            {
+              "routine": "ENWONEW3",
+              "line": "IIWO",
+              "says": "Creates the work order via WONUM^ENWONEW and WOFILL^ENWONEW, then files: 6 = Incoming Inspection, 17 = AVERAGE, 32 = PENDING for receiving shops (shop #100 > 89) else IN PROGRESS, 10 = TODAY for receiving shops, sub-file 6920.035 .01 = I1, 18 = the equipment IEN, 3 = the item's LOCATION (6914 fld 24)."
+            },
+            {
+              "routine": "ENWONEW3",
+              "line": "IIWO",
+              "says": "Clerk-entered fields: 16 technician (defaulted from the item's responsible technician), 7 contact, 8 phone, 40 comments."
+            }
+          ]
         },
         {
           "id": "SIDE.PMSchedule",
@@ -1831,7 +1855,26 @@
               "key ENEDPM",
               "user confirms"
             ]
-          }
+          },
+          "targetKind": "vistaWrite",
+          "legacyInvocation": "conditional",
+          "writes": {
+            "file": "6914.04",
+            "global": "^ENG(6914,ien,4,*)",
+            "access": "create"
+          },
+          "legacyEvidence": [
+            {
+              "routine": "ENEQ1",
+              "line": "ADDEQ",
+              "says": "Shown only to holders of key ENEDPM: 'Would you like to include this item in the PM program' (default YES). On YES it runs DINV^ENEQPMP3 when a PM schedule already exists, then XNPMSE^ENEQPMP."
+            },
+            {
+              "routine": "ENEQPMP",
+              "line": "lines 12–34",
+              "says": "Reads the item's EQUIPMENT CATEGORY (6914 node 1 piece 1). If that category has a standard PM schedule (^ENG(6911,cat,4)) the clerk is offered it and, on acceptance, it is copied onto the item (^ENG(6914,ien,4)). There is no asset-value or capitalization condition."
+            }
+          ]
         },
         {
           "id": "SIDE.FinancialAsset",
@@ -1853,7 +1896,46 @@
             "conditions": [
               "RULE.FinancialEligibility"
             ]
-          }
+          },
+          "targetKind": "vistaWrite",
+          "legacyInvocation": "conditional",
+          "writes": {
+            "file": "6915.2",
+            "global": "^ENG(6915.2,*)",
+            "access": "create"
+          },
+          "legacyEvidence": [
+            {
+              "routine": "ENEQ1",
+              "line": "ADDEQ",
+              "says": "Legacy POLICY: capitalized NX equipment is reported to FAP. Mechanism: for TYPE OF ENTRY = NX and INVESTMENT CATEGORY = 1 (CAPITALIZED/ACCOUNTABLE), the clerk holding key ENFACS is asked 'Do you wish to send an FA document to Austin' with default YES; YES runs ^ENFAACQ. Override: a NO — the bulletin then flags 'It was NOT reported to FAP' and the item can be reported later."
+            },
+            {
+              "routine": "DD 6914",
+              "line": "fld 61 BUDGET OBJECT CODE",
+              "says": "Only capitalized assets are to be recorded in the Fixed Assets Package."
+            },
+            {
+              "routine": "ENFAACQ",
+              "line": "VALEQ (line 32)",
+              "says": "Validates the equipment via ^ENFAVAL into temporary global ^TMP($J,\"BAD\",ien); any problem aborts with 'No action taken. Database unchanged.'"
+            },
+            {
+              "routine": "ENFAACQ",
+              "line": "ADDFA (line 37)",
+              "says": "Creates an FA DOCUMENT LOG entry in file 6915.2 (field 1 = NOW, 1.5 = DUZ)."
+            },
+            {
+              "routine": "ENFAACQ",
+              "line": "UPDATE (line 59)",
+              "says": "Updates the equipment record: fills STATION NUMBER (node 9 piece 5) from the FA site if blank, normalizes TOTAL ASSET VALUE (fld 12, node 2 piece 3) to two decimals, defaults day 01 on acquisition and replacement dates; stores TOTAL ASSET VALUE on the code sheet (^ENG(6915.2,ien,200)) and adjusts the FAP balance (ADJBAL^ENFABAL)."
+            },
+            {
+              "routine": "ENFAACQ",
+              "line": "UPDATE (line 83)",
+              "says": "Transmits the code sheet to FAP via ^ENFAXMT; an adjustment voucher may also be created ($$AVP^ENFAAV)."
+            }
+          ]
         },
         {
           "id": "SIDE.Bulletin",
@@ -1871,6 +1953,87 @@
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
+          },
+          "targetKind": "notification",
+          "legacyInvocation": "unconditional",
+          "legacyEvidence": [
+            {
+              "routine": "ENEQ1",
+              "line": "ADDEQ",
+              "says": "S DA=ENNXL D BULL^ENEQ3 — runs unconditionally after every new entry."
+            },
+            {
+              "routine": "ENEQ3",
+              "line": "EQMAS (line 56)",
+              "says": "S DA=ENNXL D BULL — the multiple-entry copy also sends it unconditionally for every additional item."
+            },
+            {
+              "routine": "ENEQ3",
+              "line": "BULL (line 60)",
+              "says": "Recipients: mail group 'EN NEW EQUIPMENT <station number>' if it exists with at least one member (CHKMGRP, MAIL GROUP file 3.8), otherwise 'EN NEW EQUIPMENT' on the same test. If neither qualifies, no bulletin is sent and nothing is reported."
+            },
+            {
+              "routine": "ENEQ3",
+              "line": "BULL",
+              "says": "Sends MailMan bulletin EN NEW EQUIPMENT from sender AEMS/MERS with: 1 equipment IEN, 2 the entering user's name (from DUZ), 3 MFGR. EQUIPMENT NAME (node 0 piece 2), 4 category, 5 service, 6 station number, 7 'Item is [NOT] capitalized NX.' plus, when capitalized NX, 'It was [NOT] reported to FAP.' Missing 4–6 are sent as MISSING."
+            },
+            {
+              "routine": "XMB",
+              "line": "lines 12–16",
+              "says": "MailMan delivers a bulletin to the XMY recipients the caller sets AND to the members of the mail groups listed on the bulletin's own entry in file 3.6."
+            }
+          ],
+          "messageTemplate": {
+            "source": "BULLETIN file 3.6 · EN NEW EQUIPMENT (IEN 114)",
+            "sender": "AEMS/MERS",
+            "subject": "NEW EQUIPMENT: ENTRY #|1|",
+            "body": [
+              "A new equipment record has been added to the AEMS/MERS database.",
+              "The ENTRY NUMBER is |1|.",
+              "It was entered by |2|.",
+              "The MFGR EQUIPMENT NAME is |3|.",
+              "The EQUIPMENT CATEGORY is |4|.",
+              "The SERVICE is |5|.",
+              "The STATION NUMBER is |6|.",
+              "",
+              "|7|"
+            ],
+            "params": [
+              {
+                "n": 1,
+                "value": "the equipment IEN (ENTRY NUMBER, fld .01)"
+              },
+              {
+                "n": 2,
+                "value": "the entering user's name — NEW PERSON (file 200) .01 for DUZ",
+                "dependsOn": "operatorIdentity"
+              },
+              {
+                "n": 3,
+                "value": "MFGR. EQUIPMENT NAME (fld 3, node 0 piece 2)"
+              },
+              {
+                "n": 4,
+                "value": "the EQUIPMENT CATEGORY name (fld 6 → file 6911)",
+                "ifBlank": "MISSING"
+              },
+              {
+                "n": 5,
+                "value": "the SERVICE POINTER name (fld 21, node 3 piece 2 → file 49)",
+                "ifBlank": "MISSING"
+              },
+              {
+                "n": 6,
+                "value": "STATION NUMBER (fld 60), else the site default (file 6910 fld 1)",
+                "ifBlank": "MISSING"
+              },
+              {
+                "n": 7,
+                "value": "ENEQ3 lines 92–96: 'Item is [NOT] capitalized NX.' (capitalized NX = TYPE OF ENTRY = NX and INVESTMENT CATEGORY = 1); for capitalized NX items adds 'It was [NOT] reported to FAP.' from $$CHKFA^ENFAUTL (an FA document exists)",
+                "dependsOn": "SIDE.FinancialAsset"
+              }
+            ],
+            "recipients": "members of mail group 'EN NEW EQUIPMENT <station>' if it has any, otherwise 'EN NEW EQUIPMENT' (CHKMGRP), plus the members of the groups listed on the bulletin itself (XMB lines 12–16): CLICKAAH. Nothing is sent if neither EN group qualifies."
           }
         }
       ],
@@ -1944,7 +2107,10 @@
             "provenance": "observed",
             "confidence": 0.85,
             "evidence": [
-              "ENEQ1 ADDEQ FA block: for NX + capitalized items the ENFACS key holder is prompted with default YES (policy: report); NO is a clerk override", "DD fld 61 BUDGET OBJECT CODE: Only capitalized assets are to be recorded in the Fixed Assets Package", "ENEQ3 BULL lines 93-96: the bulletin flags a capitalized NX item that was not sent: 'It was NOT reported to FAP'", "ENFAACQ header: also called from ENEQ2, ENEQ3, ENFADEL, ENFAXMTM and in batch by CMR or station (report later)"
+              "ENEQ1 ADDEQ FA block: for NX + capitalized items the ENFACS key holder is prompted with default YES (policy: report); NO is a clerk override",
+              "DD fld 61 BUDGET OBJECT CODE: Only capitalized assets are to be recorded in the Fixed Assets Package",
+              "ENEQ3 BULL lines 93-96: the bulletin flags a capitalized NX item that was not sent: 'It was NOT reported to FAP'",
+              "ENFAACQ header: also called from ENEQ2, ENEQ3, ENFADEL, ENFAXMTM and in batch by CMR or station (report later)"
             ],
             "workflows": [
               "WF.EquipmentMgmt.NewInventoryEntry"
