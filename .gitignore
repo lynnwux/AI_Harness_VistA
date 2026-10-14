@@ -17,3 +17,6 @@ Thumbs.db
 
 # local secrets — never commit (template: agent/.env.example)
 .env
+
+# local git worktrees
+.claude/worktrees/
