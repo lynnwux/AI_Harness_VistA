@@ -192,10 +192,9 @@ function defaultFor(cat,item){
 let G, dec={}, oqPolicy={}, scope={}, integration={}, LSKEY="decide";
 
 function isBlocking(id){
-  // open-question row is blocking if deferred, or resolved-but-no-policy-entered
+  // blocking until a resolution is recorded — a Defer chosen in the chat records its reason, so it never blocks
   const cat = CATS.find(c=>c.key==="oq"); if(!cat) return false;
   if(!cat.items(G).some(i=>i.id===id)) return false;
-  if(dec[id]==="Defer") return true;
   return !((oqPolicy[id]||"").trim());
 }
 function blockingList(){

@@ -76,7 +76,8 @@ function getState(graph, decisions) {
   for (const [k, arr] of Object.entries(cats)) {
     summary[k] = (arr || []).map(n => ({ id: n.id, label: label(n), decision: decisions.dec[n.id] || "(unset)" }));
   }
-  const blocking = (c.openQuestions || []).filter(q => decisions.dec[q.id] === "Defer" || !(decisions.oqPolicy[q.id] || "").trim()).map(q => q.id);
+  // blocking = no recorded resolution; a Defer chosen in the chat records its reason, so it never blocks
+  const blocking = (c.openQuestions || []).filter(q => !((decisions.oqPolicy || {})[q.id] || "").trim()).map(q => q.id);
   return { capability: c.name, summary, blocking };
 }
 
@@ -136,10 +137,14 @@ function setDisposition(graph, decisions, id, option) {
 function resolveOpenQuestion(graph, decisions, id, mode, policy) {
   if (categoryOf(graph, id) !== "oq") return { ok: false, message: `${id} is not an open question` };
   if (!CAT_OPTS.oq.includes(mode)) return { ok: false, message: `mode must be one of ${CAT_OPTS.oq.join(", ")}` };
+  const text = String(policy || "").trim() || (mode === "Defer" ? "Deferred — not built in this phase; revisit later." : "");
+  decisions.oqPolicy = decisions.oqPolicy || {};
   decisions.dec[id] = mode;
-  if (mode !== "Defer") decisions.oqPolicy[id] = policy || "";
-  const resolved = mode !== "Defer" && (policy || "").trim();
-  return { ok: true, message: `${id} → ${mode}${resolved ? " (resolved)" : " (still blocking — needs policy text)"}`, decisions };
+  decisions.oqPolicy[id] = text;
+  // the side effect this question gates follows the decision into (or out of) the build
+  decisions.scope = decisions.scope || {};
+  (C(graph).sideEffects || []).filter(s => s.openQuestion === id).forEach(s => { decisions.scope[s.id] = mode === "Defer" ? "Defer" : "Build now"; });
+  return { ok: true, message: `${id} → ${mode}${text ? " (resolved)" : " (still blocking — needs policy text)"}`, decisions };
 }
 
 function setBuildScope(graph, decisions, id, phase) {
@@ -165,7 +170,7 @@ const TOOL_SPECS = [
   { toolSpec: { name: "explainOption", description: "Explain what a disposition option means for a specific element: the IRIS artifact it produces, when to use it, and its risk.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, option: { type: "string" } }, required: ["nodeId", "option"] } } } },
   { toolSpec: { name: "explainMapping", description: "Explain how a legacy element maps through the target layers (AI Hub / IRIS Production / REST / FileMan).", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" } }, required: ["nodeId"] } } } },
   { toolSpec: { name: "setDisposition", description: "Apply a disposition to an element (rule/behavior/data/security/dependency). Not for open questions.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, option: { type: "string" } }, required: ["nodeId", "option"] } } } },
-  { toolSpec: { name: "resolveOpenQuestion", description: "Resolve an open question: mode is 'Business rule', 'Required input', or 'Defer'; policy is the resolved rule/input statement.", inputSchema: { json: { type: "object", properties: { id: { type: "string" }, mode: { type: "string" }, policy: { type: "string" } }, required: ["id", "mode"] } } } },
+  { toolSpec: { name: "resolveOpenQuestion", description: "Resolve an open question: mode is 'Business rule', 'Required input', or 'Defer'; policy is the developer's statement in their own words — for Defer, their reason. A Defer is a decision: it never blocks Phase 2, and the side effect it gates moves out of this build.", inputSchema: { json: { type: "object", properties: { id: { type: "string" }, mode: { type: "string" }, policy: { type: "string" } }, required: ["id", "mode"] } } } },
   { toolSpec: { name: "setBuildScope", description: "Set whether a side effect is built in this phase. phase is 'Build now' or 'Defer' (defer = out of this build, revisit later).", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, phase: { type: "string" } }, required: ["nodeId", "phase"] } } } },
   { toolSpec: { name: "setIntegration", description: "Mark a side effect as an external integration and capture its target so the coding agent can build the call. Provide system (e.g. Jira), endpoint, trigger, and field mapping.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, system: { type: "string" }, endpoint: { type: "string" }, trigger: { type: "string" }, mapping: { type: "string" } }, required: ["nodeId", "system"] } } } },
 ];

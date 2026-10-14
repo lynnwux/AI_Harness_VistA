@@ -1,7 +1,7 @@
 {
   "dec": {
-    "OQ.WorkOrderPolicy": "Business rule",
-    "OQ.PMEnrollmentPolicy": "Required input",
+    "OQ.WorkOrderPolicy": "Defer",
+    "OQ.PMEnrollmentPolicy": "Defer",
     "OQ.FAConfirmation": "Defer",
     "RULE.FinancialEligibility": "Preserve",
     "SIDE.WorkOrder": "Business Operation",
@@ -61,9 +61,6 @@
     "DEP.FileMan": "Platform (reuse)",
     "DEP.XLFSTR": "Platform (reuse)"
   },
-  "oqPolicy": {
-    "OQ.WorkOrderPolicy": "Create incoming inspection work order if TYPE OF ENTRY = NX OR cost ≥ $50,000",
-    "OQ.PMEnrollmentPolicy": "When creating a new equipment record, ask the operator: \"Enroll in preventive-maintenance program?\""
-  },
+  "oqPolicy": {},
   "integration": {}
 }

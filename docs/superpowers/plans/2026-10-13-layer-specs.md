@@ -28,6 +28,8 @@
 - The production deploys to container `iris-ai-hub`, namespace `INTEROP`.
 - Do not modify `capability-graph/decide-classic.html`, `graph.html`, `map.html`, or `workbench-demo.html`.
 - No new npm dependencies; Node built-ins only.
+- Every chat reply passes the grounding guardrail (`agent/lib/grounding.js`, built ahead of this plan with `agent/test/grounding.test.js`): a reply that borrows another item's evidence, or states a threshold found in neither the item's evidence nor the developer's words, is retried once and otherwise shown with a ⚠. Keep it in the chat route; never bypass it.
+- The chat's instructions contain no worked example drawn from a real item (real fields, routines, conditions) — the model transfers them to other items.
 
 ## Review Focus
 
@@ -51,6 +53,7 @@
 | `agent/lib/specs/ai.js` (new) | AI layer frame |
 | `agent/lib/specs/index.js` (new) | `generate`, `render`, `writeSpecs`, `stage`, input hashes, `loadInputs`, default paths |
 | `agent/lib/tools.js` (modify) | chat tools over the record; new `setTarget`, `bindRuleTerms`; mandatory refusals |
+| `agent/lib/grounding.js` (exists — built ahead) | reply guardrail: `groundedTurn({ run, message, history, graph, record, currentId }) → { reply, toolTrace, grounding, evidence }`; per-item vocabulary from the graph |
 | `agent/server.js` (modify) | `createApp()`; regenerate specs; `/api/specs`; chat returns `recorded`; PUT removed |
 | `agent/build-runner.js` (modify) | importable; reads `specs/api.json` with a staleness guard |
 | `agent/implemented.json` (new) | what exists and runs |
@@ -513,7 +516,8 @@ set("SIDE.FinancialAsset", {
   legacyInvocation: "conditional",
   writes: { file: "6915.2", global: "^ENG(6915.2,*)", access: "create" },
   legacyEvidence: [
-    { routine: "ENEQ1", line: "ADDEQ", says: "Shown only when the clerk holds key ENFACS, TYPE OF ENTRY = NX and INVESTMENT CATEGORY = 1 (CAPITALIZED/ACCOUNTABLE). The clerk is asked 'Do you wish to send an FA document to Austin' (default YES); on YES it runs ^ENFAACQ." },
+    { routine: "ENEQ1", line: "ADDEQ", says: "Legacy POLICY: capitalized NX equipment is reported to FAP. Mechanism: for TYPE OF ENTRY = NX and INVESTMENT CATEGORY = 1 (CAPITALIZED/ACCOUNTABLE), the clerk holding key ENFACS is asked 'Do you wish to send an FA document to Austin' with default YES; YES runs ^ENFAACQ. Override: a NO — the bulletin then flags 'It was NOT reported to FAP' and the item can be reported later." },
+    { routine: "DD 6914", line: "fld 61 BUDGET OBJECT CODE", says: "Only capitalized assets are to be recorded in the Fixed Assets Package." },
     { routine: "ENFAACQ", line: "VALEQ (line 32)", says: "Validates the equipment via ^ENFAVAL into temporary global ^TMP($J,\"BAD\",ien); any problem aborts with 'No action taken. Database unchanged.'" },
     { routine: "ENFAACQ", line: "ADDFA (line 37)", says: "Creates an FA DOCUMENT LOG entry in file 6915.2 (field 1 = NOW, 1.5 = DUZ)." },
     { routine: "ENFAACQ", line: "UPDATE (line 59)", says: "Updates the equipment record: fills STATION NUMBER (node 9 piece 5) from the FA site if blank, normalizes TOTAL ASSET VALUE (fld 12, node 2 piece 3) to two decimals, defaults day 01 on acquisition and replacement dates; stores TOTAL ASSET VALUE on the code sheet (^ENG(6915.2,ien,200)) and adjusts the FAP balance (ADJBAL^ENFABAL)." },
@@ -1032,7 +1036,7 @@ git commit -m "feat: API layer spec generated from graph and Phase 1 decisions o
 
 **Interfaces:**
 - Consumes: `cap, isBlocking, isBuilt, isMandatory, requiredTargetKeys, describeKey` (Task 4); `requestContract` (Task 5).
-- Produces: `buildOrchestratorSpec(graph, record, implemented) → { layer:"orchestrator", builds, owns, uses, needs:[{ for, service, what, from:"api", met }], missing:[{ id, kind:"decide"|"binding"|"evidence"|"target", key?, what }], complete, detail:{ container, namespace, rules, coded, built (a notification also carries `template` and `templateNotes`), notBuilt, security, request } }`; `renderOrchestrator(graph, record, spec) → markdown`.
+- Produces: `buildOrchestratorSpec(graph, record, implemented) → { layer:"orchestrator", builds, owns, uses, needs:[{ for, service, what, from:"api", met }], missing:[{ id, kind:"decide"|"binding"|"evidence"|"target", key?, what }], complete, detail:{ container, namespace, rules, coded, built (a notification also carries `template` and `templateNotes`), deferred (each `stub: true`, with `reason` — never adds ▢ items or needs), notBuilt (dropped, or waiting on a decision), security, request } }`; `renderOrchestrator(graph, record, spec) → markdown`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1067,7 +1071,7 @@ test("a business-rule work order needs bindings, target details and the unbuilt 
   assert.deepEqual(s.needs, [{ for: "SIDE.WorkOrder", service: "write:6920", what: "write file 6920 for Incoming inspection work order — proposed in the API spec from `IIWO^ENWONEW3(IEN)`", from: "api", met: false }]);
 });
 
-test("recording everything and building the 6920 write makes the spec complete", () => {
+test("with PM and FA deferred, recording the rest and building the 6920 write makes the spec complete — deferring never blocks", () => {
   const r = rec({
     ...decided,
     ruleBindings: { "OQ.WorkOrderPolicy": { "TYPE OF ENTRY": "7" } },
@@ -1081,9 +1085,19 @@ test("recording everything and building the 6920 write makes the spec complete",
   assert.equal(s.complete, true);
 });
 
-test("deferred side effects are listed as not built, with the recorded reason", () => {
+test("deferred side effects become unwired stubs with the recorded reason and add nothing to the missing list", () => {
   const s = buildOrchestratorSpec(graph, rec(decided), IM);
-  assert.deepEqual(s.detail.notBuilt.map(e => [e.id, e.reason]), [["SIDE.PMSchedule", "deferred — later phase"], ["SIDE.FinancialAsset", "deferred — no FAP target here"]]);
+  assert.deepEqual(s.detail.deferred.map(e => [e.id, e.stub, e.reason]), [["SIDE.PMSchedule", true, "later phase"], ["SIDE.FinancialAsset", true, "no FAP target here"]]);
+  assert.ok(!s.missing.some(m => m.id === "SIDE.PMSchedule" || m.id === "SIDE.FinancialAsset"));
+  assert.ok(!s.needs.some(n => n.for === "SIDE.PMSchedule" || n.for === "SIDE.FinancialAsset"));
+  assert.deepEqual(s.detail.notBuilt, []);
+  assert.match(renderOrchestrator(graph, rec(decided), s), /## Deferred — stub only, not wired[\s\S]*\*\*FA document to Austin\*\* — no FAP target here/);
+});
+
+test("a side effect still waiting on its decision is listed as not built, not as a stub", () => {
+  const s = buildOrchestratorSpec(graph, rec(), IM);
+  assert.deepEqual(s.detail.notBuilt.map(e => e.id), ["SIDE.WorkOrder", "SIDE.PMSchedule", "SIDE.FinancialAsset"]);
+  assert.deepEqual(s.detail.deferred, []);
 });
 
 test("a Required-input question is an unmet front-end need, never written into the API layer", () => {
@@ -1175,16 +1189,15 @@ function buildOrchestratorSpec(graph, record, implemented) {
   }
   const coded = (c.businessRules || []).filter(r => record.dec[r.id] !== "Drop")
     .map(r => ({ id: r.id, name: r.name, disposition: record.dec[r.id] || "Preserve", condition: r.condition, effect: r.effect }));
-  const built = [], notBuilt = [];
+  const built = [], deferred = [], notBuilt = [];
   for (const se of c.sideEffects || []) {
     const entry = { id: se.id, name: se.name, call: se.call, disposition: record.dec[se.id], mandatory: isMandatory(se), gatedBy: se.openQuestion || null, evidence: se.legacyEvidence || [], target: record.targets[se.id] || {}, template: se.messageTemplate || null, templateNotes: [] };
     if (!isBuilt(se, record)) {
       const q = se.openQuestion;
-      entry.reason = record.dec[se.id] === "Drop" ? "dropped"
-        : q && isBlocking(record, q) ? `waiting on the decision: ${oqs.find(x => x.id === q).decisionPoint}`
-        : q && record.dec[q] === "Defer" ? `deferred — ${record.oqPolicy[q]}`
-        : "deferred";
-      notBuilt.push(entry);
+      if (record.dec[se.id] === "Drop") { notBuilt.push({ ...entry, reason: "dropped — not carried forward" }); continue; }
+      if (q && isBlocking(record, q)) { notBuilt.push({ ...entry, reason: `waiting on the decision: ${oqs.find(x => x.id === q).decisionPoint}` }); continue; }
+      // a Defer is a decision: an unwired stub, no target details, no needs — it never blocks Phase 2
+      deferred.push({ ...entry, stub: true, reason: q && record.dec[q] === "Defer" ? record.oqPolicy[q] : "deferred to a later phase" });
       continue;
     }
     if (!se.targetKind && record.dec[se.id] !== "Integration") missing.push({ id: se.id, kind: "evidence", what: `${se.name}: legacy evidence not yet recorded in the graph` });
@@ -1203,7 +1216,7 @@ function buildOrchestratorSpec(graph, record, implemented) {
     uses: ["API: `POST /equipment` — the 6914 create contract"],
     needs, missing,
     complete: missing.length === 0 && needs.every(n => n.met),
-    detail: { container: CONTAINER, namespace: NAMESPACE, rules, coded, built, notBuilt, security, request: requestContract(graph, record) },
+    detail: { container: CONTAINER, namespace: NAMESPACE, rules, coded, built, deferred, notBuilt, security, request: requestContract(graph, record) },
   };
 }
 
@@ -1264,6 +1277,14 @@ function renderOrchestrator(graph, record, spec) {
     L.push("- Dry-run: on until enabled");
   });
   L.push("");
+  L.push("## Deferred — stub only, not wired");
+  L.push("Each gets a stub Business Operation in the production — registered, never called — carrying its legacy evidence and the reason below. No target details are needed, so deferring never blocks this build.");
+  if (!d.deferred.length) L.push("- none");
+  d.deferred.forEach(e => {
+    L.push(`- **${e.name}** — ${e.reason}`);
+    e.evidence.forEach(x => L.push(`  - \`${x.routine}\` ${x.line}: ${x.says}`));
+  });
+  L.push("");
   L.push("## Not built");
   if (!d.notBuilt.length) L.push("- none");
   d.notBuilt.forEach(e => L.push(`- ${e.name} — ${e.reason}`));
@@ -1288,7 +1309,7 @@ module.exports = { buildOrchestratorSpec, renderOrchestrator };
 - [ ] **Step 4: Run the tests**
 
 Run: `cd agent && node --test test/spec-orchestrator.test.js`
-Expected: PASS (7 tests)
+Expected: PASS (8 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -1644,7 +1665,7 @@ function getState(graph, decisions, extra = {}) {
     capability: c.name, summary,
     blocking: (c.openQuestions || []).filter(q => isBlocking(record, q.id)).map(q => q.id),
     resolutions: Object.fromEntries((c.openQuestions || []).map(q => [q.id, { mode: record.dec[q.id], policy: record.oqPolicy[q.id] || null, bindings: record.ruleBindings[q.id] === undefined ? null : record.ruleBindings[q.id] }])),
-    sideEffects: [...o.detail.built.map(e => ({ ...e, built: true })), ...o.detail.notBuilt.map(e => ({ ...e, built: false }))],
+    sideEffects: [...o.detail.built.map(e => ({ ...e, built: true })), ...o.detail.deferred.map(e => ({ ...e, built: false })), ...o.detail.notBuilt.map(e => ({ ...e, built: false }))],
     missing: o.missing, needs: o.needs,
     requestContract: specs.api.request,
     mandatory: (c.sideEffects || []).filter(isMandatory).map(s => s.id),
@@ -1774,7 +1795,7 @@ git commit -m "feat: chat tools record targets and field bindings, enforce manda
 
 **Interfaces:**
 - Consumes: Tasks 2, 7, 8.
-- Produces: `require("./server")` → `{ createApp({ paths?, runAgentImpl? }) → { app, state, regenerate, systemPrompt } }`. Routes: `GET /api/specs → { error, stage, layers: { api|orchestrator|ai: { md, complete, missing, needs, owns } } }`; `POST /api/agent/chat → { reply, toolTrace, recorded, specsError }`; `GET /api/decisions`, `GET /api/state`; `PUT /api/decisions` and `POST /api/decisions/reset` are removed; `POST /api/build` ignores its body.
+- Produces: `require("./server")` → `{ createApp({ paths?, runAgentImpl? }) → { app, state, regenerate, systemPrompt } }`. Routes: `GET /api/specs → { error, stage, layers: { api|orchestrator|ai: { md, complete, missing, needs, owns } } }`; `POST /api/agent/chat → { reply, toolTrace, recorded, grounding, evidence, specsError }` (the reply has passed `groundedTurn`; `evidence` = `[{ id, names, lines }]` for the evidence card); `GET /api/decisions`, `GET /api/state`; `PUT /api/decisions` and `POST /api/decisions/reset` are removed; `POST /api/build` ignores its body.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1830,6 +1851,22 @@ test("a chat turn saves the record, regenerates the specs and returns exactly wh
   } finally { t.srv.close(); }
 });
 
+test("the chat route runs the grounding guardrail and returns the evidence for the card", async () => {
+  const BAD = "For the incoming inspection work order, the legacy calls ENEQ3 automatically for capitalized NX items.";
+  const GOOD = "For the incoming inspection work order, ENEQ1 ADDEQ asks the clerk; IIWO^ENWONEW3 creates the 6920 work order.";
+  let calls = 0;
+  const fake = async () => ({ reply: ++calls === 1 ? BAD : GOOD, toolTrace: [] });
+  const t = await setup(fake);
+  try {
+    const r = await (await fetch(t.base + "/api/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "tell me about the work order", history: [] }) })).json();
+    assert.equal(calls, 2);
+    assert.ok(r.reply.startsWith(GOOD));
+    assert.match(r.reply, /↻ Grounding check/);
+    assert.equal(r.grounding.retried, true);
+    assert.deepEqual(r.evidence.map(e => e.id), ["OQ.WorkOrderPolicy"]);
+  } finally { t.srv.close(); }
+});
+
 test("the chat's instructions carry the method and the record, never a past outcome", async () => {
   const t = await setup();
   try {
@@ -1837,6 +1874,9 @@ test("the chat's instructions carry the method and the record, never a past outc
     assert.match(p, /Current stage: /);
     assert.match(p, /MANDATORY in the production[^\n]*SIDE\.Bulletin/);
     for (const banned of ["50,000", "50000", "≥", "RELOCATE", "right move"]) assert.ok(!p.includes(banned), banned);
+    // no worked example drawn from a real item — the model transfers them to other items
+    for (const realExample of ["TYPE OF ENTRY = NX", "ENFACS security key", "$P(^ENG(6914"]) assert.ok(!p.includes(realExample), realExample);
+    assert.match(p, /EVIDENCE IS PER ITEM/);
   } finally { t.srv.close(); }
 });
 
@@ -1872,6 +1912,7 @@ const { runAgent } = require("./lib/bedrock");
 const { defaultDecisions, getState, findNode, label } = require("./lib/tools");
 const { loadRecord, saveRecord, diffRecords } = require("./lib/record");
 const { DEFAULT_PATHS, generate, writeSpecs, stage } = require("./lib/specs");
+const { groundedTurn } = require("./lib/grounding");
 
 const ROOT = path.join(__dirname, "..");                 // repo root (serves capability-graph/, workbench-demo.html, …)
 const PORT = process.env.PORT || 8899;
@@ -1914,14 +1955,15 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
       "For each open question explain the three resolution modes before asking, because they produce different architecture:",
       "  · 'Business rule' = the orchestrator decides automatically from data, no prompt at entry time. Needs a stated rule — a condition on the item's data, in the developer's own words.",
       "  · 'Required input' = the operator is asked at entry time. The front-end prompt is an API-layer need, so it shows as an unmet need until Phase 1 provides it.",
-      "  · 'Defer' = not built in this phase. Record the developer's reason as the policy.",
+      "  · 'Defer' = not built in this phase: the production gets a stub operation that is registered but never called. It NEVER blocks Phase 2. Record the developer's reason as the policy.",
       "",
       "LEGACY-FIRST, THEN MODERNIZE — the core loop for every item (open question, field binding, target detail). Do NOT open with a menu and do NOT treat keeping the legacy as the default:",
       "  1. SHOW what the legacy actually does — quote the evidence (getState → sideEffects[].evidence, or the node's meta.evidence) and state its determinacy.",
       "  2. EXPLAIN it in plain language, decomposing compound conditions into parts that can be judged separately.",
       "  3. ASK how the developer wants to modernize each part — keep, change, relocate to another layer, or drop — with a recommendation and reasoning.",
       "  4. RECORD the outcome with the tools, naming which parts changed and which were preserved. Flag clearly when a choice departs from the legacy.",
-      "Example of the method (the decomposition only — the OUTCOME is always the developer's): RULE.FinancialEligibility's evidence 'I $D(^XUSEC(\"ENFACS\",DUZ)),$P(^ENG(6914,ENNXL,0),U,4)=\"NX\",$P($G(^(8)),U,2)' is three separately-judgeable conditions — the user holds the ENFACS security key; TYPE OF ENTRY = NX; the item is capitalized. Present each one and ask what the developer wants done with it.",
+      "READ INTENT AS POLICY: when the legacy code expresses intent — a default answer that performs the action, a flag raised for the non-compliant case, DD text stating a rule, a path to catch up later — present it as the legacy POLICY, which most likely carries over, and recommend carrying it over. A human override is an exception path; the decision is how to treat the override, not whether the policy exists. Never describe a default-YES step as optional.",
+      "EVIDENCE IS PER ITEM. Describe an item's legacy behaviour ONLY from that item's own evidence: call explainOption or explainMapping (or getState) for that node id and quote what it returns. Never borrow a condition, routine, field, threshold or outcome from another item — not as an example, an analogy, or a 'similar case'. If an item's evidence says something is not coded, say exactly that. To illustrate the method, stay abstract: no real fields, routines or conditions.",
       "Never present any outcome as already decided, never bring in a condition, threshold, or decision the developer has not stated in THIS conversation, and never move a condition between rules unless the developer says so.",
       "Tooling limit to be honest about: rule dispositions are only Preserve/Inline/Drop, so a 'modernized' rule has no exact disposition. Record the closest one AND state the modification in words.",
       "",
@@ -1967,13 +2009,16 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
     let out = null, err = null;
     try {
       const ctx = { graph, decisions: state.record, implemented: implemented(), system: systemPrompt() };
-      out = await runAgentImpl(String(message), history || [], ctx);   // tools mutate state.record in place
+      const next = state.stage && state.stage.next;   // the item being worked on, before tools change it
+      const currentId = next ? next.id || next.for || null : null;
+      // tools mutate state.record in place; the guardrail retries a reply that borrows another item's evidence
+      out = await groundedTurn({ run: (t, h) => runAgentImpl(t, h, ctx), message: String(message), history: history || [], graph, record: state.record, currentId });
     } catch (e) { err = String(e.message || e); }
     saveRecord(paths.decisions, state.record);
     const g = regenerate();
     const recorded = diffRecords(before, state.record, labelOf);
     if (err) return res.status(500).json({ error: err, recorded });
-    res.json({ reply: out.reply, toolTrace: out.toolTrace, recorded, specsError: g.error || null });
+    res.json({ reply: out.reply, toolTrace: out.toolTrace, recorded, grounding: out.grounding, evidence: out.evidence, specsError: g.error || null });
   });
 
   registerVistaRoutes(app);
@@ -2292,12 +2337,28 @@ function addRecordedCards(list){
   d.innerHTML=`<div class="rh">Recorded</div>`+list.map(c=>`<div class="rr"><b>${esc(c.label)}</b> · <code>${esc(c.field)}</code><br><span class="was">${esc(fmtVal(c.before))}</span> → <span class="now">${esc(fmtVal(c.after))}</span></div>`).join("");
   box.appendChild(d); box.scrollTop=box.scrollHeight;
 }
+// Evidence card: the graph's own evidence for the item the reply is about, shown beside the chat's words.
+function addEvidenceCard(list){
+  if(!list||!list.length) return;
+  const box=document.getElementById("chatMsgs");
+  const d=document.createElement("div"); d.className="evcard";
+  d.innerHTML=list.map(e=>`<div class="eh">Legacy evidence — ${esc(e.names.join(" / "))}</div>`+e.lines.map(l=>`<div class="el">${esc(l)}</div>`).join("")).join("");
+  box.appendChild(d); box.scrollTop=box.scrollHeight;
+}
+```
+
+Add to the CSS from Step 2:
+
+```css
+  .evcard{align-self:stretch;background:#141c2a;border:1px solid #33465f;border-left:3px solid var(--warn);border-radius:10px;padding:8px 12px;font-size:11.5px}
+  .evcard .eh{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--warn);margin:4px 0}
+  .evcard .el{font-family:var(--mono);color:#c9d3dd;margin:2px 0;white-space:pre-wrap}
 ```
 
 4. In `sendChat`, replace the line starting `if(res.decisions&&res.decisions.dec){` with:
 
 ```js
-    addRecordedCards(res.recorded); await loadSpecs();
+    addEvidenceCard(res.evidence); addRecordedCards(res.recorded); await loadSpecs();
 ```
 
 and change `if(res.error){ addMsg("assistant","⚠ "+res.error); return; }` to `if(res.error){ addMsg("assistant","⚠ "+res.error); addRecordedCards(res.recorded); await loadSpecs(); return; }`.
@@ -2355,7 +2416,7 @@ Restart the server, open `http://localhost:8899/capability-graph/decide.html`, a
 2. The status line reads `API 3 services built · 3 proposed · Orchestrator N items missing · AI not started`.
 3. The API tab shows 🔨 Build and ⏹ Stop; the other tabs do not. ⬇ Download saves `<layer>.md`.
 4. In the chat, defer one open question with a reason → a green **Recorded** card shows `oqPolicy` and `scope` changes, and the Orchestrator tab updates without a reload.
-5. Ask the chat for the bulletin's recipients → it quotes the `BULL^ENEQ3` evidence first; record one value → a card shows `targets.recipients`.
+5. Ask the chat for the bulletin's recipients → it quotes the `BULL^ENEQ3` evidence first, and an amber **Legacy evidence — New-equipment MailMan bulletin** card shows the graph's own lines beside the reply; record one value → a card shows `targets.recipients`.
 6. Reload the page → the chat transcript resets but the specs and record persist.
 
 - [ ] **Step 10: Commit**

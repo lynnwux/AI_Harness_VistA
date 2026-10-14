@@ -46,6 +46,8 @@ These are fixed. They come from the user, not from this design.
 | **Dependencies point one way.** A lower layer never changes because of a higher layer's decision. | The API spec is built from the graph and Phase-1 decisions only. Higher specs list *needs* from lower layers; unmet needs block, they are never written back. |
 | **Phase 1 is legacy discovery plus a REST service proposal.** | The API spec proposes a service for every write discovery found, regardless of later decisions. |
 | **Side effects the legacy calls unconditionally are mandatory in the production** (today: the new-equipment bulletin). | Discovery surfaces it: the graph records `legacyInvocation: "unconditional"` with the citing call sites (`ENEQ1 ADDEQ`, `ENEQ3 EQMAS` line 56). The tools refuse Drop/Defer for such items. Only *how* they are implemented is decided in the chat. |
+| **Legacy code that expresses intent is a policy that most likely carries over.** A default answer that performs the action, a flag raised for the non-compliant case, DD text stating the rule, a catch-up path. | Discovery records the policy, the mechanism and the override separately (FILE-PROFILING-PLAYBOOK §7). The chat presents the policy as the legacy policy and recommends carrying it over; the decision is how to treat the override, not whether the policy exists. |
+| **Deferring never blocks Phase 2.** | A Defer is a recorded decision. A deferred side effect becomes a **stub** Business Operation in the production — registered, never called — with no target details and no needs, so it adds nothing to the missing list. |
 | **A notification's legacy message is its template.** | Discovery records the bulletin's subject, body, placeholders and recipients from BULLETIN file 3.6 and `BULL^ENEQ3`; the orchestrator spec shows it as the starting point for the modern message, with what each placeholder depends on. |
 | **No secrets in specs or records.** | No field exists for credentials; they remain Management Portal settings. |
 
@@ -137,7 +139,12 @@ Per side effect, the orchestrator spec shows:
    outside the notification (another side effect's outcome, operator identity). It is the
    starting point the chat offers for the `content` and `recipients` details, never a decision.
 
-Deferred side effects are listed under *Not built*, with the recorded reason. Security keys
+Deferred side effects are listed under *Deferred — stub only, not wired*, with the recorded reason
+and their legacy evidence. Piece 2 generates a stub Business Operation for each — registered in
+the production, never called by the orchestrator — so the decision is visible in the running
+production. A stub needs no target details and adds no needs: **deferring never blocks Phase 2**.
+Un-deferring later means recording the target details and wiring the stub in. Dropped side
+effects get no stub; side effects still waiting on a decision are listed under *Not built*. Security keys
 (`ENEDPM`, `ENFACS`) appear as recorded, with the operator-identity gap stated: no clerk
 identity reaches the pipeline, so key checks cannot yet be enforced.
 
@@ -272,6 +279,15 @@ the answer and name what departs from the legacy.
 `POST /api/agent/chat` returns `recorded: [{ id, label, field, before, after }]`; the page renders
 one card per change. Cards come from the record, never from the chat's text.
 
+**Grounding guardrail and evidence cards.** Every chat reply passes `agent/lib/grounding.js`
+(deterministic, no model). It builds a vocabulary per item from the graph — routines, keys, codes,
+file numbers, rule-condition words — and flags a reply that uses terms found only in **another**
+item's evidence, or states a threshold found in neither the item's evidence nor the developer's
+words. A flagged reply is retried once with the item's own evidence; the developer sees the
+corrected reply with a "↻ Grounding check" note, or a ⚠ if the retry still fails. The response also
+carries the item's evidence, which the page shows as a **Legacy evidence** card beside the reply —
+the check catches borrowed words, the card exposes misreadings phrased in the item's own words.
+
 **Instructions hygiene.** The system prompt contains the method, the current stage, the next
 missing item, and the record view. It must never contain a decision outcome, threshold, or
 example answer.
@@ -332,7 +348,9 @@ and hand-built decision records.
 4. **Mandatory:** `setDisposition(SIDE.Bulletin, Drop)` and `setBuildScope(SIDE.Bulletin, Defer)`
    are refused.
 5. **Missing list:** a built work order lists `writePath`, `fields`, `operatorValues`, and the
-   binding for its rule; recording them clears each; deferred side effects appear as not built.
+   binding for its rule; recording them clears each.
+5a. **Deferring never blocks:** with PM and FA deferred and everything else recorded, the
+   orchestrator spec is complete; the deferred items appear as stubs with no ▢ items and no needs.
 6. **Needs:** the work order's 6920 write is unmet while `implemented.api` lacks it, met once added.
 7. **Decision cards:** a known before/after record produces exactly the expected change list.
 8. **Phase 1 equivalence:** the app generated from `api.json` matches today's generated files
@@ -348,7 +366,8 @@ With today's decisions (work order = Business rule *"Create incoming inspection 
 TYPE OF ENTRY = NX OR cost ≥ $50,000"*; PM and FA = Defer without a reason), the first generated
 orchestrator spec will show:
 
-- PM and FA as **undecided** until redecided in the chat;
+- any question deferred **before** this piece is built as **undecided**: today's tools store no
+  reason for a Defer, so it must be re-confirmed in the chat once (then it is a stub and never blocks);
 - the work order needing field bindings (*TYPE OF ENTRY*, *cost*) and its target details;
 - an **unmet need**: the 6920 write service is proposed in the API spec but not built — the
   production cannot be built until that Phase 1 work is done;

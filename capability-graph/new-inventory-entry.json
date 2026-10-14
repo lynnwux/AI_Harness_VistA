@@ -1721,10 +1721,10 @@
       "businessRules": [
         {
           "id": "RULE.FinancialEligibility",
-          "name": "FA-document eligibility",
+          "name": "FA reporting policy (capitalized NX)",
           "determinacy": "coded",
           "condition": "TYPE OF ENTRY (fld 7) = NX  AND  capitalized (INVESTMENT CATEGORY, fld 34)  AND  key ENFACS held",
-          "effect": "item becomes eligible for an FA document to Austin (user then confirms — see OQ.FAConfirmation)",
+          "effect": "the item is to be reported to FAP: an FA document is sent to Austin unless the clerk overrides (see OQ.FAConfirmation)",
           "meta": {
             "provenance": "observed",
             "confidence": 0.88,
@@ -1838,14 +1838,14 @@
           "name": "FA document to Austin",
           "call": "^ENFAACQ",
           "firedInThisRun": false,
-          "determinacy": "coded-eligibility + user-confirmed",
+          "determinacy": "coded policy (report capitalized NX to FAP), default YES with a clerk override",
           "openQuestion": "OQ.FAConfirmation",
           "candidateCapability": "CAP.SendFinancialAssetDocument",
           "meta": {
             "provenance": "observed",
             "confidence": 0.85,
             "evidence": [
-              "ENEQ1 ADDEQ ^ENFAACQ; eligibility coded (RULE.FinancialEligibility), send user-confirmed"
+              "ENEQ1 ADDEQ ^ENFAACQ; legacy policy: capitalized NX items are reported to FAP (default YES); a clerk NO is an override, flagged in the bulletin and reportable later"
             ],
             "workflows": [
               "WF.EquipmentMgmt.NewInventoryEntry"
@@ -1930,13 +1930,13 @@
         },
         {
           "id": "OQ.FAConfirmation",
-          "decisionPoint": "Whether to actually send the FA document once eligible",
+          "decisionPoint": "Whether to keep the clerk's override on the FA report (legacy policy: report every capitalized NX item to FAP)",
           "promptText": "Do you wish to send an FA document to Austin YES//",
           "default": "YES",
-          "codedBehavior": "Eligibility is fully coded (RULE.FinancialEligibility: NX + capitalized + key ENFACS). When eligible, the user is still asked to confirm; YES calls ^ENFAACQ.",
-          "whatIsNotCoded": "Whether to suppress the FA document despite eligibility is a human override with no coded criteria.",
+          "codedBehavior": "Legacy POLICY: capitalized NX equipment is reported to FAP. ENEQ1 ADDEQ carries it out at entry: for TYPE OF ENTRY = NX and INVESTMENT CATEGORY = 1 it prompts the ENFACS key holder 'Do you wish to send an FA document to Austin' with default YES; YES calls ^ENFAACQ. A NO is a clerk override: the new-equipment bulletin then flags 'It was NOT reported to FAP', and the item can be reported later (^ENFAACQ is also called from ENEQ2, ENEQ3, ENFADEL, ENFAXMTM and in batch by CMR or station).",
+          "whatIsNotCoded": "When a clerk may override the report (answer NO) has no coded criteria — the override is an exception path, not the policy.",
           "candidateInterpretations": [
-            "always send when eligible",
+            "carry the policy over: report every capitalized NX item to FAP, with no override",
             "hold for financial review in some cases"
           ],
           "askSME": true,
@@ -1944,7 +1944,7 @@
             "provenance": "observed",
             "confidence": 0.85,
             "evidence": [
-              "ENEQ1 ADDEQ FA block: eligibility coded, final send user-confirmed"
+              "ENEQ1 ADDEQ FA block: for NX + capitalized items the ENFACS key holder is prompted with default YES (policy: report); NO is a clerk override", "DD fld 61 BUDGET OBJECT CODE: Only capitalized assets are to be recorded in the Fixed Assets Package", "ENEQ3 BULL lines 93-96: the bulletin flags a capitalized NX item that was not sent: 'It was NOT reported to FAP'", "ENFAACQ header: also called from ENEQ2, ENEQ3, ENFADEL, ENFAXMTM and in batch by CMR or station (report later)"
             ],
             "workflows": [
               "WF.EquipmentMgmt.NewInventoryEntry"

@@ -6,7 +6,8 @@
   "description": "Interactive Decide-stage agent for the VistA Service Enablement Workbench (Bedrock-backed).",
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
-    "smoke": "node smoke.js"
+    "smoke": "node smoke.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "express": "^4.19.2"

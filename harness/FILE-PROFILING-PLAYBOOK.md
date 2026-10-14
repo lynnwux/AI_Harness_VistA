@@ -151,6 +151,30 @@ modern `ENG_SPACE6928` lookup (§3) ended up using, with the same decision to su
 `ROOM_NUMBER — FUNCTION_NAME` as the display and drop `BUILDING_NUMBER` (redundant). The temp
 global validated the column choice before the SQL analysis confirmed it independently.
 
+## 7. Read intent as policy
+When legacy code **expresses intent**, record it as a **legacy policy that most likely carries
+over** to the modern version — not as "optional" just because a human can override it. Signals:
+- a prompt whose **default answer performs the action** (`S DIR("B")="YES"`);
+- code that **flags the non-compliant case** (a message saying the action did *not* happen);
+- **DD description text** that states the rule;
+- a **catch-up path** for items that skipped the action (batch or "report later" callers).
+
+Record three things, separately: the **policy** (what should happen), the **mechanism** (how the
+legacy carries it out — prompt, key, routine), and the **override** (the exception path: who can
+take it, and what happens afterwards). The open question is then *how to treat the override*,
+never *whether the policy exists*.
+
+### Example (FA document, `ENEQ1 ADDEQ`)
+- **Policy:** capitalized NX equipment is reported to FAP — DD fld 61: *"Only capitalized assets
+  are to be recorded in the Fixed Assets Package."*
+- **Mechanism:** for TYPE OF ENTRY = NX and INVESTMENT CATEGORY = 1, the ENFACS key holder is
+  asked *"Do you wish to send an FA document to Austin"* with **default YES**; YES runs `^ENFAACQ`.
+- **Override:** a NO. The new-equipment bulletin then flags *"It was NOT reported to FAP"*
+  (`ENEQ3` lines 93–96), and the item can be reported later (`^ENFAACQ` is also called from
+  `ENEQ2`, `ENFAXMTM`, and in batch by CMR or station).
+
+Reading the default-YES prompt as "sending is optional" is the mistake this section prevents.
+
 ---
 
 ## Output

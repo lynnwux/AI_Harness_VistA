@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const { runAgent } = require("./lib/bedrock");
 const { defaultDecisions, getState } = require("./lib/tools");
+const { groundedTurn } = require("./lib/grounding");
 
 const ROOT = path.join(__dirname, "..");                 // repo root (serves capability-graph/, workbench-demo.html, …)
 const GRAPH_PATH = path.join(ROOT, "capability-graph", "new-inventory-entry.json");
@@ -30,7 +31,7 @@ function systemPrompt() {
     "For EACH open question explain the three resolution modes in plain language before asking, because they produce different architecture:",
     "  · 'Business rule' = the orchestrator decides automatically from data, no human prompt at entry time. Needs a stated rule — a condition on the item's data, in the developer's own words. Fastest for the clerk; encodes policy in the BP.",
     "  · 'Required input' = the operator is asked at entry time and their answer drives it. Adds a form control on the confirmation page. Keeps the human in the loop per item.",
-    "  · 'Defer' = not carried into this build; the side effect is not wired up. Phase 2 stays blocked on it.",
+    "  · 'Defer' = not built in this phase: the production gets a stub operation that is registered but never called. It NEVER blocks Phase 2. Record it with resolveOpenQuestion mode 'Defer' and policy = the developer's reason.",
     "Note what the legacy routine actually did, recommend a mode with reasoning, and capture the developer's policy statement in their own words when they choose 'Business rule' or 'Required input'.",
     "STATUS AND SUMMARIES COME FROM THE RECORD, NOT FROM MEMORY. Before you summarise decisions or claim any status, call getState and report only what it returns; restate a recorded policy verbatim. If a tool result says something is still blocking, say so — never announce Phase 2 as unblocked unless getState's blocking list is empty. If what is recorded differs from what the developer told you, point out the difference and ask them to correct it.",
     "PHASE 3 — AI Hub tool, on top of Phase 2. Do not start or offer it until the Phase 2 production has been built and verified — resolving the open questions alone is not enough.",
@@ -41,7 +42,7 @@ function systemPrompt() {
     "  2. EXPLAIN it in plain language, decomposing a compound condition into its individual parts so each can be judged separately.",
     "  3. ASK how the developer wants to modernize it — which parts to keep as-is, change, relocate to a different layer, or drop. Offer a recommendation with reasoning.",
     "  4. RECORD the outcome, naming explicitly which parts changed and which were preserved.",
-    "Example of the method (the decomposition only — the OUTCOME is always the developer's): RULE.FinancialEligibility's evidence 'I $D(^XUSEC(\"ENFACS\",DUZ)),$P(^ENG(6914,ENNXL,0),U,4)=\"NX\",$P($G(^(8)),U,2)' is three separately-judgeable conditions — the user holds the ENFACS security key; TYPE OF ENTRY = NX; the item is capitalized. Present each one and ask what the developer wants done with it.",
+    "EVIDENCE IS PER ITEM. Describe an item's legacy behaviour ONLY from that item's own evidence: call explainOption or explainMapping (or getState) for that node id and quote what it returns. Never borrow a condition, routine, field, threshold or outcome from another item — not as an example, an analogy, or a 'similar case'. If an item's evidence says something is not coded, say exactly that. To illustrate the method, stay abstract: no real fields, routines or conditions.",
     "Never present any outcome as already decided, never bring in a condition, threshold, or decision the developer has not stated in THIS conversation, and never move a condition between rules unless the developer says so.",
     "Flag clearly when a choice DEPARTS from the legacy behaviour, so the provenance trail stays trustworthy. A modernization is a decision with a rationale, never a quiet edit.",
     "Current tooling limit to be honest about: rule dispositions are only Preserve/Inline/Drop, so a 'modernized' rule (some conditions kept, others changed or relocated) has no exact disposition. Record the closest one AND state the modification in words so the record is not misleading.",
@@ -83,9 +84,11 @@ app.post("/api/agent/chat", async (req, res) => {
   if (!message) return res.status(400).json({ error: "message required" });
   try {
     const ctx = { graph, decisions, system: systemPrompt() };
-    const out = await runAgent(String(message), history || [], ctx);
+    const currentId = getState(graph, decisions).blocking[0] || null;   // the item being worked on, before tools change it
+    // grounding guardrail: a reply that borrows another item's evidence (or invents a threshold) is retried once
+    const out = await groundedTurn({ run: (text, h) => runAgent(text, h, ctx), message: String(message), history: history || [], graph, record: decisions, currentId });
     saveStore(); // ctx.decisions === decisions (mutated in place by tools)
-    res.json({ reply: out.reply, toolTrace: out.toolTrace, decisions });
+    res.json({ reply: out.reply, toolTrace: out.toolTrace, decisions, grounding: out.grounding });
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }
