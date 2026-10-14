@@ -21,9 +21,10 @@ Smoke test (no UI): `npm run smoke`.
 
 ## How it works
 
-- `server.js` — serves the workbench + APIs: `GET /api/state`, `GET/PUT /api/decisions`, `POST /api/agent/chat`, `POST /api/decisions/reset`.
+- `server.js` — serves the workbench + APIs: `GET /api/state`, `GET /api/decisions` (read-only — decisions are written only by the chat tools), `GET /api/specs` (the three generated layer specs), `POST /api/agent/chat` (returns `recorded`, the exact record changes), `POST /api/build` (regenerates the specs, then builds the API layer from `capability-graph/specs/api.json`).
+- `lib/specs/` — generates `capability-graph/specs/{api,orchestrator,ai}.{json,md}` from the graph, `decisions.json` and `implemented.json`.
 - `lib/bedrock.js` — Bedrock **Converse** tool-use loop (bearer-token auth).
-- `lib/tools.js` — grounded tools: `getState`, `explainOption`, `explainMapping`, `setDisposition`, `resolveOpenQuestion` (pure functions over graph + decisions; unit-testable without Bedrock).
+- `lib/tools.js` — grounded tools: `getState`, `explainOption`, `explainMapping`, `setDisposition`, `resolveOpenQuestion`, `setBuildScope`, `setTarget`, `bindRuleTerms` (pure functions over graph + decisions; unit-testable without Bedrock).
 - Decisions persist to `agent/decisions.json`; chat history is kept client-side and resent each turn.
 
 ## Notes

@@ -11,6 +11,9 @@ agent/decisions.backup-*.json
 agent/*.corrupt-*.json
 *.tmp
 
+# layer specs — generated on the fly from the front-end decisions record
+capability-graph/specs/
+
 # OS / editor
 .DS_Store
 Thumbs.db
