@@ -4,7 +4,7 @@
 
 **Goal:** Replace the Decide stage's single browser-generated `spec.md` with three server-generated layer specs (API, Orchestrator, AI) built from one decisions record, and make the chat work through the orchestrator layer from a computed missing list.
 
-**Architecture:** A pure generator (`agent/lib/specs/`) turns four input files — capability graph, decisions record, `constraints.json`, `implemented.json` — into `capability-graph/specs/<layer>.{json,md}`. Shared predicates live in `agent/lib/rules.js`; the record (load/atomic save/diff) in `agent/lib/record.js`. The chat tools write the record; the server regenerates specs after every chat turn and before every build; the page only displays. The Phase 1 build reads `specs/api.json`.
+**Architecture:** A pure generator (`agent/lib/specs/`) turns three input files — capability graph, decisions record, `implemented.json` — into `capability-graph/specs/<layer>.{json,md}`. Shared predicates live in `agent/lib/rules.js`; the record (load/atomic save/diff) in `agent/lib/record.js`. The chat tools write the record; the server regenerates specs after every chat turn and before every build; the page only displays. The Phase 1 build reads `specs/api.json`.
 
 **Tech Stack:** Node 22.13.1 (CommonJS), Express 4, `node:test` + `node:assert/strict`, vanilla JS in `decide.html`. No new dependencies.
 
@@ -23,7 +23,7 @@
 - Decisions come only from the user in the front-end Decide chat. Never write `agent/decisions.json` from a development session; tests use temporary copies only.
 - Dependencies point one way: the API spec is generated from the graph, the data-field dispositions (Phase 1 decisions) and `implemented.api` only — nothing else in the record may affect it.
 - The legacy source and the data dictionary are the truth — never the `Vista-Engineering-IRIS` / `Equipment.*` prototype.
-- `SIDE.Bulletin` is mandatory in the production (`agent/constraints.json`): it can never be dropped or deferred.
+- Side effects the legacy calls unconditionally are mandatory in the production — discovery records `legacyInvocation: "unconditional"` with the citing lines (today only `SIDE.Bulletin`). They can never be dropped or deferred.
 - No credentials or tokens in specs or records — they are Management Portal settings.
 - The production deploys to container `iris-ai-hub`, namespace `INTEROP`.
 - Do not modify `capability-graph/decide-classic.html`, `graph.html`, `map.html`, or `workbench-demo.html`.
@@ -53,7 +53,7 @@
 | `agent/lib/tools.js` (modify) | chat tools over the record; new `setTarget`, `bindRuleTerms`; mandatory refusals |
 | `agent/server.js` (modify) | `createApp()`; regenerate specs; `/api/specs`; chat returns `recorded`; PUT removed |
 | `agent/build-runner.js` (modify) | importable; reads `specs/api.json` with a staleness guard |
-| `agent/constraints.json`, `agent/implemented.json` (new) | product constraints; what exists and runs |
+| `agent/implemented.json` (new) | what exists and runs |
 | `capability-graph/new-inventory-entry.json` (modify) | legacy evidence + `targetKind` on side effects |
 | `capability-graph/decide.html` (replace) | single page: tabs, status line, decision cards, display only |
 | `agent/test/*` (new) | tests, helpers, fixtures |
@@ -396,15 +396,15 @@ git commit -m "feat: decisions record with corrupt-safe load, atomic save and di
 
 ---
 
-### Task 3: Legacy evidence in the graph, product constraints, implemented services
+### Task 3: Legacy evidence and the bulletin template in the graph; implemented services
 
 **Files:**
 - Modify: `capability-graph/new-inventory-entry.json` (via a one-off script)
-- Create: `agent/constraints.json`, `agent/implemented.json`
+- Create: `agent/implemented.json`
 - Test: `agent/test/graph-evidence.test.js`
 
 **Interfaces:**
-- Produces: every `capabilities[0].sideEffects[i]` has `targetKind` (`vistaWrite | notification`) and `legacyEvidence: [{ routine, line, says }]`; `SIDE.WorkOrder.writes.file = 6920`, `SIDE.PMSchedule.writes.file = "6914.04"`, `SIDE.FinancialAsset.writes.file = "6915.2"`. `constraints.json = { mandatory: ["SIDE.Bulletin"] }`. `implemented.json = { api: [{ id, endpoint, what }], orchestrator: { built, verified } }`.
+- Produces: every `capabilities[0].sideEffects[i]` has `targetKind` (`vistaWrite | notification`) and `legacyEvidence: [{ routine, line, says }]`; `SIDE.WorkOrder.writes.file = 6920`, `SIDE.PMSchedule.writes.file = "6914.04"`, `SIDE.FinancialAsset.writes.file = "6915.2"`; every side effect has `legacyInvocation` (`"unconditional"` only for `SIDE.Bulletin`); `SIDE.Bulletin.messageTemplate = { source, sender, subject, body: string[9], params: [{ n, value, ifBlank?, dependsOn? }] (n = 1…7), recipients }`. `implemented.json = { api: [{ id, endpoint, what }], orchestrator: { built, verified } }`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -443,9 +443,27 @@ test("the serial guidance states the canonical key as ASKSER builds it", () => {
   assert.doesNotMatch(serial.legacyInput, /UPPERCASE/);
 });
 
-test("constraints and implemented files have the expected shape", () => {
-  const k = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "constraints.json"), "utf8"));
-  assert.deepEqual(k, { mandatory: ["SIDE.Bulletin"] });
+test("discovery marks only the bulletin as called unconditionally, citing the call sites", () => {
+  const inv = Object.fromEntries(c.sideEffects.map(s => [s.id, s.legacyInvocation]));
+  assert.deepEqual(inv, { "SIDE.WorkOrder": "conditional", "SIDE.PMSchedule": "conditional", "SIDE.FinancialAsset": "conditional", "SIDE.Bulletin": "unconditional" });
+  const b = c.sideEffects.find(s => s.id === "SIDE.Bulletin");
+  assert.ok(b.legacyEvidence.some(e => e.routine === "ENEQ1" && /D BULL\^ENEQ3/.test(e.says)));
+  assert.ok(b.legacyEvidence.some(e => e.routine === "ENEQ3" && /EQMAS/.test(e.line)));
+});
+
+test("the bulletin carries the legacy message template from BULLETIN file 3.6", () => {
+  const t = c.sideEffects.find(s => s.id === "SIDE.Bulletin").messageTemplate;
+  assert.equal(t.subject, "NEW EQUIPMENT: ENTRY #|1|");
+  assert.equal(t.sender, "AEMS/MERS");
+  assert.equal(t.body.length, 9);
+  assert.equal(t.body[8], "|7|");
+  assert.deepEqual(t.params.map(p => p.n), [1, 2, 3, 4, 5, 6, 7]);
+  assert.equal(t.params.find(p => p.n === 7).dependsOn, "SIDE.FinancialAsset");
+  assert.equal(t.params.find(p => p.n === 2).dependsOn, "operatorIdentity");
+  assert.match(t.recipients, /CLICKAAH/);
+});
+
+test("the implemented-services file has the expected shape", () => {
   const im = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "implemented.json"), "utf8"));
   assert.deepEqual(im.api.map(s => s.id), ["write:6914", "read:next-ien", "read:lookup"]);
   assert.deepEqual(im.orchestrator, { built: false, verified: false });
@@ -473,6 +491,7 @@ const set = (id, patch) => { const s = c.sideEffects.find(x => x.id === id); if 
 
 set("SIDE.WorkOrder", {
   targetKind: "vistaWrite",
+  legacyInvocation: "conditional",
   legacyEvidence: [
     { routine: "ENEQ1", line: "ADDEQ", says: "The work-order prompt appears only if site parameter ASK INCOMING INSPECTION W.O. (file 6910.2) exists with piece 2 set; the default answer is YES when piece 2 = 2, otherwise NO. On YES it calls IIWO^ENWONEW3(ENNXL)." },
     { routine: "ENWONEW3", line: "IIWO (line 5)", says: "Shop: the site's incoming-inspection section (^DIC(6910,1,0) piece 13), else the item's responsible shop (^ENG(6914,ien,4)), else the temporary work-order section (piece 6). The clerk is asked if it is still blank or if they hold key ENEDPM (non-holders are restricted to receiving areas). No shop means no work order." },
@@ -482,6 +501,7 @@ set("SIDE.WorkOrder", {
 });
 set("SIDE.PMSchedule", {
   targetKind: "vistaWrite",
+  legacyInvocation: "conditional",
   writes: { file: "6914.04", global: "^ENG(6914,ien,4,*)", access: "create" },
   legacyEvidence: [
     { routine: "ENEQ1", line: "ADDEQ", says: "Shown only to holders of key ENEDPM: 'Would you like to include this item in the PM program' (default YES). On YES it runs DINV^ENEQPMP3 when a PM schedule already exists, then XNPMSE^ENEQPMP." },
@@ -490,6 +510,7 @@ set("SIDE.PMSchedule", {
 });
 set("SIDE.FinancialAsset", {
   targetKind: "vistaWrite",
+  legacyInvocation: "conditional",
   writes: { file: "6915.2", global: "^ENG(6915.2,*)", access: "create" },
   legacyEvidence: [
     { routine: "ENEQ1", line: "ADDEQ", says: "Shown only when the clerk holds key ENFACS, TYPE OF ENTRY = NX and INVESTMENT CATEGORY = 1 (CAPITALIZED/ACCOUNTABLE). The clerk is asked 'Do you wish to send an FA document to Austin' (default YES); on YES it runs ^ENFAACQ." },
@@ -501,11 +522,41 @@ set("SIDE.FinancialAsset", {
 });
 set("SIDE.Bulletin", {
   targetKind: "notification",
+  legacyInvocation: "unconditional",
   legacyEvidence: [
     { routine: "ENEQ1", line: "ADDEQ", says: "S DA=ENNXL D BULL^ENEQ3 — runs unconditionally after every new entry." },
-    { routine: "ENEQ3", line: "BULL (line 60)", says: "Recipients: mail group 'EN NEW EQUIPMENT <station number>' if it exists, otherwise 'EN NEW EQUIPMENT'. If neither mail group exists, no bulletin is sent and nothing is reported." },
+    { routine: "ENEQ3", line: "EQMAS (line 56)", says: "S DA=ENNXL D BULL — the multiple-entry copy also sends it unconditionally for every additional item." },
+    { routine: "ENEQ3", line: "BULL (line 60)", says: "Recipients: mail group 'EN NEW EQUIPMENT <station number>' if it exists with at least one member (CHKMGRP, MAIL GROUP file 3.8), otherwise 'EN NEW EQUIPMENT' on the same test. If neither qualifies, no bulletin is sent and nothing is reported." },
     { routine: "ENEQ3", line: "BULL", says: "Sends MailMan bulletin EN NEW EQUIPMENT from sender AEMS/MERS with: 1 equipment IEN, 2 the entering user's name (from DUZ), 3 MFGR. EQUIPMENT NAME (node 0 piece 2), 4 category, 5 service, 6 station number, 7 'Item is [NOT] capitalized NX.' plus, when capitalized NX, 'It was [NOT] reported to FAP.' Missing 4–6 are sent as MISSING." },
+    { routine: "XMB", line: "lines 12–16", says: "MailMan delivers a bulletin to the XMY recipients the caller sets AND to the members of the mail groups listed on the bulletin's own entry in file 3.6." },
   ],
+  // the legacy email, read from BULLETIN file 3.6 entry EN NEW EQUIPMENT (IEN 114) on VADEMO, 2026-10-14
+  messageTemplate: {
+    source: "BULLETIN file 3.6 · EN NEW EQUIPMENT (IEN 114)",
+    sender: "AEMS/MERS",
+    subject: "NEW EQUIPMENT: ENTRY #|1|",
+    body: [
+      "A new equipment record has been added to the AEMS/MERS database.",
+      "The ENTRY NUMBER is |1|.",
+      "It was entered by |2|.",
+      "The MFGR EQUIPMENT NAME is |3|.",
+      "The EQUIPMENT CATEGORY is |4|.",
+      "The SERVICE is |5|.",
+      "The STATION NUMBER is |6|.",
+      "",
+      "|7|",
+    ],
+    params: [
+      { n: 1, value: "the equipment IEN (ENTRY NUMBER, fld .01)" },
+      { n: 2, value: "the entering user's name — NEW PERSON (file 200) .01 for DUZ", dependsOn: "operatorIdentity" },
+      { n: 3, value: "MFGR. EQUIPMENT NAME (fld 3, node 0 piece 2)" },
+      { n: 4, value: "the EQUIPMENT CATEGORY name (fld 6 → file 6911)", ifBlank: "MISSING" },
+      { n: 5, value: "the SERVICE POINTER name (fld 21, node 3 piece 2 → file 49)", ifBlank: "MISSING" },
+      { n: 6, value: "STATION NUMBER (fld 60), else the site default (file 6910 fld 1)", ifBlank: "MISSING" },
+      { n: 7, value: "ENEQ3 lines 92–96: 'Item is [NOT] capitalized NX.' (capitalized NX = TYPE OF ENTRY = NX and INVESTMENT CATEGORY = 1); for capitalized NX items adds 'It was [NOT] reported to FAP.' from $$CHKFA^ENFAUTL (an FA document exists)", dependsOn: "SIDE.FinancialAsset" },
+    ],
+    recipients: "members of mail group 'EN NEW EQUIPMENT <station>' if it has any, otherwise 'EN NEW EQUIPMENT' (CHKMGRP), plus the members of the groups listed on the bulletin itself (XMB lines 12–16): CLICKAAH. Nothing is sent if neither EN group qualifies.",
+  },
 });
 
 const serial = c.data.find(d => d.id === "FLD.serial");
@@ -520,13 +571,7 @@ Expected: `evidence recorded on SIDE.WorkOrder, SIDE.PMSchedule, SIDE.FinancialA
 
 Then: `rm agent/add-evidence.tmp.js`
 
-- [ ] **Step 4: Create the two configuration files**
-
-`agent/constraints.json`:
-
-```json
-{ "mandatory": ["SIDE.Bulletin"] }
-```
+- [ ] **Step 4: Create the implemented-services file**
 
 `agent/implemented.json`:
 
@@ -549,8 +594,8 @@ Expected: PASS (the Angular golden still passes — pages do not depend on side-
 - [ ] **Step 6: Commit**
 
 ```bash
-git add capability-graph/new-inventory-entry.json agent/constraints.json agent/implemented.json agent/test/graph-evidence.test.js
-git commit -m "feat: record legacy evidence for every side effect; add constraints and implemented services"
+git add capability-graph/new-inventory-entry.json agent/implemented.json agent/test/graph-evidence.test.js
+git commit -m "feat: record legacy evidence, invocation and the bulletin template for every side effect; add implemented services"
 ```
 
 ---
@@ -564,7 +609,7 @@ git commit -m "feat: record legacy evidence for every side effect; add constrain
 
 **Interfaces:**
 - Consumes: `normalize` (Task 2); graph `targetKind` (Task 3).
-- Produces: `TARGET_KEYS`, `VIA = ["vista","iris","external"]`, `cap(graph)`, `isBlocking(record, oqId) → bool` (true when `oqPolicy[oqId]` is empty), `isMandatory(constraints, id)`, `kindFor(se, record)`, `requiredTargetKeys(se, record) → ["via", …]`, `allowedTargetKeys(se, record)`, `describeKey(se, record, key) → string`, `isBuilt(se, record, constraints) → bool`. Test helpers: `{ graph, K, IM, rec(patch), se(id) }`.
+- Produces: `TARGET_KEYS`, `VIA = ["vista","iris","external"]`, `cap(graph)`, `isBlocking(record, oqId) → bool` (true when `oqPolicy[oqId]` is empty), `isMandatory(se)` (true when discovery marked it `legacyInvocation: "unconditional"`), `kindFor(se, record)`, `requiredTargetKeys(se, record) → ["via", …]`, `allowedTargetKeys(se, record)`, `describeKey(se, record, key) → string`, `isBuilt(se, record) → bool`. Test helpers: `{ graph, IM, rec(patch), se(id) }`.
 
 - [ ] **Step 1: Create the test helpers**
 
@@ -578,7 +623,6 @@ const { defaultDecisions } = require("../lib/tools");
 const { normalize } = require("../lib/record");
 
 const graph = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), "utf8"));
-const K = { mandatory: ["SIDE.Bulletin"] };
 const IM = {
   api: [
     { id: "write:6914", endpoint: "POST /equipment", what: "create a file-6914 record" },
@@ -595,7 +639,7 @@ function rec(patch) {
 }
 const se = id => graph.capabilities[0].sideEffects.find(s => s.id === id);
 
-module.exports = { graph, K, IM, rec, se };
+module.exports = { graph, IM, rec, se };
 ```
 
 - [ ] **Step 2: Write the failing tests**
@@ -606,7 +650,7 @@ Create `agent/test/rules.test.js`:
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { K, rec, se } = require("./helpers");
+const { rec, se } = require("./helpers");
 const R = require("../lib/rules");
 
 test("an untouched question blocks; a recorded Defer reason does not; an empty policy blocks", () => {
@@ -616,14 +660,14 @@ test("an untouched question blocks; a recorded Defer reason does not; an empty p
 });
 
 test("a side effect is built only once its gating question is decided with a non-Defer mode", () => {
-  assert.equal(R.isBuilt(se("SIDE.WorkOrder"), rec(), K), false);
-  assert.equal(R.isBuilt(se("SIDE.WorkOrder"), rec({ dec: { "OQ.WorkOrderPolicy": "Business rule" }, oqPolicy: { "OQ.WorkOrderPolicy": "always" } }), K), true);
-  assert.equal(R.isBuilt(se("SIDE.WorkOrder"), rec({ oqPolicy: { "OQ.WorkOrderPolicy": "later" } }), K), false);
+  assert.equal(R.isBuilt(se("SIDE.WorkOrder"), rec(), false);
+  assert.equal(R.isBuilt(se("SIDE.WorkOrder"), rec({ dec: { "OQ.WorkOrderPolicy": "Business rule" }, oqPolicy: { "OQ.WorkOrderPolicy": "always" } }), true);
+  assert.equal(R.isBuilt(se("SIDE.WorkOrder"), rec({ oqPolicy: { "OQ.WorkOrderPolicy": "later" } }), false);
 });
 
 test("the mandatory bulletin is always built unless dropped", () => {
-  assert.equal(R.isBuilt(se("SIDE.Bulletin"), rec({ scope: { "SIDE.Bulletin": "Defer" } }), K), true);
-  assert.equal(R.isBuilt(se("SIDE.Bulletin"), rec({ dec: { "SIDE.Bulletin": "Drop" } }), K), false);
+  assert.equal(R.isBuilt(se("SIDE.Bulletin"), rec({ scope: { "SIDE.Bulletin": "Defer" } }), true);
+  assert.equal(R.isBuilt(se("SIDE.Bulletin"), rec({ dec: { "SIDE.Bulletin": "Drop" } }), false);
 });
 
 test("target keys follow the graph's targetKind, or the external set when the disposition is Integration", () => {
@@ -657,7 +701,7 @@ const VIA_HELP = "where the work is performed (vista | iris | external)";
 
 const cap = graph => graph.capabilities[0];
 const isBlocking = (record, oqId) => !String((record.oqPolicy || {})[oqId] || "").trim();
-const isMandatory = (constraints, id) => ((constraints && constraints.mandatory) || []).includes(id);
+const isMandatory = se => !!se && se.legacyInvocation === "unconditional";   // discovery: the legacy always calls it
 const kindFor = (se, record) => (record.dec[se.id] === "Integration" ? "external" : se.targetKind || null);
 const requiredTargetKeys = (se, record) => { const k = kindFor(se, record); return ["via", ...(k ? Object.keys(TARGET_KEYS[k]) : [])]; };
 const allowedTargetKeys = (se, record) => { const k = kindFor(se, record); return [...requiredTargetKeys(se, record), ...((k && OPTIONAL_KEYS[k]) || [])]; };
@@ -665,9 +709,9 @@ const describeKey = (se, record, key) => (key === "via" ? VIA_HELP : (TARGET_KEY
 
 // built = carried into this build: not dropped, not deferred, and its gating question (if any)
 // decided with a non-Defer mode. Mandatory items are always built.
-function isBuilt(se, record, constraints) {
+function isBuilt(se, record) {
   if (record.dec[se.id] === "Drop") return false;
-  if (isMandatory(constraints, se.id)) return true;
+  if (isMandatory(se)) return true;
   if ((record.scope[se.id] || "Build now") === "Defer") return false;
   if (se.openQuestion) return !isBlocking(record, se.openQuestion) && record.dec[se.openQuestion] !== "Defer";
   return true;
@@ -988,7 +1032,7 @@ git commit -m "feat: API layer spec generated from graph and Phase 1 decisions o
 
 **Interfaces:**
 - Consumes: `cap, isBlocking, isBuilt, isMandatory, requiredTargetKeys, describeKey` (Task 4); `requestContract` (Task 5).
-- Produces: `buildOrchestratorSpec(graph, record, constraints, implemented) → { layer:"orchestrator", builds, owns, uses, needs:[{ for, service, what, from:"api", met }], missing:[{ id, kind:"decide"|"binding"|"evidence"|"target", key?, what }], complete, detail:{ container, namespace, rules, coded, built, notBuilt, security, request } }`; `renderOrchestrator(graph, record, spec) → markdown`.
+- Produces: `buildOrchestratorSpec(graph, record, implemented) → { layer:"orchestrator", builds, owns, uses, needs:[{ for, service, what, from:"api", met }], missing:[{ id, kind:"decide"|"binding"|"evidence"|"target", key?, what }], complete, detail:{ container, namespace, rules, coded, built (a notification also carries `template` and `templateNotes`), notBuilt, security, request } }`; `renderOrchestrator(graph, record, spec) → markdown`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -998,7 +1042,7 @@ Create `agent/test/spec-orchestrator.test.js`:
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { graph, rec, K, IM } = require("./helpers");
+const { graph, rec, IM } = require("./helpers");
 const { buildOrchestratorSpec, renderOrchestrator } = require("../lib/specs/orchestrator");
 
 const decided = {
@@ -1008,7 +1052,7 @@ const decided = {
 const withWrite = { ...IM, api: [...IM.api, { id: "write:6920", endpoint: "POST /work-orders", what: "x" }] };
 
 test("untouched record: three decisions missing and only the mandatory bulletin is built", () => {
-  const s = buildOrchestratorSpec(graph, rec(), K, IM);
+  const s = buildOrchestratorSpec(graph, rec(), IM);
   assert.deepEqual(s.missing.filter(m => m.kind === "decide").map(m => m.id), ["OQ.WorkOrderPolicy", "OQ.PMEnrollmentPolicy", "OQ.FAConfirmation"]);
   assert.deepEqual(s.detail.built.map(e => e.id), ["SIDE.Bulletin"]);
   assert.deepEqual(s.missing.filter(m => m.id === "SIDE.Bulletin").map(m => m.key), ["via", "channel", "recipients", "content"]);
@@ -1016,7 +1060,7 @@ test("untouched record: three decisions missing and only the mandatory bulletin 
 });
 
 test("a business-rule work order needs bindings, target details and the unbuilt 6920 write", () => {
-  const s = buildOrchestratorSpec(graph, rec(decided), K, IM);
+  const s = buildOrchestratorSpec(graph, rec(decided), IM);
   assert.equal(s.detail.rules[0].policy, "Create incoming inspection work order if TYPE OF ENTRY = NX");
   assert.ok(s.missing.some(m => m.id === "OQ.WorkOrderPolicy" && m.kind === "binding"));
   assert.deepEqual(s.missing.filter(m => m.id === "SIDE.WorkOrder").map(m => m.key), ["via", "writePath", "fields", "operatorValues"]);
@@ -1032,29 +1076,43 @@ test("recording everything and building the 6920 write makes the spec complete",
       "SIDE.Bulletin": { via: "iris", channel: "email", recipients: "eng-group", content: "as legacy" },
     },
   });
-  const s = buildOrchestratorSpec(graph, r, K, withWrite);
+  const s = buildOrchestratorSpec(graph, r, withWrite);
   assert.deepEqual(s.missing, []);
   assert.equal(s.complete, true);
 });
 
 test("deferred side effects are listed as not built, with the recorded reason", () => {
-  const s = buildOrchestratorSpec(graph, rec(decided), K, IM);
+  const s = buildOrchestratorSpec(graph, rec(decided), IM);
   assert.deepEqual(s.detail.notBuilt.map(e => [e.id, e.reason]), [["SIDE.PMSchedule", "deferred — later phase"], ["SIDE.FinancialAsset", "deferred — no FAP target here"]]);
 });
 
 test("a Required-input question is an unmet front-end need, never written into the API layer", () => {
-  const s = buildOrchestratorSpec(graph, rec({ dec: { "OQ.PMEnrollmentPolicy": "Required input" }, oqPolicy: { "OQ.PMEnrollmentPolicy": "ask the clerk" } }), K, IM);
+  const s = buildOrchestratorSpec(graph, rec({ dec: { "OQ.PMEnrollmentPolicy": "Required input" }, oqPolicy: { "OQ.PMEnrollmentPolicy": "ask the clerk" } }), IM);
   assert.ok(s.needs.some(n => n.service === "prompt:OQ.PMEnrollmentPolicy" && n.met === false));
 });
 
 test("the rendered spec quotes the record verbatim and never invents a threshold", () => {
   const r = rec(decided);
-  const md = renderOrchestrator(graph, r, buildOrchestratorSpec(graph, r, K, IM));
+  const md = renderOrchestrator(graph, r, buildOrchestratorSpec(graph, r, IM));
   assert.match(md, /"Create incoming inspection work order if TYPE OF ENTRY = NX"/);
   assert.match(md, /▢ via — where the work is performed/);
   assert.match(md, /unmet — requires Phase 1 work/);
   assert.match(md, /`ENEQ3` BULL \(line 60\): Recipients:/);
   assert.doesNotMatch(md, /50,?000/);
+});
+
+test("the bulletin shows the legacy email template and what it depends on", () => {
+  const r = rec(decided);   // FA deferred
+  const s = buildOrchestratorSpec(graph, r, IM);
+  const b = s.detail.built.find(e => e.id === "SIDE.Bulletin");
+  assert.equal(b.template.subject, "NEW EQUIPMENT: ENTRY #|1|");
+  assert.deepEqual(b.templateNotes.map(n => n.slice(0, 5)), ["`|2|`", "`|7|`"]);
+  const md = renderOrchestrator(graph, r, s);
+  assert.match(md, /Subject: `NEW EQUIPMENT: ENTRY #\|1\|`/);
+  assert.match(md, /⚠ `\|7\|` reports the outcome of FA document to Austin, which is not built in this phase/);
+  assert.match(md, /⚠ `\|2\|`: no operator identity reaches the pipeline yet/);
+  const withFA = rec({ ...decided, dec: { ...decided.dec, "OQ.FAConfirmation": "Business rule" }, oqPolicy: { ...decided.oqPolicy, "OQ.FAConfirmation": "send when eligible" } });
+  assert.match(renderOrchestrator(graph, withFA, buildOrchestratorSpec(graph, withFA, IM)), /⚠ `\|7\|` reports the outcome of FA document to Austin — run the bulletin after that step, as the legacy does/);
 });
 ```
 
@@ -1088,7 +1146,20 @@ function needsFor(se, record, implemented) {
   return out;
 }
 
-function buildOrchestratorSpec(graph, record, constraints, implemented) {
+// What a legacy message template depends on, from the graph's params[].dependsOn — surfaced, never decided.
+function templateNotes(se, graph, record) {
+  const t = se.messageTemplate; if (!t) return [];
+  return t.params.filter(p => p.dependsOn).map(p => {
+    if (p.dependsOn === "operatorIdentity") return `\`|${p.n}|\`: no operator identity reaches the pipeline yet, so this would name the service account, not the clerk`;
+    const dep = cap(graph).sideEffects.find(x => x.id === p.dependsOn);
+    if (!dep) return `\`|${p.n}|\` depends on ${p.dependsOn}`;
+    return isBuilt(dep, record)
+      ? `\`|${p.n}|\` reports the outcome of ${dep.name} — run the bulletin after that step, as the legacy does`
+      : `\`|${p.n}|\` reports the outcome of ${dep.name}, which is not built in this phase — it would always report that step as not done`;
+  });
+}
+
+function buildOrchestratorSpec(graph, record, implemented) {
   const c = cap(graph), oqs = c.openQuestions || [];
   const missing = [], needs = [], rules = [];
   for (const q of oqs) {
@@ -1106,8 +1177,8 @@ function buildOrchestratorSpec(graph, record, constraints, implemented) {
     .map(r => ({ id: r.id, name: r.name, disposition: record.dec[r.id] || "Preserve", condition: r.condition, effect: r.effect }));
   const built = [], notBuilt = [];
   for (const se of c.sideEffects || []) {
-    const entry = { id: se.id, name: se.name, call: se.call, disposition: record.dec[se.id], mandatory: isMandatory(constraints, se.id), gatedBy: se.openQuestion || null, evidence: se.legacyEvidence || [], target: record.targets[se.id] || {} };
-    if (!isBuilt(se, record, constraints)) {
+    const entry = { id: se.id, name: se.name, call: se.call, disposition: record.dec[se.id], mandatory: isMandatory(se), gatedBy: se.openQuestion || null, evidence: se.legacyEvidence || [], target: record.targets[se.id] || {}, template: se.messageTemplate || null, templateNotes: [] };
+    if (!isBuilt(se, record)) {
       const q = se.openQuestion;
       entry.reason = record.dec[se.id] === "Drop" ? "dropped"
         : q && isBlocking(record, q) ? `waiting on the decision: ${oqs.find(x => x.id === q).decisionPoint}`
@@ -1121,6 +1192,7 @@ function buildOrchestratorSpec(graph, record, constraints, implemented) {
       if (!String(entry.target[key] || "").trim()) missing.push({ id: se.id, kind: "target", key, what: `${se.name}: ${describeKey(se, record, key)}` });
     }
     needs.push(...needsFor(se, record, implemented));
+    entry.templateNotes = templateNotes(se, graph, record);
     built.push(entry);
   }
   const security = (c.security || []).filter(s => record.dec[s.id] !== "Drop").map(s => ({ id: s.id, key: s.key, gates: s.gates, disposition: record.dec[s.id] }));
@@ -1169,10 +1241,20 @@ function renderOrchestrator(graph, record, spec) {
     const se = cap(graph).sideEffects.find(x => x.id === e.id);
     const rule = d.rules.find(r => r.id === e.gatedBy);
     L.push(`### ${e.name}${e.mandatory ? " — mandatory" : ""}`);
-    L.push(`- Decision: ${e.disposition}${e.mandatory ? " · always built (product constraint)" : rule ? ` · gate: ${rule.mode} "${rule.policy}"` : ""}`);
+    L.push(`- Decision: ${e.disposition}${e.mandatory ? " · always built (the legacy calls it unconditionally)" : rule ? ` · gate: ${rule.mode} "${rule.policy}"` : ""}`);
     L.push("- Legacy evidence:");
     if (!e.evidence.length) L.push("  - ▢ not yet recorded");
     e.evidence.forEach(x => L.push(`  - \`${x.routine}\` ${x.line}: ${x.says}`));
+    if (e.template) {
+      const t = e.template;
+      L.push(`- Legacy message template (${t.source}) — the starting point for the modern message:`);
+      L.push(`  - From: ${t.sender}`);
+      L.push(`  - Subject: \`${t.subject}\``);
+      L.push(`  - Body: ${t.body.map(b => (b.trim() ? "`" + b + "`" : "(blank line)")).join(" / ")}`);
+      t.params.forEach(p => L.push(`  - \`|${p.n}|\` — ${p.value}${p.ifBlank ? ` (blank → \`${p.ifBlank}\`)` : ""}`));
+      L.push(`  - Recipients (legacy): ${t.recipients}`);
+      e.templateNotes.forEach(n => L.push(`  - ⚠ ${n}`));
+    }
     L.push("- Target details:");
     const req = requiredTargetKeys(se, record);
     req.concat(Object.keys(e.target).filter(k => !req.includes(k))).forEach(k => {
@@ -1206,7 +1288,7 @@ module.exports = { buildOrchestratorSpec, renderOrchestrator };
 - [ ] **Step 4: Run the tests**
 
 Run: `cd agent && node --test test/spec-orchestrator.test.js`
-Expected: PASS (6 tests)
+Expected: PASS (7 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -1225,7 +1307,7 @@ git commit -m "feat: orchestrator layer spec with missing list and needs from lo
 
 **Interfaces:**
 - Consumes: Tasks 2, 5, 6.
-- Produces (`require("./lib/specs")`): `DEFAULT_PATHS { graph, decisions, constraints, implemented, specsDir }`, `LAYERS`, `canon(v)`, `inputHashes(layer, inputs)`, `generate(inputs) → { api, orchestrator, ai }` (each with `inputs` hashes), `render(layer, spec, inputs) → md`, `writeSpecs(dir, specs, inputs) → { api: md, orchestrator: md, ai: md }`, `stage(specs, implemented) → { layer, step: "decide"|"binding"|"evidence"|"target"|"needs"|"ready"|"design", next }`, `loadInputs(paths?, fallbackRecord?) → { graph, record, constraints, implemented }`. `inputs` = `{ graph, record, constraints, implemented }`.
+- Produces (`require("./lib/specs")`): `DEFAULT_PATHS { graph, decisions, implemented, specsDir }`, `LAYERS`, `canon(v)`, `inputHashes(layer, inputs)`, `generate(inputs) → { api, orchestrator, ai }` (each with `inputs` hashes), `render(layer, spec, inputs) → md`, `writeSpecs(dir, specs, inputs) → { api: md, orchestrator: md, ai: md }`, `stage(specs, implemented) → { layer, step: "decide"|"binding"|"evidence"|"target"|"needs"|"ready"|"design", next }`, `loadInputs(paths?, fallbackRecord?) → { graph, record, implemented }`. `inputs` = `{ graph, record, implemented }`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1238,10 +1320,10 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { graph, rec, K, IM } = require("./helpers");
+const { graph, rec, IM } = require("./helpers");
 const { generate, render, writeSpecs, stage, inputHashes } = require("../lib/specs");
 
-const inputs = (record, implemented = IM) => ({ graph, record, constraints: K, implemented });
+const inputs = (record, implemented = IM) => ({ graph, record, implemented });
 
 test("one-way rule: no orchestrator-layer decision changes the API spec or its markdown", () => {
   const base = inputs(rec()); const a = generate(base).api; const amd = render("api", a, base);
@@ -1336,7 +1418,6 @@ const ROOT = path.join(__dirname, "..", "..", "..");
 const DEFAULT_PATHS = {
   graph: path.join(ROOT, "capability-graph", "new-inventory-entry.json"),
   decisions: path.join(ROOT, "agent", "decisions.json"),
-  constraints: path.join(ROOT, "agent", "constraints.json"),
   implemented: path.join(ROOT, "agent", "implemented.json"),
   specsDir: path.join(ROOT, "capability-graph", "specs"),
 };
@@ -1350,16 +1431,16 @@ function canon(v) {
 const sha = v => crypto.createHash("sha256").update(canon(v)).digest("hex");
 
 // The API spec hashes only what it may depend on, so orchestrator decisions never make it look stale.
-function inputHashes(layer, { graph, record, constraints, implemented }) {
+function inputHashes(layer, { graph, record, implemented }) {
   if (layer === "api") return { graph: sha(graph), decisions: sha(api.dataSlice(graph, record)), implemented: sha((implemented && implemented.api) || []) };
-  return { graph: sha(graph), decisions: sha(record), constraints: sha(constraints), implemented: sha(implemented) };
+  return { graph: sha(graph), decisions: sha(record), implemented: sha(implemented) };
 }
 
 function generate(inputs) {
-  const { graph, record, constraints, implemented } = inputs;
+  const { graph, record, implemented } = inputs;
   const specs = {
     api: api.buildApiSpec(graph, record, implemented),
-    orchestrator: orchestrator.buildOrchestratorSpec(graph, record, constraints, implemented),
+    orchestrator: orchestrator.buildOrchestratorSpec(graph, record, implemented),
     ai: ai.buildAiSpec(),
   };
   for (const l of LAYERS) specs[l].inputs = inputHashes(l, inputs);
@@ -1402,7 +1483,6 @@ function loadInputs(paths = DEFAULT_PATHS, fallbackRecord) {
   return {
     graph: JSON.parse(fs.readFileSync(paths.graph, "utf8")),
     record: loadRecord(paths.decisions, fallbackRecord),
-    constraints: readJson(paths.constraints, { mandatory: [] }),
     implemented: readJson(paths.implemented, { api: [], orchestrator: { built: false, verified: false } }),
   };
 }
@@ -1432,7 +1512,7 @@ git commit -m "feat: generator entry point, input hashes and chat stage"
 
 **Interfaces:**
 - Consumes: `normalize` (Task 2); `cap, isBlocking, isMandatory, allowedTargetKeys, VIA` (Task 4); `generate, stage` (Task 7); `requestContract` (Task 5).
-- Produces: `runTool(name, input, ctx)` with `ctx = { graph, decisions, constraints, implemented }`; tools `getState, explainOption, explainMapping, setDisposition, resolveOpenQuestion, setBuildScope, setTarget, bindRuleTerms` (`setIntegration` is removed). `getState(graph, decisions, { constraints, implemented }) → { capability, summary, blocking, resolutions, sideEffects, missing, needs, requestContract, mandatory, stage }`. `defaultDecisions(graph) → { dec, oqPolicy:{}, scope:{}, targets:{}, ruleBindings:{} }`. Tool results no longer embed the whole record.
+- Produces: `runTool(name, input, ctx)` with `ctx = { graph, decisions, implemented }`; tools `getState, explainOption, explainMapping, setDisposition, resolveOpenQuestion, setBuildScope, setTarget, bindRuleTerms` (`setIntegration` is removed). `getState(graph, decisions, { implemented }) → { capability, summary, blocking, resolutions, sideEffects, missing, needs, requestContract, mandatory, stage }`. `defaultDecisions(graph) → { dec, oqPolicy:{}, scope:{}, targets:{}, ruleBindings:{} }`. Tool results no longer embed the whole record.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1442,10 +1522,10 @@ Create `agent/test/tools.test.js`:
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { graph, rec, K, IM } = require("./helpers");
+const { graph, rec, IM } = require("./helpers");
 const { runTool } = require("../lib/tools");
 
-const ctx = record => ({ graph, decisions: record, constraints: K, implemented: IM });
+const ctx = record => ({ graph, decisions: record, implemented: IM });
 
 test("Defer without a reason records a default reason and takes the gated side effect out of the build", () => {
   const r = rec();
@@ -1528,7 +1608,7 @@ Expected: FAIL (e.g. `setTarget` → `unknown tool setTarget`, mandatory Drop re
 
 ```js
 "use strict";
-// Grounded tools for the Decide agent. Pure functions over (graph, decisions record, constraints).
+// Grounded tools for the Decide agent. Pure functions over (graph, decisions record).
 // No Bedrock dependency here — unit-testable on their own.
 const { normalize } = require("./record");
 const { cap: C, isBlocking, isMandatory, allowedTargetKeys, VIA } = require("./rules");
@@ -1552,14 +1632,13 @@ const { requestContract } = require("./specs/api");
 function getState(graph, decisions, extra = {}) {
   const c = C(graph);
   const record = normalize(decisions);
-  const constraints = extra.constraints || { mandatory: [] };
   const implemented = extra.implemented || { api: [], orchestrator: { built: false, verified: false } };
   const cats = { oq: c.openQuestions, rule: c.businessRules, beh: c.sideEffects, sec: c.security, dep: c.dependencies };
   const summary = {};
   for (const [k, arr] of Object.entries(cats)) {
     summary[k] = (arr || []).map(n => ({ id: n.id, label: label(n), decision: record.dec[n.id] || "(unset)" }));
   }
-  const specs = generate({ graph, record, constraints, implemented });
+  const specs = generate({ graph, record, implemented });
   const o = specs.orchestrator;
   return {
     capability: c.name, summary,
@@ -1568,7 +1647,7 @@ function getState(graph, decisions, extra = {}) {
     sideEffects: [...o.detail.built.map(e => ({ ...e, built: true })), ...o.detail.notBuilt.map(e => ({ ...e, built: false }))],
     missing: o.missing, needs: o.needs,
     requestContract: specs.api.request,
-    mandatory: constraints.mandatory || [],
+    mandatory: (c.sideEffects || []).filter(isMandatory).map(s => s.id),
     stage: stage(specs, implemented),
   };
 }
@@ -1577,14 +1656,14 @@ function getState(graph, decisions, extra = {}) {
 5. Replace `setDisposition`, `resolveOpenQuestion`, `setBuildScope` and `setIntegration` with:
 
 ```js
-const MANDATORY_MSG = id => `${id} is mandatory in the production (a product constraint set by the user). Only how it is implemented is decided here.`;
+const MANDATORY_MSG = id => `${id} is mandatory in the production — the legacy calls it unconditionally (discovery). Only how it is implemented is decided here.`;
 
-function setDisposition(graph, decisions, id, option, constraints) {
+function setDisposition(graph, decisions, id, option) {
   const cat = categoryOf(graph, id);
   if (!cat) return { ok: false, message: `unknown node ${id}` };
   if (cat === "oq") return { ok: false, message: `${id} is an open question — use resolveOpenQuestion instead` };
   if (!CAT_OPTS[cat].includes(option)) return { ok: false, message: `option "${option}" invalid for ${id}; valid: ${CAT_OPTS[cat].join(", ")}` };
-  if (option === "Drop" && isMandatory(constraints, id)) return { ok: false, message: `refused: ${MANDATORY_MSG(id)}` };
+  if (option === "Drop" && cat === "beh" && isMandatory(findNode(graph, id))) return { ok: false, message: `refused: ${MANDATORY_MSG(id)}` };
   decisions.dec[id] = option;
   return { ok: true, message: `${id} → ${option}` };
 }
@@ -1601,10 +1680,10 @@ function resolveOpenQuestion(graph, decisions, id, mode, policy) {
   return { ok: true, message: `${id} → ${mode}${text ? " (resolved)" : " (still blocking — needs policy text)"}` };
 }
 
-function setBuildScope(graph, decisions, id, phase, constraints) {
+function setBuildScope(graph, decisions, id, phase) {
   if (categoryOf(graph, id) !== "beh") return { ok: false, message: `${id} is not a side effect; build scope applies to behaviors/side effects` };
   if (!["Build now", "Defer"].includes(phase)) return { ok: false, message: `phase must be "Build now" or "Defer"` };
-  if (phase === "Defer" && isMandatory(constraints, id)) return { ok: false, message: `refused: ${MANDATORY_MSG(id)}` };
+  if (phase === "Defer" && isMandatory(findNode(graph, id))) return { ok: false, message: `refused: ${MANDATORY_MSG(id)}` };
   decisions.scope[id] = phase;
   return { ok: true, message: `${id} build scope → ${phase}` };
 }
@@ -1656,14 +1735,14 @@ const TOOL_SPECS = [
 ];
 
 function runTool(name, input, ctx) {
-  const { graph, decisions, constraints } = ctx;
+  const { graph, decisions } = ctx;
   switch (name) {
     case "getState": return getState(graph, decisions, ctx);
     case "explainOption": return explainOption(graph, input.nodeId, input.option);
     case "explainMapping": return explainMapping(graph, input.nodeId);
-    case "setDisposition": return setDisposition(graph, decisions, input.nodeId, input.option, constraints);
+    case "setDisposition": return setDisposition(graph, decisions, input.nodeId, input.option);
     case "resolveOpenQuestion": return resolveOpenQuestion(graph, decisions, input.id, input.mode, input.policy);
-    case "setBuildScope": return setBuildScope(graph, decisions, input.nodeId, input.phase, constraints);
+    case "setBuildScope": return setBuildScope(graph, decisions, input.nodeId, input.phase);
     case "setTarget": { const { nodeId, ...details } = input || {}; return setTarget(graph, decisions, nodeId, details); }
     case "bindRuleTerms": return bindRuleTerms(graph, decisions, input.id, input.bindings);
     default: return { error: `unknown tool ${name}` };
@@ -1716,7 +1795,7 @@ function setup(fakeAgent) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-"));
   const graphCopy = path.join(dir, "graph.json");
   fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), graphCopy);
-  const paths = { graph: graphCopy, decisions: path.join(dir, "decisions.json"), constraints: path.join(__dirname, "..", "constraints.json"), implemented: path.join(__dirname, "..", "implemented.json"), specsDir: path.join(dir, "specs") };
+  const paths = { graph: graphCopy, decisions: path.join(dir, "decisions.json"), implemented: path.join(__dirname, "..", "implemented.json"), specsDir: path.join(dir, "specs") };
   const made = createApp({ paths, runAgentImpl: fakeAgent || (async () => ({ reply: "ok", toolTrace: [] })) });
   return new Promise(resolve => {
     const srv = made.app.listen(0, "127.0.0.1", () => resolve({ ...made, srv, paths, base: `http://127.0.0.1:${srv.address().port}` }));
@@ -1802,7 +1881,6 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   let graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
   const state = { record: loadRecord(paths.decisions, () => defaultDecisions(graph)), specs: null, md: null, stage: null, specsError: null };
   if (!fs.existsSync(paths.decisions)) saveRecord(paths.decisions, state.record);   // the file is the single truth builds read
-  const constraints = () => readJson(paths.constraints, { mandatory: [] });
   const implemented = () => readJson(paths.implemented, { api: [], orchestrator: { built: false, verified: false } });
   const labelOf = id => { const n = findNode(graph, id); return n ? label(n) : id; };
 
@@ -1810,7 +1888,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   function regenerate() {
     try {
       graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
-      const inputs = { graph, record: state.record, constraints: constraints(), implemented: implemented() };
+      const inputs = { graph, record: state.record, implemented: implemented() };
       const specs = generate(inputs);
       state.md = writeSpecs(paths.specsDir, specs, inputs);
       state.specs = specs;
@@ -1824,8 +1902,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   }
 
   function systemPrompt() {
-    const k = constraints();
-    const st = getState(graph, state.record, { constraints: k, implemented: implemented() });
+    const st = getState(graph, state.record, { implemented: implemented() });
     return [
       "You are the Decide-stage GUIDE for the VistA Service Enablement Workbench.",
       "You lead a human, one decision at a time, through turning a legacy VistA capability into three layer specs that drive the builds: API (Phase 1 — REST service on VistA + Angular app), Orchestrator (Phase 2 — IRIS Interoperability production), AI (Phase 3 — AI Hub). The specs render live on the right, one tab per layer.",
@@ -1849,8 +1926,9 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
       "Tooling limit to be honest about: rule dispositions are only Preserve/Inline/Drop, so a 'modernized' rule has no exact disposition. Record the closest one AND state the modification in words.",
       "",
       "FIELD BINDINGS: list candidate fields from getState.requestContract with their DD names, let the developer choose, and record with bindRuleTerms. A word with no field in the contract is an unmet need.",
+      "NOTIFICATIONS: start the content and recipients details from the legacy message template (getState → sideEffects[].template) — show the subject, body and placeholders verbatim, then ask what to keep or change — and raise every ⚠ note in sideEffects[].templateNotes before recording.",
       "TARGET DETAILS: record with setTarget — it never changes the disposition. To make a side effect an external integration, first setDisposition(id,'Integration'). Never ask for or record passwords, tokens, or other secrets — those are Management Portal settings.",
-      `MANDATORY in the production (product constraints set by the user): ${(k.mandatory || []).join(", ") || "none"}. Never offer Drop or Defer for these and never ask the operator about them; the developer decides only HOW each is implemented.`,
+      `MANDATORY in the production (discovery: the legacy calls these unconditionally): ${st.mandatory.join(", ") || "none"}. Never offer Drop or Defer for these and never ask the operator about them; the developer decides only HOW each is implemented.`,
       "",
       "STATUS AND SUMMARIES COME FROM THE RECORD, NOT FROM MEMORY. Before you summarise decisions or claim any status, call getState and report only what it returns; restate a recorded policy verbatim. If a tool result says something is still blocking or refused, say so. If what is recorded differs from what the developer told you, point out the difference and ask them to correct it.",
       "",
@@ -1873,7 +1951,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
 
-  app.get("/api/state", (_req, res) => res.json({ workflow: graph.workflow, decisions: state.record, state: getState(graph, state.record, { constraints: constraints(), implemented: implemented() }) }));
+  app.get("/api/state", (_req, res) => res.json({ workflow: graph.workflow, decisions: state.record, state: getState(graph, state.record, { implemented: implemented() }) }));
   app.get("/api/decisions", (_req, res) => res.json(state.record));
 
   app.get("/api/specs", (_req, res) => {
@@ -1888,7 +1966,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
     const before = JSON.parse(JSON.stringify(state.record));
     let out = null, err = null;
     try {
-      const ctx = { graph, decisions: state.record, constraints: constraints(), implemented: implemented(), system: systemPrompt() };
+      const ctx = { graph, decisions: state.record, implemented: implemented(), system: systemPrompt() };
       out = await runAgentImpl(String(message), history || [], ctx);   // tools mutate state.record in place
     } catch (e) { err = String(e.message || e); }
     saveRecord(paths.decisions, state.record);
@@ -1965,7 +2043,7 @@ In `agent/README.md`, replace line 23 with:
 
 ```markdown
 - `server.js` — serves the workbench + APIs: `GET /api/state`, `GET /api/decisions` (read-only — decisions are written only by the chat tools), `GET /api/specs` (the three generated layer specs), `POST /api/agent/chat` (returns `recorded`, the exact record changes), `POST /api/build` (regenerates the specs, then builds the API layer from `capability-graph/specs/api.json`).
-- `lib/specs/` — generates `capability-graph/specs/{api,orchestrator,ai}.{json,md}` from the graph, `decisions.json`, `constraints.json` and `implemented.json`.
+- `lib/specs/` — generates `capability-graph/specs/{api,orchestrator,ai}.{json,md}` from the graph, `decisions.json` and `implemented.json`.
 ```
 
 - [ ] **Step 5: Run all tests**
@@ -2005,7 +2083,7 @@ Append to `agent/test/angular-app.test.js`:
 
 ```js
 const os = require("os");
-const { graph, rec, K, IM } = require("./helpers");
+const { graph, rec, IM } = require("./helpers");
 const { generate, writeSpecs, loadInputs, DEFAULT_PATHS } = require("../lib/specs");
 
 const PHASE2_BLOCK = [
@@ -2017,7 +2095,7 @@ const PHASE2_BLOCK = [
 ].join("\n") + "\n";
 
 test("the app built from the API spec equals the pre-refactor app minus the Phase 2 block", () => {
-  const spec = generate({ graph, record: rec(), constraints: K, implemented: IM }).api;
+  const spec = generate({ graph, record: rec(), implemented: IM }).api;
   const { oq, sideEffects, ...kept } = goldenCfg();
   assert.deepEqual(spec.detail, kept);
   const golden = goldenApp();

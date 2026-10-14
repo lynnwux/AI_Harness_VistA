@@ -45,7 +45,8 @@ These are fixed. They come from the user, not from this design.
 | **The truth is the legacy source code and the data dictionary**, not any earlier modern prototype (e.g. `Vista-Engineering-IRIS` / `Equipment.*`). | All legacy evidence in the graph cites a routine and line or a DD field. |
 | **Dependencies point one way.** A lower layer never changes because of a higher layer's decision. | The API spec is built from the graph and Phase-1 decisions only. Higher specs list *needs* from lower layers; unmet needs block, they are never written back. |
 | **Phase 1 is legacy discovery plus a REST service proposal.** | The API spec proposes a service for every write discovery found, regardless of later decisions. |
-| **The new-equipment bulletin is mandatory in the production.** | Encoded as a product constraint (`agent/constraints.json`), enforced by the tools. Only *how* it is implemented is decided in the chat. |
+| **Side effects the legacy calls unconditionally are mandatory in the production** (today: the new-equipment bulletin). | Discovery surfaces it: the graph records `legacyInvocation: "unconditional"` with the citing call sites (`ENEQ1 ADDEQ`, `ENEQ3 EQMAS` line 56). The tools refuse Drop/Defer for such items. Only *how* they are implemented is decided in the chat. |
+| **A notification's legacy message is its template.** | Discovery records the bulletin's subject, body, placeholders and recipients from BULLETIN file 3.6 and `BULL^ENEQ3`; the orchestrator spec shows it as the starting point for the modern message, with what each placeholder depends on. |
 | **No secrets in specs or records.** | No field exists for credentials; they remain Management Portal settings. |
 
 ---
@@ -54,25 +55,23 @@ These are fixed. They come from the user, not from this design.
 
 ```
  capability graph   ─┐                                          ┌─▶ specs/api.json + api.md ──────────▶ API build (existing 🔨)
- decisions record   ─┤                                          │
- constraints.json   ─┼─▶  agent/lib/specs.js  (one generator)  ─┼─▶ specs/orchestrator.json + .md ────▶ production build (piece 2)
+ decisions record   ─┼─▶  agent/lib/specs/  (one generator)    ─┼─▶ specs/orchestrator.json + .md ────▶ production build (piece 2)
  implemented.json   ─┘    runs on every recorded change         │
                           and immediately before any build      └─▶ specs/ai.json + ai.md ─────────────▶ AI build (piece 3)
                                      │
                                      └─▶ missing list ─▶ chat (asks for the next item) · page (shows ▢ items)
 ```
 
-**Inputs** — exactly four, all files:
+**Inputs** — exactly three, all files:
 
 | Input | Path | Holds | Written by |
 |---|---|---|---|
-| Capability graph | `capability-graph/new-inventory-entry.json` | legacy evidence only | discovery |
+| Capability graph | `capability-graph/new-inventory-entry.json` | legacy evidence only — including which side effects the legacy calls unconditionally, and the bulletin's message template | discovery |
 | Decisions record | `agent/decisions.json` | what the user decided in the front-end chat | chat tools only |
-| Product constraints | `agent/constraints.json` (new) | rules the user set directly, e.g. mandatory bulletin | the user |
 | Implemented services | `agent/implemented.json` (new) | what actually exists and runs (built endpoints; later, production status) | builds / seeded |
 
-**Generator** — `agent/lib/specs.js` exports `generate(graph, decisions, constraints,
-implemented)` returning `{ api, orchestrator, ai }`. Each value is a structured object (§5) and a
+**Generator** — `agent/lib/specs/` exports `generate({ graph, record, implemented })` returning
+`{ api, orchestrator, ai }`. Each value is a structured object (§5) and a
 `render(spec)` turns it into markdown. The server writes `capability-graph/specs/<layer>.json`
 and `<layer>.md`:
 
@@ -133,6 +132,10 @@ Per side effect, the orchestrator spec shows:
 2. **Legacy evidence** — the routine, line, and what it actually does (from the graph);
 3. **Target details** — recorded values, or ▢ items still missing;
 4. **Dry-run** — on, until enabled in piece 2.
+5. **Legacy message template** (notifications only) — subject, body, each placeholder's source,
+   legacy recipients, and a ⚠ note for every placeholder whose value depends on something
+   outside the notification (another side effect's outcome, operator identity). It is the
+   starting point the chat offers for the `content` and `recipients` details, never a decision.
 
 Deferred side effects are listed under *Not built*, with the recorded reason. Security keys
 (`ENEDPM`, `ENFACS`) appear as recorded, with the operator-identity gap stated: no clerk
@@ -189,12 +192,6 @@ receives. A word that has no field there is itself an unmet need.
   effect, not only external integrations. Only the keys in §4.4 for that side effect's kind are
   accepted.
 
-### `agent/constraints.json`
-
-```json
-{ "mandatory": ["SIDE.Bulletin"] }
-```
-
 ### `agent/implemented.json`
 
 ```json
@@ -215,7 +212,7 @@ true.
 ```jsonc
 {
   "layer": "api | orchestrator | ai",
-  "inputs": { "graph": "<sha256>", "decisions": "<sha256>", "constraints": "<sha256>", "implemented": "<sha256>" },
+  "inputs": { "graph": "<sha256>", "decisions": "<sha256>", "implemented": "<sha256>" },
   "builds": [ ... ], "owns": [ ... ], "uses": [ ... ],
   "needs":  [ { "what": "...", "from": "api", "met": false } ],
   "missing": [ { "id": "...", "what": "..." } ],
@@ -229,13 +226,17 @@ the current input files.
 
 ### Graph additions — legacy evidence
 
-Each side effect gains `targetKind` and an `evidence` list of `{ routine, line, says }`, read from
-the routine source on VADEMO (Atelier `GET /doc/<ROUTINE>.int`):
+Each side effect gains `targetKind`, `legacyInvocation` (`"unconditional"` when every path through
+the option calls it — mandatory in the production — otherwise `"conditional"`), and an evidence
+list of `{ routine, line, says }`, read from the routine source on VADEMO (Atelier
+`GET /doc/<ROUTINE>.int`). A notification also gains `messageTemplate` — `{ source, sender,
+subject, body[], params: [{ n, value, ifBlank?, dependsOn? }], recipients }` — read from its
+BULLETIN file 3.6 entry; `dependsOn` names another side effect or `operatorIdentity`.
 
 | Side effect | Source | Evidence to capture |
 |---|---|---|
 | `SIDE.WorkOrder` (`vistaWrite`, file 6920) | `IIWO^ENWONEW3` (line 5) | shop chosen from site incoming-inspection section → item's responsible shop → temp section, clerk asked if blank or holds `ENEDPM`; fields written: 6 = `Incoming Inspection`, 17 = `AVERAGE`, 32 = `PENDING`/`IN PROGRESS` by shop, 10 = `TODAY` for receiving shops, 6920.035 = `I1`, 18 = equipment, 3 = location (from 6914 fld 24); clerk-entered 16 technician, 7 contact, 8 phone, 40 comments |
-| `SIDE.Bulletin` (`notification`) | `BULL^ENEQ3` (line 60) | bulletin `EN NEW EQUIPMENT`, sender `AEMS/MERS`; recipients = mail group `EN NEW EQUIPMENT <station>` else `EN NEW EQUIPMENT`; **not sent if neither group exists**; content = IEN, entering user's name (from `DUZ`), equipment name, category, service, station, "Item is [NOT] capitalized NX. It was [NOT] reported to FAP." |
+| `SIDE.Bulletin` (`notification`, **unconditional**: `ENEQ1 ADDEQ` `S DA=ENNXL D BULL^ENEQ3`; `ENEQ3 EQMAS` line 56) — template from BULLETIN 3.6 `EN NEW EQUIPMENT` (IEN 114): subject `NEW EQUIPMENT: ENTRY #|1|`, 9 body lines, params 1–7; `|7|` depends on the FA step, `|2|` on operator identity; MailMan also delivers to the bulletin's own groups (`CLICKAAH`) | `BULL^ENEQ3` (line 60) | bulletin `EN NEW EQUIPMENT`, sender `AEMS/MERS`; recipients = mail group `EN NEW EQUIPMENT <station>` else `EN NEW EQUIPMENT`, each counted only if it exists **and has at least one member** (`CHKMGRP`, MAIL GROUP file 3.8); **not sent if neither qualifies**; content = IEN, entering user's name (from `DUZ`), equipment name, category, service, station, "Item is [NOT] capitalized NX. It was [NOT] reported to FAP." |
 | `SIDE.PMSchedule` (`vistaWrite`, sub-file 6914.04) | `ENEQPMP` (lines 12–34) | the item's equipment category's standard PM schedule (`^ENG(6911,cat,4)`) is offered; if the clerk accepts it is copied to `^ENG(6914,ien,4)`; gated by key `ENEDPM` plus a prompt; no value or capitalization condition |
 | `SIDE.FinancialAsset` (`vistaWrite`, file 6915.2) | `^ENFAACQ` (read 2026-10-13) | validates the item via `^ENFAVAL` into temporary global `^TMP($J,"BAD",ien)` and aborts on any problem; creates an FA DOCUMENT LOG entry in 6915.2; fills STATION NUMBER if blank, normalizes TOTAL ASSET VALUE (fld 12, node 2 piece 3) to two decimals and stores it on the code sheet; adjusts the FAP balance; transmits the code sheet via `^ENFAXMT`; may create an adjustment voucher |
 
@@ -263,7 +264,7 @@ the answer and name what departs from the legacy.
 |---|---|
 | `getState` | returns the record view: every disposition, recorded resolutions with policy text, each side effect's status, the missing list, needs, current stage. The chat must call it before any summary or status claim. |
 | `resolveOpenQuestion` | records mode + policy (for Defer, the reason). Sets the gated side effect's scope: Defer → out of the build; otherwise → in. |
-| `setDisposition` / `setBuildScope` | refuse Drop / Defer for anything in `constraints.mandatory`. |
+| `setDisposition` / `setBuildScope` | refuse Drop / Defer for any side effect discovery marked `legacyInvocation: "unconditional"`. |
 | `setTarget` (replaces `setIntegration`) | records target details; never changes a disposition; accepts only the keys valid for that side effect's kind. |
 | `bindRuleTerms` (new) | records `{ word: field }` for a resolved open question; each field must exist in the API spec's request contract. |
 
@@ -351,7 +352,10 @@ orchestrator spec will show:
 - the work order needing field bindings (*TYPE OF ENTRY*, *cost*) and its target details;
 - an **unmet need**: the 6920 write service is proposed in the API spec but not built — the
   production cannot be built until that Phase 1 work is done;
-- the bulletin (mandatory) needing channel, recipients and content.
+- the bulletin — mandatory because discovery found the legacy calls it unconditionally — needing
+  channel, recipients and content, shown with its legacy template and two ⚠ notes: with FA
+  deferred, `|7|` would always say "It was NOT reported to FAP" for capitalized NX items; and `|2|`
+  ("entered by") would name the service account until operator identity exists.
 
 ---
 
