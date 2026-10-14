@@ -18,10 +18,10 @@ const allowedTargetKeys = (se, record) => { const k = kindFor(se, record); retur
 const describeKey = (se, record, key) => (key === "via" ? VIA_HELP : (TARGET_KEYS[kindFor(se, record)] || {})[key] || key);
 
 // built = carried into this build: not dropped, not deferred, and its gating question (if any)
-// decided with a non-Defer mode. Mandatory items are always built.
+// decided with a non-Defer mode. Mandatory items are always built — even a Drop left in an older record.
 function isBuilt(se, record) {
-  if (record.dec[se.id] === "Drop") return false;
   if (isMandatory(se)) return true;
+  if (record.dec[se.id] === "Drop") return false;
   if ((record.scope[se.id] || "Build now") === "Defer") return false;
   if (se.openQuestion) return !isBlocking(record, se.openQuestion) && record.dec[se.openQuestion] !== "Defer";
   return true;

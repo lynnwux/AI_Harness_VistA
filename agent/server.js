@@ -15,10 +15,18 @@ const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(f
 
 function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   let graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
-  const state = { record: loadRecord(paths.decisions, () => defaultDecisions(graph)), specs: null, md: null, stage: null, specsError: null };
-  if (!fs.existsSync(paths.decisions)) saveRecord(paths.decisions, state.record);   // the file is the single truth builds read
+  let notice = null;
+  const onCorrupt = bak => { notice = `decisions.json could not be read, so the workbench started from the default decisions. The unreadable file was backed up as ${path.basename(bak)} — nothing in it is lost.`; };
+  const state = { record: loadRecord(paths.decisions, () => defaultDecisions(graph), { onCorrupt }), specs: null, md: null, stage: null, specsError: null, notice: null };
+  state.notice = notice;
+  // the file is the single truth builds read: write it when missing, or when it was unreadable (now backed up)
+  if (!fs.existsSync(paths.decisions) || state.notice) saveRecord(paths.decisions, state.record);
   const implemented = () => readJson(paths.implemented, { api: [], orchestrator: { built: false, verified: false } });
   const labelOf = id => { const n = findNode(graph, id); return n ? label(n) : id; };
+  const restore = snap => { for (const k of Object.keys(state.record)) delete state.record[k]; Object.assign(state.record, JSON.parse(JSON.stringify(snap))); };
+  // one chat turn or build at a time, so each turn's diff, prompt and history see only its own changes
+  let queue = Promise.resolve();
+  const serially = fn => { const p = queue.then(fn); queue = p.catch(() => {}); return p; };
 
   // Regenerate all three layer specs from the three input files. On failure the last good specs stay.
   function regenerate() {
@@ -92,12 +100,13 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   app.get("/api/decisions", (_req, res) => res.json(state.record));
 
   app.get("/api/specs", (_req, res) => {
-    if (!state.specs) return res.status(500).json({ error: state.specsError || "specs not generated" });
+    if (!state.specs) return res.status(500).json({ error: state.specsError || "specs not generated", notice: state.notice });
     const layer = l => ({ md: state.md[l], complete: state.specs[l].complete, missing: state.specs[l].missing, needs: state.specs[l].needs, owns: state.specs[l].owns });
-    res.json({ error: state.specsError, stage: state.stage, layers: { api: layer("api"), orchestrator: layer("orchestrator"), ai: layer("ai") } });
+    res.json({ error: state.specsError, notice: state.notice, stage: state.stage, layers: { api: layer("api"), orchestrator: layer("orchestrator"), ai: layer("ai") } });
   });
 
-  app.post("/api/agent/chat", async (req, res) => {
+  const UNDONE = "The record changes your previous draft made were undone. With the tools, re-apply only what the developer asked for in their message.";
+  app.post("/api/agent/chat", (req, res) => serially(async () => {
     const { message, history } = req.body || {};
     if (!message) return res.status(400).json({ error: "message required" });
     const before = JSON.parse(JSON.stringify(state.record));
@@ -106,18 +115,29 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
       const ctx = { graph, decisions: state.record, implemented: implemented(), system: systemPrompt() };
       const next = state.stage && state.stage.next;   // the item being worked on, before tools change it
       const currentId = next ? next.id || next.for || null : null;
-      // tools mutate state.record in place; the guardrail retries a reply that borrows another item's evidence
-      out = await groundedTurn({ run: (t, h) => runAgentImpl(t, h, ctx), message: String(message), history: history || [], graph, record: state.record, currentId });
+      // tools mutate state.record in place; a draft the guardrail rejects has its record changes undone before the retry
+      let attempt = 0;
+      const run = (t, h) => {
+        if (attempt++ === 0) return runAgentImpl(t, h, ctx);
+        restore(before);
+        return runAgentImpl(t + "\n" + UNDONE, h, ctx);
+      };
+      // the check judges against the record as it was before this turn, never against what the draft just wrote
+      out = await groundedTurn({ run, message: String(message), history: history || [], graph, record: before, currentId });
     } catch (e) { err = String(e.message || e); }
-    saveRecord(paths.decisions, state.record);
+    try { saveRecord(paths.decisions, state.record); }
+    catch (e) {
+      restore(before); regenerate();   // memory stays equal to the file the builds read
+      return res.status(500).json({ error: `the decisions record could not be saved, so nothing was recorded: ${e.message || e}`, recorded: [] });
+    }
     const g = regenerate();
     const recorded = diffRecords(before, state.record, labelOf);
     if (err) return res.status(500).json({ error: err, recorded });
     res.json({ reply: out.reply, toolTrace: out.toolTrace, recorded, grounding: out.grounding, evidence: out.evidence, specsError: g.error || null });
-  });
+  }).catch(e => { if (!res.headersSent) res.status(500).json({ error: String(e.message || e) }); }));
 
   registerVistaRoutes(app);
-  registerBuildRoutes(app, regenerate);
+  registerBuildRoutes(app, regenerate, serially);
   app.use(express.static(ROOT));
 
   regenerate();
@@ -232,8 +252,9 @@ function registerVistaRoutes(app) {
 const STATUS_FILE = path.join(__dirname, "build-status.json");
 let buildProc = null;
 
-function registerBuildRoutes(app, regenerate) {
-  app.post("/api/build", (_req, res) => {
+function registerBuildRoutes(app, regenerate, serially) {
+  // queued behind any chat turn in flight, so the build reads the record that turn saved
+  app.post("/api/build", (_req, res) => serially(() => {
     try {
       if (buildProc) return res.json({ started: false, running: true, note: "a build is already running" });
       const g = regenerate();   // the build always reads the latest specs; it ignores any request body
@@ -256,7 +277,7 @@ function registerBuildRoutes(app, regenerate) {
       buildProc.unref();
       res.json({ started: true, statusUrl: "/api/build/status" });
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
-  });
+  }));
   app.get("/api/build/status", (_req, res) => {
     try { res.json(JSON.parse(fs.readFileSync(STATUS_FILE, "utf8"))); }
     catch (e) { res.json({ state: "idle", step: "", log: [], url: null }); }

@@ -83,3 +83,30 @@ test("the bulletin shows the legacy email template and what it depends on", () =
   const withFA = rec({ ...decided, dec: { ...decided.dec, "OQ.FAConfirmation": "Business rule" }, oqPolicy: { ...decided.oqPolicy, "OQ.FAConfirmation": "send when eligible" } });
   assert.match(renderOrchestrator(graph, withFA, buildOrchestratorSpec(graph, withFA, IM)), /⚠ `\|7\|` reports the outcome of FA document to Austin — run the bulletin after that step, as the legacy does/);
 });
+
+test("a stale Drop of the mandatory bulletin in an older record keeps it built and asks how to implement it", () => {
+  const s = buildOrchestratorSpec(graph, rec({ dec: { "SIDE.Bulletin": "Drop" } }), IM);
+  assert.ok(s.detail.built.some(e => e.id === "SIDE.Bulletin"));
+  assert.ok(!s.detail.notBuilt.some(e => e.id === "SIDE.Bulletin"));
+  assert.ok(s.missing.some(m => m.id === "SIDE.Bulletin" && m.kind === "decide"));
+});
+
+test("a bound field the API contract no longer carries is an unmet need, so the spec cannot be complete", () => {
+  const fld7 = graph.capabilities[0].data.find(d => d.field === "7").id;
+  const bound = { ...decided, ruleBindings: { "OQ.WorkOrderPolicy": { "TYPE OF ENTRY": "7" } } };
+  const okNeeds = buildOrchestratorSpec(graph, rec(bound), withWrite).needs.filter(n => n.for === "OQ.WorkOrderPolicy");
+  assert.deepEqual(okNeeds, []);
+  const omitted = rec({ ...bound, dec: { ...bound.dec, [fld7]: "Omit" } });
+  const s = buildOrchestratorSpec(graph, omitted, withWrite);
+  const n = s.needs.find(x => x.for === "OQ.WorkOrderPolicy");
+  assert.ok(n && n.met === false, JSON.stringify(s.needs));
+  assert.match(n.what, /TYPE OF ENTRY/);
+  assert.equal(s.complete, false);
+});
+
+test("a resolved rule whose side effect is deferred by build scope never asks for bindings — deferring never blocks", () => {
+  const r = rec({ dec: { "OQ.PMEnrollmentPolicy": "Business rule" }, oqPolicy: { "OQ.PMEnrollmentPolicy": "enroll when the developer says so" }, scope: { "SIDE.PMSchedule": "Defer" } });
+  const s = buildOrchestratorSpec(graph, r, IM);
+  assert.ok(s.detail.deferred.some(e => e.id === "SIDE.PMSchedule"));
+  assert.ok(!s.missing.some(m => m.id === "OQ.PMEnrollmentPolicy"), JSON.stringify(s.missing));
+});

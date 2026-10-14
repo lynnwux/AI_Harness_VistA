@@ -222,7 +222,8 @@ function renderRight(){
   document.getElementById("killBtn").style.display = onApi ? "" : "none";
   const doc=document.getElementById("doc");
   if(!SPECS||!SPECS.layers){ doc.innerHTML=`<div class="specerr">${esc((SPECS&&SPECS.error)||"Specs not available")}</div>`; return; }
-  const banner = SPECS.error ? `<div class="specerr">⚠ Spec generation failed — showing the last good version. ${esc(SPECS.error)}</div>` : "";
+  const banner = (SPECS.notice ? `<div class="specerr">⚠ ${esc(SPECS.notice)}</div>` : "")
+    + (SPECS.error ? `<div class="specerr">⚠ Spec generation failed — showing the last good version. ${esc(SPECS.error)}</div>` : "");
   doc.innerHTML = banner + mdToHtml(SPECS.layers[TAB].md);
   updateProg(); updateAgenda();
 }
@@ -329,8 +330,11 @@ function addEvidenceCard(list){
   d.innerHTML=list.map(e=>`<div class="eh">Legacy evidence — ${esc(e.names.join(" / "))}</div>`+e.lines.map(l=>`<div class="el">${esc(l)}</div>`).join("")).join("");
   box.appendChild(d); box.scrollTop=box.scrollHeight;
 }
+let chatBusy=false;   // one turn at a time — a second message waits until the reply and its cards are in
 async function sendChat(){
-  const inp=document.getElementById("chatInp"); const msg=inp.value.trim(); if(!msg) return;
+  const inp=document.getElementById("chatInp"), send=document.getElementById("chatSend");
+  const msg=inp.value.trim(); if(!msg||chatBusy) return;
+  chatBusy=true; send.disabled=true;
   inp.value=""; addMsg("user",msg); const prior=chatHistory.slice(); chatHistory.push({role:"user",text:msg});
   const pending=addMsg("assistant","…","muted");
   try{
@@ -340,6 +344,7 @@ async function sendChat(){
     addMsg("assistant",res.reply); chatHistory.push({role:"assistant",text:res.reply});
     addEvidenceCard(res.evidence); addRecordedCards(res.recorded); await loadSpecs();
   }catch(e){ pending.remove(); addMsg("assistant","⚠ "+e.message); }
+  finally{ chatBusy=false; send.disabled=false; }
 }
 function wireChat(){
   document.getElementById("chatSend").onclick=sendChat;

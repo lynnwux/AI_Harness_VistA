@@ -2,7 +2,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { graph, rec, IM } = require("./helpers");
-const { runTool } = require("../lib/tools");
+const { runTool, TOOL_SPECS } = require("../lib/tools");
 
 const ctx = record => ({ graph, decisions: record, implemented: IM });
 
@@ -51,6 +51,28 @@ test("setTarget refuses a value that looks like a credential", () => {
   assert.equal(out.ok, false);
   assert.match(out.message, /credential/);
   assert.equal(r.targets["SIDE.Bulletin"], undefined);
+});
+
+test("credentials in other shapes are refused too — in target details and in policy text", () => {
+  for (const v of ["https://svc:Hunter2@host.example/api", "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc", "pwd=Hunter2", "pass: Hunter2"]) {
+    const r = rec();
+    const out = runTool("setTarget", { nodeId: "SIDE.Bulletin", recipients: v }, ctx(r));
+    assert.equal(out.ok, false, v);
+    assert.equal(r.targets["SIDE.Bulletin"], undefined, v);
+  }
+  const r = rec();
+  const out = runTool("resolveOpenQuestion", { id: "OQ.WorkOrderPolicy", mode: "Business rule", policy: "always; password=Hunter2" }, ctx(r));
+  assert.equal(out.ok, false);
+  assert.match(out.message, /credential/);
+  assert.equal(r.oqPolicy["OQ.WorkOrderPolicy"], undefined);
+  assert.equal(r.dec["OQ.WorkOrderPolicy"], "Defer");
+});
+
+test("tool descriptions and explanations carry no example drawn from a real item", () => {
+  const text = JSON.stringify(TOOL_SPECS);
+  for (const real of ["TYPE OF ENTRY", "ENFACS", "$P(^ENG(6914", "work-order", "work order"]) assert.ok(!text.includes(real), real);
+  const pm = runTool("explainMapping", { nodeId: "SIDE.PMSchedule" }, ctx(rec()));
+  assert.ok(!/work-order|work order/i.test(pm.mapsThroughLayers.join(" ")), pm.mapsThroughLayers.join(" | "));
 });
 
 test("bindRuleTerms only binds a resolved rule, only to fields in the API request contract", () => {

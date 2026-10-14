@@ -90,7 +90,8 @@ function checkReply({ graph, reply, userMessage = "", record = {}, currentId = n
     const from = others.filter(g => g.lex.has(w)).map(g => g.id);
     if (from.length) borrowed.push({ term: w, from });
   }
-  const allowed = norm([focus.map(g => g.text).join("\n"), userMessage, ...Object.values(record.oqPolicy || {})].join("\n"));
+  // a threshold is supported by the focused item's evidence, the developer's words now, or that item's own recorded policy
+  const allowed = norm([focus.map(g => g.text).join("\n"), userMessage, ...focus.map(g => (record.oqPolicy || {})[g.id] || "")].join("\n"));
   const thresholds = [...new Set((text.match(THRESH) || []).map(s => s.trim()))].filter(s => !allowed.includes(norm(s)));
   return { ok: borrowed.length === 0 && thresholds.length === 0, focus: focus.map(g => g.id), borrowed, thresholds };
 }

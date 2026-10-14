@@ -77,7 +77,7 @@ const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(f
 function loadInputs(paths = DEFAULT_PATHS, fallbackRecord) {
   return {
     graph: JSON.parse(fs.readFileSync(paths.graph, "utf8")),
-    record: loadRecord(paths.decisions, fallbackRecord),
+    record: loadRecord(paths.decisions, fallbackRecord, { backup: false }),   // a reader: never writes
     implemented: readJson(paths.implemented, { api: [], orchestrator: { built: false, verified: false } }),
   };
 }

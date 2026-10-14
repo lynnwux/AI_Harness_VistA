@@ -119,7 +119,7 @@ function explainMapping(graph, id) {
     if (node.kind === "crossReference") layers.push("a GET query filter (REST)", `the ${node.index} index on ^ENG(6914)`);
   } else if (cat === "beh") {
     layers.push("IRIS Production: a Business Operation or Event (per disposition)");
-    if (node.writes) layers.push("REST data service (e.g. POST /work-orders)", `FileMan file ${node.writes.file}`);
+    if (node.writes) layers.push(`a REST data service that writes FileMan file ${node.writes.file} (proposed in the API spec)`, `FileMan file ${node.writes.file}`);
   } else if (cat === "rule") {
     layers.push("a business rule / validation asserted in the command handler");
   } else if (cat === "oq") {
@@ -138,6 +138,16 @@ function explainMapping(graph, id) {
   };
 }
 
+// Credentials are never recorded — they are Management Portal settings.
+const SECRET = [
+  /\b(password|passwd|pwd|pass|secret|token|api[_-]?key|bearer|authorization)\s*[:=]/i,
+  /\/\/[^\s/:@]+:[^\s/@]+@/,              // user:password@host in a URL
+  /\bbearer\s+[\w.~+/-]{8,}/i,            // a bearer token
+  /\beyJ[\w-]{5,}\.[\w-]{5,}/,            // a JWT
+];
+const looksSecret = v => SECRET.some(re => re.test(String(v)));
+const SECRET_MSG = what => `refused: ${what} looks like it contains a credential. Credentials are never recorded — they are Management Portal settings.`;
+
 const MANDATORY_MSG = id => `${id} is mandatory in the production — the legacy calls it unconditionally (discovery). Only how it is implemented is decided here.`;
 
 function setDisposition(graph, decisions, id, option) {
@@ -154,6 +164,7 @@ function resolveOpenQuestion(graph, decisions, id, mode, policy) {
   if (categoryOf(graph, id) !== "oq") return { ok: false, message: `${id} is not an open question` };
   if (!CAT_OPTS.oq.includes(mode)) return { ok: false, message: `mode must be one of ${CAT_OPTS.oq.join(", ")}` };
   const text = String(policy || "").trim() || (mode === "Defer" ? "Deferred — not built in this phase; revisit later." : "");
+  if (looksSecret(text)) return { ok: false, message: SECRET_MSG("the policy") };
   // bindings were made for the old wording — a changed resolution must be re-bound
   if (decisions.dec[id] !== mode || decisions.oqPolicy[id] !== text) delete decisions.ruleBindings[id];
   decisions.dec[id] = mode;
@@ -170,8 +181,6 @@ function setBuildScope(graph, decisions, id, phase) {
   return { ok: true, message: `${id} build scope → ${phase}` };
 }
 
-const SECRET = /(password|passwd|secret|token|api[_-]?key|bearer|authorization)\s*[:=]/i;
-
 function setTarget(graph, decisions, id, details) {
   const se = (C(graph).sideEffects || []).find(s => s.id === id);
   if (!se) return { ok: false, message: `${id} is not a side effect` };
@@ -179,8 +188,8 @@ function setTarget(graph, decisions, id, details) {
   const given = Object.entries(details || {}).filter(([, v]) => v != null && String(v).trim() !== "");
   const bad = given.map(([k]) => k).filter(k => !allowed.includes(k));
   if (bad.length) return { ok: false, message: `not a target detail for ${id}: ${bad.join(", ")}. Allowed: ${allowed.join(", ")}. Credentials are never recorded.` };
-  const leaked = given.filter(([, v]) => SECRET.test(String(v)));
-  if (leaked.length) return { ok: false, message: `refused: ${leaked.map(([k]) => k).join(", ")} looks like it contains a credential. Credentials are never recorded — they are Management Portal settings.` };
+  const leaked = given.filter(([, v]) => looksSecret(v));
+  if (leaked.length) return { ok: false, message: SECRET_MSG(leaked.map(([k]) => k).join(", ")) };
   const via = given.find(([k]) => k === "via");
   if (via && !VIA.includes(String(via[1]).trim())) return { ok: false, message: `via must be one of ${VIA.join(", ")}` };
   decisions.targets[id] = Object.assign({}, decisions.targets[id] || {}, Object.fromEntries(given.map(([k, v]) => [k, String(v).trim()])));
@@ -192,6 +201,7 @@ function bindRuleTerms(graph, decisions, id, bindings) {
   if (isBlocking(decisions, id) || decisions.dec[id] === "Defer") return { ok: false, message: `${id} has no resolved rule to bind — decide it first` };
   const fields = new Map(requestContract(graph, decisions).map(f => [f.field, f.name]));
   const entries = Object.entries(bindings || {}).map(([w, f]) => [w, String(f).trim()]);
+  if (entries.some(([w]) => looksSecret(w))) return { ok: false, message: SECRET_MSG("a policy word") };
   const bad = entries.filter(([, f]) => !fields.has(f));
   if (bad.length) return { ok: false, message: `not in the API request contract: ${bad.map(([w, f]) => `${w} → ${f}`).join(", ")}. A word with no field in the contract is an unmet need — report it, don't bind it.` };
   decisions.ruleBindings[id] = Object.fromEntries(entries);
@@ -209,7 +219,7 @@ const TOOL_SPECS = [
   { toolSpec: { name: "resolveOpenQuestion", description: "Resolve an open question: mode is 'Business rule', 'Required input', or 'Defer'; policy is the developer's statement in their own words (for Defer, their reason). The side effect the question gates moves into this build (Business rule / Required input) or out of it (Defer). Changing a resolution clears its field bindings.", inputSchema: { json: { type: "object", properties: { id: { type: "string" }, mode: { type: "string" }, policy: { type: "string" } }, required: ["id", "mode"] } } } },
   { toolSpec: { name: "setBuildScope", description: "Set whether a side effect is built in this phase: 'Build now' or 'Defer'. Defer is refused for mandatory items.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, phase: { type: "string" } }, required: ["nodeId", "phase"] } } } },
   { toolSpec: { name: "setTarget", description: "Record target details for a built side effect so the production can be built. Never changes the disposition. Accepts via plus only the keys for that side effect's kind (vistaWrite: writePath, fields, operatorValues; notification: channel, recipients, content; Integration disposition: system, endpoint, trigger, mapping, settings). Never pass credentials or tokens.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, ...TARGET_PROPS }, required: ["nodeId"] } } } },
-  { toolSpec: { name: "bindRuleTerms", description: "Bind the data words in a resolved open question's policy to DD field numbers from the API request contract (getState.requestContract). Pass {} if the policy uses no data. A word with no field in the contract is an unmet need — report it instead of binding.", inputSchema: { json: { type: "object", properties: { id: { type: "string" }, bindings: { type: "object", description: "map of policy word → DD field number, e.g. {\"TYPE OF ENTRY\": \"7\"}" } }, required: ["id", "bindings"] } } } },
+  { toolSpec: { name: "bindRuleTerms", description: "Bind the data words in a resolved open question's policy to DD field numbers from the API request contract (getState.requestContract). Pass {} if the policy uses no data. A word with no field in the contract is an unmet need — report it instead of binding.", inputSchema: { json: { type: "object", properties: { id: { type: "string" }, bindings: { type: "object", description: "map of policy word → DD field number from getState.requestContract, shaped {\"<word in the policy>\": \"<field number>\"}" } }, required: ["id", "bindings"] } } } },
 ];
 
 function runTool(name, input, ctx) {

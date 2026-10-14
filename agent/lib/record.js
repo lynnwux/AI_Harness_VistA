@@ -13,15 +13,20 @@ function normalize(raw) {
   return r;
 }
 
-function loadRecord(file, fallback) {
+// opts.backup (default true): copy an unreadable file aside before falling back; opts.onCorrupt(backupPath) is told.
+// Readers that must not write (the build) pass { backup: false }.
+function loadRecord(file, fallback, opts = {}) {
   let text;
   try { text = fs.readFileSync(file, "utf8"); }
   catch (e) { return normalize(fallback ? fallback() : {}); }
   try { return normalize(JSON.parse(text)); }
   catch (e) {
-    // never silently discard the user's decisions: keep the unreadable file before falling back
-    const bak = file.replace(/\.json$/, "") + ".corrupt-" + new Date().toISOString().replace(/[:.]/g, "-") + ".json";
-    fs.writeFileSync(bak, text);
+    if (opts.backup !== false) {
+      // never silently discard the user's decisions: keep the unreadable file before falling back
+      const bak = file.replace(/\.json$/, "") + ".corrupt-" + new Date().toISOString().replace(/[:.]/g, "-") + ".json";
+      fs.writeFileSync(bak, text);
+      if (opts.onCorrupt) opts.onCorrupt(bak);
+    }
     return normalize(fallback ? fallback() : {});
   }
 }

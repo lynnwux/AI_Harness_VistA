@@ -16,9 +16,9 @@ test("a side effect is built only once its gating question is decided with a non
   assert.equal(R.isBuilt(se("SIDE.WorkOrder"), rec({ oqPolicy: { "OQ.WorkOrderPolicy": "later" } })), false);
 });
 
-test("the mandatory bulletin is always built unless dropped", () => {
+test("the mandatory bulletin is always built — not even a stale Drop or Defer in an older record removes it", () => {
   assert.equal(R.isBuilt(se("SIDE.Bulletin"), rec({ scope: { "SIDE.Bulletin": "Defer" } })), true);
-  assert.equal(R.isBuilt(se("SIDE.Bulletin"), rec({ dec: { "SIDE.Bulletin": "Drop" } })), false);
+  assert.equal(R.isBuilt(se("SIDE.Bulletin"), rec({ dec: { "SIDE.Bulletin": "Drop" } })), true);
 });
 
 test("target keys follow the graph's targetKind, or the external set when the disposition is Integration", () => {

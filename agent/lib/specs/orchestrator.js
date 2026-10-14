@@ -36,12 +36,22 @@ function templateNotes(se, graph, record) {
 function buildOrchestratorSpec(graph, record, implemented) {
   const c = cap(graph), oqs = c.openQuestions || [];
   const missing = [], needs = [], rules = [];
+  const contract = new Set(requestContract(graph, record).map(f => f.field));
   for (const q of oqs) {
     if (isBlocking(record, q.id)) { missing.push({ id: q.id, kind: "decide", what: `decide: ${q.decisionPoint}` }); continue; }
     const mode = record.dec[q.id];
     if (mode === "Defer") continue;
-    rules.push({ id: q.id, decisionPoint: q.decisionPoint, mode, policy: record.oqPolicy[q.id], bindings: record.ruleBindings[q.id] === undefined ? null : record.ruleBindings[q.id] });
-    if (record.ruleBindings[q.id] === undefined) missing.push({ id: q.id, kind: "binding", what: `bind the data words in the policy for "${q.decisionPoint}" to fields of the API request contract` });
+    const bindings = record.ruleBindings[q.id] === undefined ? null : record.ruleBindings[q.id];
+    // a rule whose side effects are all out of this build (e.g. deferred by build scope) asks for nothing now
+    const gated = (c.sideEffects || []).filter(s => s.openQuestion === q.id);
+    const idle = gated.length > 0 && !gated.some(s => isBuilt(s, record));
+    rules.push({ id: q.id, decisionPoint: q.decisionPoint, mode, policy: record.oqPolicy[q.id], bindings, idle });
+    if (idle) continue;
+    if (bindings === null) missing.push({ id: q.id, kind: "binding", what: `bind the data words in the policy for "${q.decisionPoint}" to fields of the API request contract` });
+    // a binding to a field the API contract no longer carries is data the orchestrator will not receive
+    for (const [word, f] of Object.entries(bindings || {})) {
+      if (!contract.has(String(f))) needs.push({ for: q.id, service: "field:" + f, what: `"${word}" in the policy for "${q.decisionPoint}" is bound to fld ${f}, which the API request contract no longer carries`, from: "api", met: false });
+    }
     if (mode === "Required input") {
       const service = "prompt:" + q.id;
       needs.push({ for: q.id, service, what: `operator prompt on the front end: "${q.promptText}"`, from: "api", met: has(implemented, service) });
@@ -60,6 +70,7 @@ function buildOrchestratorSpec(graph, record, implemented) {
       deferred.push({ ...entry, stub: true, reason: q && record.dec[q] === "Defer" ? record.oqPolicy[q] : "deferred to a later phase" });
       continue;
     }
+    if (isMandatory(se) && record.dec[se.id] === "Drop") missing.push({ id: se.id, kind: "decide", what: `decide how ${se.name} is implemented — it is mandatory, so the Drop in the record cannot apply` });
     if (!se.targetKind && record.dec[se.id] !== "Integration") missing.push({ id: se.id, kind: "evidence", what: `${se.name}: legacy evidence not yet recorded in the graph` });
     for (const key of requiredTargetKeys(se, record)) {
       if (!String(entry.target[key] || "").trim()) missing.push({ id: se.id, kind: "target", key, what: `${se.name}: ${describeKey(se, record, key)}` });
@@ -99,7 +110,8 @@ function renderOrchestrator(graph, record, spec) {
   L.push("### From resolved open questions");
   if (!d.rules.length) L.push("- none");
   d.rules.forEach(r => {
-    const b = r.bindings === null ? "▢ field bindings"
+    const b = r.idle && r.bindings === null ? "its side effect is not built in this phase — no bindings needed now"
+      : r.bindings === null ? "▢ field bindings"
       : Object.keys(r.bindings).length ? "fields: " + Object.entries(r.bindings).map(([w, f]) => `${w} → fld ${f} ${fieldName(f)}`).join("; ")
       : "fields: none (the policy uses no data)";
     L.push(`- **${r.decisionPoint}** — ${r.mode}: "${r.policy}" · ${b}`);
