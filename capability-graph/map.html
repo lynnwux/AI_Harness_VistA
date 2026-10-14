@@ -1,0 +1,2335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Layer Map — Legacy ↔ Target</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#141b24; --panel2:#1b2430; --edge:#26303d;
+    --ink:#e6edf3; --dim:#8b98a5; --faint:#5b6672;
+    --accent:#3d9cf5; --accent2:#7ee787; --warn:#f0a020; --question:#ff6b5e; --purple:#bc8cff;
+    --aih:#bc8cff; --rest:#3d9cf5; --prod:#7ee787; --fm:#f0a020;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px;overflow:hidden}
+  header{display:flex;align-items:center;gap:14px;height:50px;padding:0 16px;
+    background:linear-gradient(180deg,#182029,#10161d);border-bottom:1px solid var(--edge)}
+  header .logo{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,#3d9cf5,#1f6feb);
+    display:grid;place-items:center;font-weight:800;color:#fff;font-size:12px}
+  header h1{font-size:14px;margin:0;font-weight:650}
+  header .sub{color:var(--dim);font-size:11.5px}
+  header .sp{flex:1}
+  header .hint{font-size:11px;color:var(--faint)}
+
+  .stage{display:grid;grid-template-columns:340px 1fr;height:calc(100% - 50px)}
+  .col{min-height:0;overflow-y:auto;padding:14px 16px 50px}
+  .col.left{border-right:1px solid var(--edge)}
+  .col-title{font-size:11px;letter-spacing:1.3px;text-transform:uppercase;color:var(--faint);font-weight:700;margin:0 0 10px}
+
+  /* legacy left */
+  .grp{margin-bottom:12px}
+  .grp-h{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);font-weight:700;margin:8px 0 5px}
+  .lrow{background:var(--panel);border:1px solid var(--edge);border-radius:7px;padding:6px 9px;margin-bottom:5px;cursor:pointer;transition:.12s}
+  .lrow:hover{border-color:var(--accent)}
+  .lrow .l{font-size:12px;font-weight:600}
+  .lrow .s{font-size:10px;color:var(--dim);font-family:var(--mono);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lrow.oq{border-left:3px solid var(--question)}
+
+  /* target layers right */
+  .layer{border:1px solid var(--edge);border-radius:10px;margin-bottom:8px;overflow:hidden;background:#10161d}
+  .layer-h{display:flex;align-items:baseline;gap:10px;padding:7px 12px;border-bottom:1px solid var(--edge);background:#131b24}
+  .layer-h .nm{font-size:12px;font-weight:800;letter-spacing:.6px}
+  .layer-h .tag{font-size:10px;color:var(--faint)}
+  .layer-h .orch{margin-left:auto;font-size:9px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;
+    border:1px solid var(--edge);border-radius:10px;padding:1px 8px;color:var(--accent2)}
+  .layer.aih .nm{color:var(--aih)} .layer.rest .nm{color:var(--rest)}
+  .layer.prod .nm{color:var(--prod)} .layer.fm .nm{color:var(--fm)}
+  .layer.aih .orch{color:var(--aih);border-color:var(--aih)}
+  .layer.prod .orch{color:var(--prod);border-color:var(--prod)}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;padding:10px 12px}
+  .chip{border:1px solid var(--edge);border-radius:8px;padding:6px 10px;background:var(--panel);cursor:pointer;
+    transition:.12s;position:relative;max-width:260px}
+  .chip .cl{font-size:11.5px;font-weight:600;font-family:var(--mono)}
+  .chip .cs{font-size:10px;color:var(--dim);margin-top:1px}
+  .chip:hover{border-color:var(--accent)}
+  .chip .oqb{position:absolute;top:-7px;right:-7px;background:var(--question);color:#1a0d0b;font-size:8px;font-weight:800;
+    border-radius:9px;padding:1px 5px;letter-spacing:.3px}
+  .conn{text-align:center;color:var(--faint);font-size:10px;margin:-2px 0 6px;letter-spacing:.5px}
+
+  /* highlight states */
+  .dim{opacity:.22;filter:saturate(.4)}
+  .hi{border-color:var(--accent2) !important;box-shadow:0 0 0 1px var(--accent2)}
+  .lrow.hi{border-color:var(--accent2) !important;box-shadow:0 0 0 1px var(--accent2)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">SE</div>
+  <div><h1>Layer Map — Legacy ↔ Target</h1><div class="sub" id="hdrSub">—</div></div>
+  <div class="sp"></div>
+  <div class="hint">hover a legacy element or a target chip — the mapping highlights both ways</div>
+</header>
+
+<div class="stage">
+  <div class="col left">
+    <div class="col-title">Legacy capability</div>
+    <div id="legacy"></div>
+  </div>
+  <div class="col right">
+    <div class="col-title">Target — layered stack (top → bottom)</div>
+    <div id="layers"></div>
+  </div>
+</div>
+
+<script>
+const EMBED = {
+  "graphVersion": "0.1",
+  "generatedBy": "VistA Service Enablement Workbench",
+  "sandbox": {
+    "node": "isc-vademo",
+    "instance": "IRISHEALTH",
+    "namespace": "VISTA-DIEGO",
+    "host": "VADEMO sandbox (set VADEMO_URL)"
+  },
+  "workflow": {
+    "id": "WF.EquipmentMgmt.NewInventoryEntry",
+    "name": "New Inventory Entry",
+    "package": "Engineering (AEMS-MERS)",
+    "menuPath": [
+      "EVE",
+      "Core Applications",
+      "EN — Engineering Main Menu",
+      "EQ — Equipment Management",
+      "1 — New Inventory Entry"
+    ],
+    "meta": {
+      "provenance": "observed",
+      "confidence": 1,
+      "evidence": [
+        "navigation screenshots (VADEMO roll-and-scroll, 2026-09-17)"
+      ],
+      "workflows": [
+        "WF.EquipmentMgmt.NewInventoryEntry"
+      ],
+      "conditions": []
+    }
+  },
+  "interactions": [
+    {
+      "id": "IX.SelectOption",
+      "name": "Select option 1 — New Inventory Entry",
+      "exercises": [
+        "CAP.CreateEquipment"
+      ],
+      "meta": {
+        "provenance": "verified",
+        "confidence": 0.99,
+        "evidence": [
+          "screenshot: 'Select Equipment Management ... Option: 1'",
+          "VISTA.OPTION19 IEN 307 (Atelier SQL)"
+        ],
+        "workflows": [
+          "WF.EquipmentMgmt.NewInventoryEntry"
+        ],
+        "conditions": []
+      }
+    },
+    {
+      "id": "IX.EnterSerial",
+      "name": "Enter SERIAL # (10001)",
+      "exercises": [
+        "CAP.CreateEquipment"
+      ],
+      "meta": {
+        "provenance": "observed",
+        "confidence": 0.95,
+        "evidence": [
+          "screenshot: 'SERIAL #: 10001'",
+          "ENEQ1 ASKSER (routine source)"
+        ],
+        "workflows": [
+          "WF.EquipmentMgmt.NewInventoryEntry"
+        ],
+        "conditions": []
+      }
+    },
+    {
+      "id": "IX.ScreenManEdit",
+      "name": "Edit ScreenMan form (screens 1–3 of 3)",
+      "exercises": [
+        "CAP.CreateEquipment"
+      ],
+      "meta": {
+        "provenance": "observed",
+        "confidence": 0.95,
+        "evidence": [
+          "screenshots: Equipment Inventory screens 1/2/3 of 3",
+          "ENEQ1 ADDEQ → EN^ENJ (routine source)"
+        ],
+        "workflows": [
+          "WF.EquipmentMgmt.NewInventoryEntry"
+        ],
+        "conditions": []
+      }
+    },
+    {
+      "id": "IX.DeclineInspectionWO",
+      "name": "Answer 'Create an Incoming Inspection Work Order?' = NO",
+      "exercises": [
+        "CAP.CreateEquipment"
+      ],
+      "meta": {
+        "provenance": "verified",
+        "confidence": 0.97,
+        "evidence": [
+          "screenshot: prompt answered NO",
+          "live 6914,455: no linked 6920 work order"
+        ],
+        "workflows": [
+          "WF.EquipmentMgmt.NewInventoryEntry"
+        ],
+        "conditions": [
+          "^ENG(6910.2 'ASK INCOMING INSPECTION W.O.' enabled"
+        ]
+      }
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "CAP.CreateEquipment",
+      "name": "Create Equipment Record",
+      "summary": "Allocate a new equipment inventory record in file 6914, file the serial, drive the ScreenMan edit, then evaluate side-effect gates.",
+      "meta": {
+        "provenance": "verified",
+        "confidence": 0.97,
+        "evidence": [
+          "ENEQ1 EQAD/ADDEQ/ENR (routine source)",
+          "live record ^ENG(6914,455) created (Atelier SQL)"
+        ],
+        "workflows": [
+          "WF.EquipmentMgmt.NewInventoryEntry"
+        ],
+        "conditions": []
+      },
+      "entryPoint": {
+        "id": "OPT.ENINVNEW",
+        "type": "OPTION",
+        "name": "ENINVNEW — New Inventory Entry",
+        "optionFile": 19,
+        "ien": 307,
+        "optionType": "R (run routine)",
+        "dispatch": "EQAD^ENEQ1",
+        "meta": {
+          "provenance": "verified",
+          "confidence": 0.99,
+          "evidence": [
+            "SELECT NAME,TYPE,ROUTINE FROM VISTA.OPTION19 WHERE MENU_TEXT='New Inventory Entry' → ENINVNEW / R / EQAD^ENEQ1 (Atelier SQL)"
+          ],
+          "workflows": [
+            "WF.EquipmentMgmt.NewInventoryEntry"
+          ],
+          "conditions": []
+        }
+      },
+      "routines": [
+        {
+          "id": "RTN.EQAD",
+          "entryPoint": "EQAD^ENEQ1",
+          "role": "New Inventory Entry point; loops add-item",
+          "calls": [
+            "ZIS^ENUTL",
+            "ASKEDM^ENEQ1",
+            "ASKSER^ENEQ1",
+            "ADDEQ^ENEQ1"
+          ],
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.95,
+            "evidence": [
+              "ENEQ1.int EQAD (GET /doc)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "RTN.ASKSER",
+          "entryPoint": "ASKSER^ENEQ1",
+          "role": "Prompt serial; duplicate-check via FC cross-reference",
+          "calls": [
+            "^DIR",
+            "$UP^XLFSTR",
+            "$GET1^DIQ"
+          ],
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.95,
+            "evidence": [
+              "ENEQ1.int ASKSER: $O(^ENG(6914,\"FC\",ENX,ENI))"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "RTN.ADDEQ",
+          "entryPoint": "ADDEQ^ENEQ1",
+          "role": "Create record, file serial, drive edit, fire side-effect gates",
+          "calls": [
+            "ENR^ENEQ1",
+            "^DIE",
+            "EN^ENJ",
+            "XNPMSE^ENEQPMP",
+            "IIWO^ENWONEW3",
+            "^ENFAACQ",
+            "BULL^ENEQ3"
+          ],
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.95,
+            "evidence": [
+              "ENEQ1.int ADDEQ (GET /doc)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "RTN.ENR",
+          "entryPoint": "ENR^ENEQ1",
+          "role": "Allocate next IEN and create the record",
+          "calls": [
+            "FILE^DICN"
+          ],
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.97,
+            "evidence": [
+              "ENEQ1.int ENR: LOCK ^ENG(6914,0); DINUM=$P(^ENG(6914,0),\"^\",3)+1; FILE^DICN",
+              "live: record 455 exists"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        }
+      ],
+      "data": [
+        {
+          "id": "DATA.6914",
+          "kind": "file",
+          "file": 6914,
+          "global": "^ENG(6914,*)",
+          "access": "create",
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.98,
+            "evidence": [
+              "ENR: FILE^DICN DIC=\"^ENG(6914,\"",
+              "live: SELECT COUNT(*) FROM VISTA.EQUIPMENT_INV_6914 = 289; row 455 present"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DATA.6914.counter",
+          "kind": "global",
+          "global": "^ENG(6914,0)",
+          "piece": 3,
+          "access": "read/write",
+          "note": "next-IEN counter: $P(^ENG(6914,0),\"^\",3)+1",
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.97,
+            "evidence": [
+              "ENEQ1 ENR",
+              "live NextIEN read via Harness probe (now removed)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.entryNumber",
+          "kind": "field",
+          "file": 6914,
+          "field": ".01",
+          "name": "ENTRY NUMBER",
+          "node": 0,
+          "piece": 1,
+          "access": "create",
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.98,
+            "evidence": [
+              "DD storage map",
+              "live 6914,455 ENTRY_NUMBER=455"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.serial",
+          "kind": "field",
+          "file": 6914,
+          "field": "5",
+          "name": "SERIAL",
+          "node": 1,
+          "piece": 3,
+          "access": "write",
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.97,
+            "evidence": [
+              "ENEQ1 ADDEQ: DIE=\"^ENG(6914,\" DR=\"5////\"_ENSERIAL",
+              "live 6914,455 SERIAL_=10001"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.serialC",
+          "kind": "field",
+          "file": 6914,
+          "field": "5.1",
+          "name": "SERIAL_C (canonical)",
+          "node": 1,
+          "piece": 6,
+          "access": "write",
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.9,
+            "evidence": [
+              "DD storage map",
+              "live 6914,455 SERIAL_C='10001 '"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.enteredBy",
+          "kind": "field",
+          "file": 6914,
+          "field": ".5",
+          "name": "ENTERED BY",
+          "node": 0,
+          "piece": 6,
+          "access": "create",
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.95,
+            "evidence": [
+              "live 6914,455 ENTERED_BY=1 (BLACK,JOHN)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.dateEntered",
+          "kind": "field",
+          "file": 6914,
+          "field": ".6",
+          "name": "DATE ENTERED",
+          "node": 0,
+          "piece": 7,
+          "access": "create",
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.95,
+            "evidence": [
+              "live 6914,455 DATE_ENTERED=3260917 (2026-09-17)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "XREF.B",
+          "kind": "crossReference",
+          "index": "B",
+          "global": "^ENG(6914,\"B\",ENTRY_NUMBER,IEN)",
+          "field": ".01",
+          "access": "create",
+          "purpose": "primary lookup by entry number (IEN)",
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.97,
+            "evidence": [
+              "DD storage map",
+              "record 455 lookupable by IEN"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "XREF.F",
+          "kind": "crossReference",
+          "index": "F",
+          "global": "^ENG(6914,\"F\",SERIAL,IEN)",
+          "field": "5",
+          "access": "create",
+          "purpose": "exact serial lookup",
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.9,
+            "evidence": [
+              "DD storage map (F=SERIAL_)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "XREF.FC",
+          "kind": "crossReference",
+          "index": "FC",
+          "global": "^ENG(6914,\"FC\",<canonical serial>,IEN)",
+          "field": "5.1",
+          "access": "create",
+          "purpose": "duplicate-serial detection; key = UP^XLFSTR(serial) with punctuation stripped, 30 chars. THIS is the index ASKSER walks — a modern FindBySerial must replicate the normalization.",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.92,
+            "evidence": [
+              "ENEQ1 ASKSER: ENX=$UP^XLFSTR($TR(ENSERIAL,...)) ; $O(^ENG(6914,\"FC\",ENX,ENI))"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "XREF.others",
+          "kind": "crossReference",
+          "indexes": {
+            "D": "LOCATION (fld 24 →6928)",
+            "C": "VA PM NUMBER (fld 25)",
+            "L": "LOCAL IDENTIFIER (fld 26)",
+            "K": "MANUFACTURER (fld 1 →6912)",
+            "G": "EQUIPMENT CATEGORY (fld 6 →6911)",
+            "E": "MODEL (fld 4)",
+            "EC": "MODELC (fld 4.1)",
+            "H": "MFGR/EQUIPMENT NAME (fld 3)",
+            "J": "CATEGORY STOCK NUMBER (fld 18 →6917)",
+            "M": "PURCHASE ORDER (fld 11)",
+            "I": "NXRN (fld 17)"
+          },
+          "secondary": [
+            "AC",
+            "AD",
+            "AE",
+            "AJ",
+            "AK",
+            "AL",
+            "ANSP",
+            "AO",
+            "AR"
+          ],
+          "access": "create",
+          "purpose": "lookup indexes; each is a candidate query filter and a write-side effect FILE^DICN/^DIE maintain automatically. Blank in this run, but latent.",
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD storage map (VISTA.EQUIPMENTINV6914 index maps)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": [
+              "field populated"
+            ]
+          }
+        },
+        {
+          "id": "FLD.manufacturer",
+          "kind": "field",
+          "file": 6914,
+          "field": "1",
+          "name": "MANUFACTURER",
+          "sqlField": "MANUFACTURER",
+          "access": "write",
+          "pointsTo": "6912 MANUFACTURER LIST FILE",
+          "screen": 1,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 1 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 5175 in VISTA.MANUFACTURER_LIST_FILE6912 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "MANUFACTURER_LIST_FILE6912",
+          "lookupCount": 5175
+        },
+        {
+          "id": "FLD.mfgrEquipmentName",
+          "kind": "field",
+          "file": 6914,
+          "field": "3",
+          "name": "MFGR. EQUIPMENT NAME",
+          "sqlField": "MFGR__EQUIPMENT_NAME",
+          "access": "write",
+          "screen": 1,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 3 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.model",
+          "kind": "field",
+          "file": 6914,
+          "field": "4",
+          "name": "MODEL",
+          "sqlField": "MODEL",
+          "access": "write",
+          "screen": 1,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 4 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.equipmentCategory",
+          "kind": "field",
+          "file": 6914,
+          "field": "6",
+          "name": "EQUIPMENT CATEGORY",
+          "sqlField": "EQUIPMENT_CATEGORY",
+          "access": "write",
+          "pointsTo": "6911 EQUIPMENT CATEGORY",
+          "screen": 1,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 6 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 600 in VISTA.EQUIPMENT_CATEGORY6911 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "EQUIPMENT_CATEGORY6911",
+          "lookupCount": 600
+        },
+        {
+          "id": "FLD.typeOfEntry",
+          "kind": "field",
+          "file": 6914,
+          "field": "7",
+          "name": "TYPE OF ENTRY",
+          "sqlField": "TYPE_OF_ENTRY",
+          "access": "write",
+          "enumValues": "NX=NON-EXPENDABLE EQPT; BSE=BUILDING SERVICE EQPT; EXP=EXPENDABLE EQPT",
+          "screen": 1,
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.95,
+            "evidence": [
+              "DD: FileMan Field Number 7 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "DD VALUELIST/DISPLAYLIST of VISTA.EQUIPMENTINV6914 (Atelier, 2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.acquisitionMethod",
+          "kind": "field",
+          "file": 6914,
+          "field": "20.1",
+          "name": "ACQUISITION METHOD",
+          "sqlField": "ACQUISITION_METHOD",
+          "access": "write",
+          "enumValues": "C=CONSTRUCTED; G=GIFT/BEQUEST/DONATION; L=LEASED; M=CAPITAL LEASE; O=OTHER; P=PURCHASED; R=TRANSFERRED; T=TRADED; X=EXCESS; 1=ON LOAN TO VAMC",
+          "screen": 1,
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.95,
+            "evidence": [
+              "DD: FileMan Field Number 20.1 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "DD VALUELIST/DISPLAYLIST of VISTA.EQUIPMENTINV6914 (Atelier, 2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.acquisitionDate",
+          "kind": "field",
+          "file": 6914,
+          "field": "13",
+          "name": "ACQUISITION DATE",
+          "sqlField": "ACQUISITION_DATE",
+          "access": "write",
+          "type": "FilemanDate",
+          "screen": 1,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 13 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.vendorPointer",
+          "kind": "field",
+          "file": 6914,
+          "field": "10",
+          "name": "VENDOR POINTER",
+          "sqlField": "VENDOR_POINTER",
+          "access": "write",
+          "pointsTo": "440 VENDOR",
+          "screen": 1,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 10 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 2627 in VISTA.VENDOR440 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "VENDOR440",
+          "lookupCount": 2627
+        },
+        {
+          "id": "FLD.originalAssetValue",
+          "kind": "field",
+          "file": 6914,
+          "field": "31.5",
+          "name": "ORIGINAL ASSET VALUE",
+          "sqlField": "ORIGINAL_ASSET_VALUE",
+          "access": "write",
+          "type": "Numeric",
+          "screen": 1,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 31.5 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.warrantyExpDate",
+          "kind": "field",
+          "file": 6914,
+          "field": "14",
+          "name": "WARRANTY EXP. DATE",
+          "sqlField": "WARRANTY_EXP__DATE",
+          "access": "write",
+          "type": "FilemanDate",
+          "screen": 1,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 14 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.replacingEntryNumber",
+          "kind": "field",
+          "file": 6914,
+          "field": "51",
+          "name": "REPLACING (ENTRY NUMBER)",
+          "sqlField": "REPLACING_ENTRY_NUMBER",
+          "access": "write",
+          "pointsTo": "6914 self-reference",
+          "screen": 1,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 51 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 289 in VISTA.EQUIPMENT_INV_6914 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "EQUIPMENT_INV_6914",
+          "lookupCount": 289
+        },
+        {
+          "id": "FLD.categoryStockNumber",
+          "kind": "field",
+          "file": 6914,
+          "field": "18",
+          "name": "CATEGORY STOCK NUMBER",
+          "sqlField": "CATEGORY_STOCK_NUMBER",
+          "access": "write",
+          "pointsTo": "6917 CATEGORY STOCK NUMBER",
+          "screen": 1,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 18 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 4013 in VISTA.CATEGORY_STOCK_NUMBER6917 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "CATEGORY_STOCK_NUMBER6917",
+          "lookupCount": 4013
+        },
+        {
+          "id": "FLD.servicePointer",
+          "kind": "field",
+          "file": 6914,
+          "field": "21",
+          "name": "SERVICE POINTER",
+          "sqlField": "SERVICE_POINTER",
+          "access": "write",
+          "pointsTo": "49 SERVICE/SECTION",
+          "screen": 2,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 21 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 54 in VISTA.SERVICESECTION49 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "SERVICESECTION49",
+          "lookupCount": 54,
+          "options": [
+            {
+              "value": "1046",
+              "label": "ACCOUNTS RECEIVABLE"
+            },
+            {
+              "value": "1000",
+              "label": "AMBULATORY CARE"
+            },
+            {
+              "value": "1001",
+              "label": "ANESTHESIOLOGY"
+            },
+            {
+              "value": "1002",
+              "label": "AUDIOLOGY AND SPEECH PATHOLOGY"
+            },
+            {
+              "value": "11",
+              "label": "BLIND REHAB"
+            },
+            {
+              "value": "1003",
+              "label": "BLIND REHABILITATION"
+            },
+            {
+              "value": "1004",
+              "label": "BUILDING MANAGEMENT"
+            },
+            {
+              "value": "1005",
+              "label": "CANTEEN"
+            },
+            {
+              "value": "1006",
+              "label": "CENTRAL DENTAL LABORATORY"
+            },
+            {
+              "value": "1007",
+              "label": "CHAPLAIN"
+            },
+            {
+              "value": "1008",
+              "label": "DENTAL"
+            },
+            {
+              "value": "1009",
+              "label": "DIETETICS"
+            },
+            {
+              "value": "16",
+              "label": "DOMICILIARY"
+            },
+            {
+              "value": "1011",
+              "label": "ENGINEERING"
+            },
+            {
+              "value": "1012",
+              "label": "EXTENDED CARE"
+            },
+            {
+              "value": "1013",
+              "label": "FISCAL"
+            },
+            {
+              "value": "1014",
+              "label": "INFORMATION RESOURCE MGMT"
+            },
+            {
+              "value": "1043",
+              "label": "INFORMATION SYSTEMS CENTER"
+            },
+            {
+              "value": "6",
+              "label": "INTERMEDIATE MEDICINE"
+            },
+            {
+              "value": "1016",
+              "label": "LABORATORY"
+            },
+            {
+              "value": "1017",
+              "label": "LIBRARY"
+            },
+            {
+              "value": "1018",
+              "label": "MEDICAL"
+            },
+            {
+              "value": "1019",
+              "label": "MEDICAL ADMINISTRATION"
+            },
+            {
+              "value": "1020",
+              "label": "MEDICAL DISTRICT"
+            },
+            {
+              "value": "1021",
+              "label": "MEDICAL MEDIA PRODUCTION"
+            },
+            {
+              "value": "2",
+              "label": "MEDICINE"
+            },
+            {
+              "value": "9",
+              "label": "NEUROLOGY"
+            },
+            {
+              "value": "14",
+              "label": "NHCU"
+            },
+            {
+              "value": "1047",
+              "label": "NHCU"
+            },
+            {
+              "value": "1023",
+              "label": "NUCLEAR MEDICINE"
+            },
+            {
+              "value": "1024",
+              "label": "NURSING"
+            },
+            {
+              "value": "1025",
+              "label": "NURSING HOME"
+            },
+            {
+              "value": "1026",
+              "label": "OFFICE OF THE DIRECTOR"
+            },
+            {
+              "value": "1027",
+              "label": "OUTREACH"
+            },
+            {
+              "value": "1044",
+              "label": "PERSONAL PROPERTY MANAGEMENT"
+            },
+            {
+              "value": "1028",
+              "label": "PERSONNEL"
+            },
+            {
+              "value": "1048",
+              "label": "PHARMACY"
+            },
+            {
+              "value": "1030",
+              "label": "PROSTHETICS AND SENSORY AIDS"
+            },
+            {
+              "value": "13",
+              "label": "PSYCHIATRY"
+            },
+            {
+              "value": "1032",
+              "label": "PSYCHOLOGY"
+            },
+            {
+              "value": "1045",
+              "label": "PURCHASING & CONTRACTING"
+            },
+            {
+              "value": "1033",
+              "label": "RADIOLOGY"
+            },
+            {
+              "value": "1034",
+              "label": "RECREATION"
+            },
+            {
+              "value": "10",
+              "label": "REHAB MEDICINE"
+            },
+            {
+              "value": "1035",
+              "label": "REHABILITATION MEDICINE"
+            },
+            {
+              "value": "1036",
+              "label": "RESEARCH"
+            },
+            {
+              "value": "15",
+              "label": "RESPITE CARE"
+            },
+            {
+              "value": "1037",
+              "label": "SECURITY"
+            },
+            {
+              "value": "1038",
+              "label": "SOCIAL WORK"
+            },
+            {
+              "value": "12",
+              "label": "SPINAL CORD INJURY"
+            },
+            {
+              "value": "1040",
+              "label": "SUPPLY"
+            },
+            {
+              "value": "3",
+              "label": "SURGERY"
+            },
+            {
+              "value": "1041",
+              "label": "SURGICAL"
+            },
+            {
+              "value": "1042",
+              "label": "VOLUNTARY"
+            }
+          ]
+        },
+        {
+          "id": "FLD.useStatus",
+          "kind": "field",
+          "file": 6914,
+          "field": "20",
+          "name": "USE STATUS",
+          "sqlField": "USE_STATUS",
+          "access": "write",
+          "enumValues": "1=IN USE; 2=OUT OF SERVICE; 3=LOANED OUT; 4=TURNED IN; 5=LOST OR STOLEN",
+          "screen": 2,
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.95,
+            "evidence": [
+              "DD: FileMan Field Number 20 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "DD VALUELIST/DISPLAYLIST of VISTA.EQUIPMENTINV6914 (Atelier, 2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.parentSystem",
+          "kind": "field",
+          "file": 6914,
+          "field": "2",
+          "name": "PARENT SYSTEM",
+          "sqlField": "PARENT_SYSTEM",
+          "access": "write",
+          "pointsTo": "6914 self-reference",
+          "screen": 2,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 2 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 289 in VISTA.EQUIPMENT_INV_6914 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "EQUIPMENT_INV_6914",
+          "lookupCount": 289
+        },
+        {
+          "id": "FLD.location",
+          "kind": "field",
+          "file": 6914,
+          "field": "24",
+          "name": "LOCATION",
+          "sqlField": "LOCATION",
+          "access": "write",
+          "pointsTo": "6928 ENG SPACE",
+          "screen": 2,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 24 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 234 in VISTA.ENG_SPACE6928 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "ENG_SPACE6928",
+          "lookupCount": 234
+        },
+        {
+          "id": "FLD.lockoutRequired",
+          "kind": "field",
+          "file": 6914,
+          "field": "9",
+          "name": "LOCKOUT REQUIRED?",
+          "sqlField": "LOCKOUT_REQUIRED",
+          "access": "write",
+          "enumValues": "YES; NO",
+          "screen": 2,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 9 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.conditionCode",
+          "kind": "field",
+          "file": 6914,
+          "field": "53",
+          "name": "CONDITION CODE",
+          "sqlField": "CONDITION_CODE",
+          "access": "write",
+          "enumValues": "1=LIKE NEW; 2=GOOD; 3=POOR",
+          "screen": 2,
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.95,
+            "evidence": [
+              "DD: FileMan Field Number 53 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "DD VALUELIST/DISPLAYLIST of VISTA.EQUIPMENTINV6914 (Atelier, 2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.stationNumber",
+          "kind": "field",
+          "file": 6914,
+          "field": "60",
+          "name": "STATION NUMBER",
+          "sqlField": "STATION_NUMBER",
+          "access": "write",
+          "type": "String(3-5)",
+          "screen": 2,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 60 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.vaPmNumber",
+          "kind": "field",
+          "file": 6914,
+          "field": "25",
+          "name": "VA PM NUMBER",
+          "sqlField": "VA_PM_NUMBER",
+          "access": "write",
+          "type": "String(9-10)",
+          "screen": 2,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 25 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.serviceContract",
+          "kind": "field",
+          "file": 6914,
+          "field": "19.5",
+          "name": "SERVICE CONTRACT",
+          "sqlField": "SERVICE_CONTRACT",
+          "access": "write",
+          "enumValues": "YES; NO",
+          "screen": 2,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 19.5 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.serviceContractCost",
+          "kind": "field",
+          "file": 6914,
+          "field": "19.6",
+          "name": "SERVICE CONTRACT COST",
+          "sqlField": "SERVICE_CONTRACT_COST",
+          "access": "write",
+          "type": "Numeric",
+          "condition": "shown only when SERVICE CONTRACT=YES",
+          "screen": 2,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 19.6 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.localIdentifier",
+          "kind": "field",
+          "file": 6914,
+          "field": "26",
+          "name": "LOCAL IDENTIFIER",
+          "sqlField": "LOCAL_IDENTIFIER",
+          "access": "write",
+          "type": "String(3-15)",
+          "screen": 2,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 26 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.physicalInventoryDate",
+          "kind": "field",
+          "file": 6914,
+          "field": "23",
+          "name": "PHYSICAL INVENTORY DATE",
+          "sqlField": "PHYSICAL_INVENTORY_DATE",
+          "access": "write",
+          "type": "FilemanDate",
+          "screen": 2,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 23 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.jcaho",
+          "kind": "field",
+          "file": 6914,
+          "field": "27",
+          "name": "JCAHO",
+          "sqlField": "JCAHO",
+          "access": "write",
+          "enumValues": "YES; NO",
+          "screen": 2,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 27 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.controlledItem",
+          "kind": "field",
+          "file": 6914,
+          "field": "33",
+          "name": "CONTROLLED ITEM?",
+          "sqlField": "CONTROLLED_ITEM",
+          "access": "write",
+          "enumValues": "YES; NO",
+          "screen": 3,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 33 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.investmentCategory",
+          "kind": "field",
+          "file": 6914,
+          "field": "34",
+          "name": "INVESTMENT CATEGORY",
+          "sqlField": "INVESTMENT_CATEGORY",
+          "access": "write",
+          "enumValues": "1=CAPITALIZED/ACCOUNTABLE; A=NOT CAPITALIZED/ACCOUNTABLE; 0=EXPENSED/OPTIONALLY ACCOUNTABLE",
+          "screen": 3,
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.95,
+            "evidence": [
+              "DD: FileMan Field Number 34 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "gates RULE.FinancialEligibility",
+              "DD VALUELIST/DISPLAYLIST of VISTA.EQUIPMENTINV6914 (Atelier, 2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.fundControlPoint",
+          "kind": "field",
+          "file": 6914,
+          "field": "35",
+          "name": "FUND CONTROL POINT",
+          "sqlField": "FUND_CONTROL_POINT",
+          "access": "write",
+          "type": "String(3-30)",
+          "screen": 3,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 35 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.fund",
+          "kind": "field",
+          "file": 6914,
+          "field": "62",
+          "name": "FUND",
+          "sqlField": "FUND",
+          "access": "write",
+          "pointsTo": "NXFUND (6946)",
+          "screen": 3,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 62 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 22 in VISTA.NX_FUND6914_6 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "NX_FUND6914_6",
+          "lookupCount": 22,
+          "options": [
+            {
+              "value": "4014",
+              "label": "Canteen Service"
+            },
+            {
+              "value": "4018",
+              "label": "Pershing Hall"
+            },
+            {
+              "value": "4048",
+              "label": "Compensated Work Therapy"
+            },
+            {
+              "value": "4538",
+              "label": "Parking Facilities"
+            },
+            {
+              "value": "4539",
+              "label": "Franchise Fund"
+            },
+            {
+              "value": "4537B",
+              "label": "Field Supply Fund"
+            },
+            {
+              "value": "4537B2",
+              "label": "VACO Supply Fund"
+            },
+            {
+              "value": "8129S",
+              "label": "National Cemetery Gift Fund"
+            },
+            {
+              "value": "8180S",
+              "label": "General Post Fund"
+            },
+            {
+              "value": "AMAFGE",
+              "label": "General Operating Expense 0151"
+            },
+            {
+              "value": "AMAFIG",
+              "label": "Inspector General"
+            },
+            {
+              "value": "AMAFIT",
+              "label": "AMAF Info Tech Fund 0167"
+            },
+            {
+              "value": "AMAFMA",
+              "label": "Medical Administrative 0152"
+            },
+            {
+              "value": "AMAFMC",
+              "label": "Medical Care 0160"
+            },
+            {
+              "value": "AMAFMF",
+              "label": "Medical Facilities"
+            },
+            {
+              "value": "AMAFNC",
+              "label": "National Cemetery System 0129"
+            },
+            {
+              "value": "AMAFRE",
+              "label": "Medical Research"
+            }
+          ]
+        },
+        {
+          "id": "FLD.budgetObjectCode",
+          "kind": "field",
+          "file": 6914,
+          "field": "61",
+          "name": "BUDGET OBJECT CODE",
+          "sqlField": "BUDGET_OBJECT_CODE",
+          "access": "write",
+          "pointsTo": "NXBOC (6944)",
+          "screen": 3,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 61 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 15 in VISTA.NX_BOC6914_4 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "NX_BOC6914_4",
+          "lookupCount": 15,
+          "options": [
+            {
+              "value": "2335",
+              "label": "SOFTWARE"
+            },
+            {
+              "value": "3105",
+              "label": "TRUST EQUIPMENT"
+            },
+            {
+              "value": "3110",
+              "label": "TRANSPORTATION EQUIPMENT, PASSENGER VEHICLES"
+            },
+            {
+              "value": "3112",
+              "label": "TRANSPORTATION EQUIP, NONPASSENGER VEHICLES"
+            },
+            {
+              "value": "3120",
+              "label": "NONEXPENDIBLE FURNITURE & FIXTURES"
+            },
+            {
+              "value": "3121",
+              "label": "OFFICE EQUIPMENT"
+            },
+            {
+              "value": "3122",
+              "label": "OFFICE AUTOMATION/WORD PROCESSING, PURCHASED"
+            },
+            {
+              "value": "3123",
+              "label": "ADP EQUIPMENT"
+            },
+            {
+              "value": "3124",
+              "label": "ADP SOFTWARE"
+            },
+            {
+              "value": "3125",
+              "label": "TELECOMMUNICATIONS EQUIPMENT"
+            },
+            {
+              "value": "3130",
+              "label": "MEDICAL, DENTAL & SCIENTIFIC EQUIPMENT"
+            },
+            {
+              "value": "3138",
+              "label": "IT HARDWARE-CAPITALIZED"
+            },
+            {
+              "value": "3150",
+              "label": "UTILITY & OPERATING EQUIPMENT"
+            },
+            {
+              "value": "3160",
+              "label": "EQUIPMENT UNDER CAPITAL LEASE"
+            }
+          ]
+        },
+        {
+          "id": "FLD.standardGeneralLedger",
+          "kind": "field",
+          "file": 6914,
+          "field": "38",
+          "name": "STANDARD GENERAL LEDGER",
+          "sqlField": "STANDARD_GENERAL_LEDGER",
+          "access": "write",
+          "pointsTo": "NXSGL (6943)",
+          "screen": 3,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 38 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 9 in VISTA.NX_SGL6914_3 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "NX_SGL6914_3",
+          "lookupCount": 9,
+          "options": [
+            {
+              "value": "1524",
+              "label": "PROPERTY PENDING DISPOSAL"
+            },
+            {
+              "value": "1750",
+              "label": "NONEXPENDABLE EQUIPMENT"
+            },
+            {
+              "value": "1751",
+              "label": "ADP NONEXPENDABLE PROPERTY"
+            },
+            {
+              "value": "1811",
+              "label": "EQUIPMENT UNDER CAPITAL LEASE"
+            },
+            {
+              "value": "1830",
+              "label": "ADP SOFTWARE"
+            },
+            {
+              "value": "6100",
+              "label": "EXPENSED NX EQUIPMENT (ALL TYPES)"
+            }
+          ]
+        },
+        {
+          "id": "FLD.equityAccount",
+          "kind": "field",
+          "file": 6914,
+          "field": "64",
+          "name": "EQUITY ACCOUNT",
+          "sqlField": "EQUITY_ACCOUNT",
+          "access": "write",
+          "enumValues": "3299=MEDICAL; 3210=NON-MEDICAL; 3402=DONATED",
+          "screen": 3,
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.95,
+            "evidence": [
+              "DD: FileMan Field Number 64 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "DD VALUELIST/DISPLAYLIST of VISTA.EQUIPMENTINV6914 (Atelier, 2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "FLD.subaccount",
+          "kind": "field",
+          "file": 6914,
+          "field": "37",
+          "name": "SUBACCOUNT (A/O)",
+          "sqlField": "SUBACCOUNT",
+          "access": "write",
+          "pointsTo": "4202 BUDGET OBJECT CODE",
+          "screen": 3,
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "DD: FileMan Field Number 37 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)",
+              "VADEMO row count 325 in VISTA.BUDGET_OBJECT_CODE420_2 (2026-09-28)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          },
+          "lookupTable": "BUDGET_OBJECT_CODE420_2",
+          "lookupCount": 325
+        }
+      ],
+      "businessRules": [
+        {
+          "id": "RULE.FinancialEligibility",
+          "name": "FA-document eligibility",
+          "determinacy": "coded",
+          "condition": "TYPE OF ENTRY (fld 7) = NX  AND  capitalized (INVESTMENT CATEGORY, fld 34)  AND  key ENFACS held",
+          "effect": "item becomes eligible for an FA document to Austin (user then confirms — see OQ.FAConfirmation)",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.88,
+            "evidence": [
+              "ENEQ1 ADDEQ: I $D(^XUSEC(\"ENFACS\",DUZ)),$P(^ENG(6914,ENNXL,0),U,4)=\"NX\",$P($G(^(8)),U,2)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": [
+              "TYPE=NX",
+              "capitalized",
+              "key ENFACS"
+            ]
+          }
+        }
+      ],
+      "_note_businessRules": "Only genuinely CODED rules appear here. A prior 'RULE.Inspection (LOCKOUT REQUIRED -> mandatory WO)' was removed: that logic lives in the modern Equipment.Production, NOT in legacy ENEQ1 — the work-order decision is a user choice, now tracked in openQuestions (OQ.WorkOrderPolicy).",
+      "security": [
+        {
+          "id": "SEC.ENEDPM",
+          "kind": "securityKey",
+          "key": "ENEDPM",
+          "global": "^XUSEC(\"ENEDPM\",DUZ)",
+          "gates": "PM-schedule enrollment prompt",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.9,
+            "evidence": [
+              "ENEQ1 ADDEQ: I $D(^XUSEC(\"ENEDPM\",DUZ))"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "SEC.ENFACS",
+          "kind": "securityKey",
+          "key": "ENFACS",
+          "global": "^XUSEC(\"ENFACS\",DUZ)",
+          "gates": "FA-document generation",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.9,
+            "evidence": [
+              "ENEQ1 ADDEQ: I $D(^XUSEC(\"ENFACS\",DUZ))"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        }
+      ],
+      "sideEffects": [
+        {
+          "id": "SIDE.WorkOrder",
+          "name": "Incoming inspection work order",
+          "call": "IIWO^ENWONEW3(IEN)",
+          "writes": {
+            "file": 6920,
+            "global": "^ENG(6920,*)",
+            "access": "create"
+          },
+          "determinacy": "user-decision",
+          "openQuestion": "OQ.WorkOrderPolicy",
+          "candidateCapability": "CAP.CreateInspectionWorkOrder",
+          "firedInThisRun": false,
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.93,
+            "evidence": [
+              "ENEQ1 ADDEQ IIWO^ENWONEW3",
+              "no item-condition gate — outcome is the user's prompt answer",
+              "live 455: not created (answered NO)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": [
+              "prompt gated by ^ENG(6910.2 'ASK INCOMING INSPECTION W.O.'"
+            ]
+          }
+        },
+        {
+          "id": "SIDE.PMSchedule",
+          "name": "PM-schedule enrollment",
+          "call": "XNPMSE^ENEQPMP",
+          "firedInThisRun": false,
+          "determinacy": "user-decision",
+          "openQuestion": "OQ.PMEnrollmentPolicy",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.88,
+            "evidence": [
+              "ENEQ1 ADDEQ XNPMSE^ENEQPMP / DINV^ENEQPMP3; shown only to key ENEDPM holders, then user prompt"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": [
+              "key ENEDPM",
+              "user confirms"
+            ]
+          }
+        },
+        {
+          "id": "SIDE.FinancialAsset",
+          "name": "FA document to Austin",
+          "call": "^ENFAACQ",
+          "firedInThisRun": false,
+          "determinacy": "coded-eligibility + user-confirmed",
+          "openQuestion": "OQ.FAConfirmation",
+          "candidateCapability": "CAP.SendFinancialAssetDocument",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.85,
+            "evidence": [
+              "ENEQ1 ADDEQ ^ENFAACQ; eligibility coded (RULE.FinancialEligibility), send user-confirmed"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": [
+              "RULE.FinancialEligibility"
+            ]
+          }
+        },
+        {
+          "id": "SIDE.Bulletin",
+          "name": "New-equipment MailMan bulletin",
+          "call": "BULL^ENEQ3",
+          "firedInThisRun": true,
+          "determinacy": "coded",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.9,
+            "evidence": [
+              "ENEQ1 ADDEQ: S DA=ENNXL D BULL^ENEQ3 (unconditional)"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        }
+      ],
+      "openQuestions": [
+        {
+          "id": "OQ.WorkOrderPolicy",
+          "decisionPoint": "Whether to create an incoming inspection work order",
+          "promptText": "Create an Incoming Inspection Work Order? YES//",
+          "default": "data-driven — YES if ^ENG(6910.2 piece 2 = 2, otherwise NO",
+          "codedBehavior": "Prompt appears only if ^ENG(6910.2 'ASK INCOMING INSPECTION W.O.' is enabled; if the user answers YES, IIWO^ENWONEW3 creates a 6920 work order.",
+          "whatIsNotCoded": "NO item property decides YES vs NO — the choice is left to the user at runtime. The 'LOCKOUT REQUIRED -> mandatory WO' logic exists in the modern Equipment.Production but is NOT in the legacy ENEQ1; encoding it would be an incorrect assumption.",
+          "candidateInterpretations": [
+            "always for new non-expendable items",
+            "only when the item requires incoming inspection per site policy",
+            "purely discretionary / site-configured default"
+          ],
+          "askSME": true,
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.9,
+            "evidence": [
+              "ENEQ1 ADDEQ inspection-WO block: user's prompt answer drives IIWO^ENWONEW3; no coded item-condition",
+              "gate ^ENG(6910.2 'ASK INCOMING INSPECTION W.O.'"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "OQ.PMEnrollmentPolicy",
+          "decisionPoint": "Whether to enroll the item in the PM program",
+          "promptText": "Would you like to include this item in the PM program YES//",
+          "default": "YES",
+          "codedBehavior": "Prompt shown only to holders of key ENEDPM; if YES, XNPMSE^ENEQPMP (or DINV^ENEQPMP3) enrolls the item.",
+          "whatIsNotCoded": "Which items warrant PM enrollment is a user/policy decision; not derivable from the record.",
+          "candidateInterpretations": [
+            "all serviceable equipment",
+            "by equipment category",
+            "discretionary per biomed engineer"
+          ],
+          "askSME": true,
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.85,
+            "evidence": [
+              "ENEQ1 ADDEQ PM block gated by ^XUSEC('ENEDPM',DUZ) + user prompt"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": [
+              "key ENEDPM"
+            ]
+          }
+        },
+        {
+          "id": "OQ.FAConfirmation",
+          "decisionPoint": "Whether to actually send the FA document once eligible",
+          "promptText": "Do you wish to send an FA document to Austin YES//",
+          "default": "YES",
+          "codedBehavior": "Eligibility is fully coded (RULE.FinancialEligibility: NX + capitalized + key ENFACS). When eligible, the user is still asked to confirm; YES calls ^ENFAACQ.",
+          "whatIsNotCoded": "Whether to suppress the FA document despite eligibility is a human override with no coded criteria.",
+          "candidateInterpretations": [
+            "always send when eligible",
+            "hold for financial review in some cases"
+          ],
+          "askSME": true,
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.85,
+            "evidence": [
+              "ENEQ1 ADDEQ FA block: eligibility coded, final send user-confirmed"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": [
+              "RULE.FinancialEligibility"
+            ]
+          }
+        }
+      ],
+      "dependencies": [
+        {
+          "id": "DEP.ENUTL",
+          "target": "ENUTL",
+          "why": "device/ZIS setup",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.9,
+            "evidence": [
+              "ZIS^ENUTL"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DEP.ENJ",
+          "target": "ENJ",
+          "why": "ScreenMan-style form driver (EN^ENJ, DJSC=ENEQ1)",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.9,
+            "evidence": [
+              "EN^ENJ"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DEP.ENEQ3",
+          "target": "ENEQ3",
+          "why": "bulletin (BULL) and multi-entry (EQMAS)",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.9,
+            "evidence": [
+              "BULL^ENEQ3"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DEP.ENWONEW3",
+          "target": "ENWONEW3",
+          "why": "work-order creation",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.88,
+            "evidence": [
+              "IIWO^ENWONEW3"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": [
+              "RULE.Inspection"
+            ]
+          }
+        },
+        {
+          "id": "DEP.ENEQPMP",
+          "target": "ENEQPMP / ENEQPMP3",
+          "why": "PM schedule",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.85,
+            "evidence": [
+              "XNPMSE^ENEQPMP"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": [
+              "SEC.ENEDPM"
+            ]
+          }
+        },
+        {
+          "id": "DEP.ENFAACQ",
+          "target": "ENFAACQ",
+          "why": "financial asset acquisition doc",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.85,
+            "evidence": [
+              "^ENFAACQ"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": [
+              "RULE.Financial"
+            ]
+          }
+        },
+        {
+          "id": "DEP.FileMan",
+          "target": "DIC / DIE / DIQ / DIR",
+          "why": "FileMan data-access layer — the modernization seam",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.95,
+            "evidence": [
+              "FILE^DICN, ^DIE, $GET1^DIQ, ^DIR in ENEQ1"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DEP.XLFSTR",
+          "target": "XLFSTR",
+          "why": "serial canonicalization ($UP)",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.9,
+            "evidence": [
+              "$UP^XLFSTR in ASKSER"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        }
+      ],
+      "modernizationCandidates": {
+        "note": "AI-inferred targets derived from the graph above; must be verified before implementation.",
+        "rest": [
+          {
+            "endpoint": "POST /equipment",
+            "capability": "CreateEquipment",
+            "from": [
+              "RTN.ENR",
+              "FLD.serial"
+            ]
+          },
+          {
+            "endpoint": "GET /equipment?serial=",
+            "capability": "FindBySerial",
+            "from": [
+              "XREF.FC"
+            ],
+            "caveat": "must apply FC canonicalization"
+          }
+        ],
+        "interopProduction": {
+          "service": "EquipmentEntry.Service.REST",
+          "orchestrator": "EquipmentEntry.Process.Orchestrator",
+          "operationsFromSideEffects": [
+            "SIDE.WorkOrder",
+            "SIDE.PMSchedule",
+            "SIDE.FinancialAsset",
+            "SIDE.Bulletin"
+          ],
+          "rulesFromCodedGates": [
+            "RULE.FinancialEligibility"
+          ],
+          "decisionsRequiringInput": [
+            "OQ.WorkOrderPolicy",
+            "OQ.PMEnrollmentPolicy",
+            "OQ.FAConfirmation"
+          ],
+          "note2": "Only RULE.FinancialEligibility is a coded rule the service can auto-enforce. The three openQuestions must be resolved with an SME and modeled as explicit request parameters or elicited rules — not guessed.",
+          "extendsExisting": "Equipment.Production (adds PMSchedule + FinancialAsset ops)"
+        },
+        "meta": {
+          "provenance": "AI-inferred",
+          "confidence": 0.6,
+          "evidence": [
+            "derived from capability graph + Vista-Engineering Equipment.Production pattern"
+          ],
+          "workflows": [
+            "WF.EquipmentMgmt.NewInventoryEntry"
+          ],
+          "conditions": []
+        }
+      },
+      "formScreens": [
+        {
+          "screen": 1,
+          "title": "Equipment Identity & Acquisition",
+          "fields": [
+            "FLD.entryNumber",
+            "FLD.manufacturer",
+            "FLD.mfgrEquipmentName",
+            "FLD.model",
+            "FLD.serial",
+            "FLD.equipmentCategory",
+            "FLD.categoryStockNumber",
+            "FLD.typeOfEntry",
+            "FLD.acquisitionMethod",
+            "FLD.acquisitionDate",
+            "FLD.vendorPointer",
+            "FLD.originalAssetValue",
+            "FLD.warrantyExpDate",
+            "FLD.replacingEntryNumber"
+          ],
+          "note": "ScreenMan screen 1 of 3; ENTRY NUMBER is display-only (system-allocated)."
+        },
+        {
+          "screen": 2,
+          "title": "Ownership & Location",
+          "fields": [
+            "FLD.servicePointer",
+            "FLD.useStatus",
+            "FLD.parentSystem",
+            "FLD.location",
+            "FLD.lockoutRequired",
+            "FLD.conditionCode",
+            "FLD.stationNumber",
+            "FLD.vaPmNumber",
+            "FLD.serviceContract",
+            "FLD.serviceContractCost",
+            "FLD.localIdentifier",
+            "FLD.physicalInventoryDate",
+            "FLD.jcaho"
+          ],
+          "note": "ScreenMan screen 2 of 3; SERVICE CONTRACT COST conditional on SERVICE CONTRACT=YES."
+        },
+        {
+          "screen": 3,
+          "title": "Financial",
+          "fields": [
+            "FLD.controlledItem",
+            "FLD.investmentCategory",
+            "FLD.fundControlPoint",
+            "FLD.fund",
+            "FLD.budgetObjectCode",
+            "FLD.standardGeneralLedger",
+            "FLD.equityAccount",
+            "FLD.subaccount"
+          ],
+          "note": "ScreenMan screen 3 of 3; INVESTMENT CATEGORY gates RULE.FinancialEligibility."
+        },
+        {
+          "screen": 4,
+          "title": "Confirmation & Side-Effect Prompts",
+          "fields": [],
+          "sideEffectPrompts": [
+            "OQ.WorkOrderPolicy",
+            "OQ.PMEnrollmentPolicy",
+            "OQ.FAConfirmation"
+          ],
+          "note": "Post-save prompts after the record is filed; not a ScreenMan form screen."
+        }
+      ]
+    }
+  ]
+};
+const cap = g => g.capabilities[0];
+const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const TARGET = "RegisterEquipment";
+const clean = s => (s||"").replace(/[^A-Za-z0-9]/g,"");
+
+let G, decisions={};
+function loadDecisions(){ try{ const s=JSON.parse(localStorage.getItem("decide:"+G.workflow.id)||"{}"); if(s.dec) decisions=s.dec; }catch(e){} }
+
+/* ---------- legacy (left) ---------- */
+function legacyGroups(){
+  const c=cap(G);
+  return [
+    {t:"Entry point", items:[{id:c.entryPoint.id,label:c.entryPoint.name,sub:c.entryPoint.dispatch}]},
+    {t:"Routines", items:(c.routines||[]).map(r=>({id:r.id,label:r.entryPoint,sub:r.role}))},
+    {t:"Data", items:(c.data||[]).filter(d=>["file","field","crossReference"].includes(d.kind))
+        .map(d=>({id:d.id,label:d.name||d.global||("xref "+d.index)||d.id,sub:d.field?("fld "+d.field):(d.purpose||d.access||d.global||"")}))},
+    {t:"Rules", items:(c.businessRules||[]).map(r=>({id:r.id,label:r.name,sub:r.condition}))},
+    {t:"Side effects", items:(c.sideEffects||[]).map(s=>({id:s.id,label:s.name,sub:s.call}))},
+    {t:"Security", items:(c.security||[]).map(s=>({id:s.id,label:s.key,sub:s.gates}))},
+    {t:"Open questions", items:(c.openQuestions||[]).map(q=>({id:q.id,label:q.decisionPoint,sub:q.promptText,oq:true}))},
+  ];
+}
+function renderLegacy(){
+  let h="";
+  legacyGroups().forEach(gr=>{ if(!gr.items.length)return;
+    h+=`<div class="grp"><div class="grp-h">${esc(gr.t)}</div>`;
+    gr.items.forEach(it=> h+=`<div class="lrow ${it.oq?'oq':''}" data-lid="${esc(it.id)}"><div class="l">${esc(it.label)}</div><div class="s">${esc(it.sub||"")}</div></div>`);
+    h+=`</div>`;
+  });
+  document.getElementById("legacy").innerHTML=h;
+}
+
+/* ---------- target (right) ---------- */
+let LAYERS=[], chipFrom={}, chipFlow={}, chipRev={};
+function buildTarget(){
+  const c=cap(G), beh=c.sideEffects||[];
+  const disp = b => decisions[b.id] || (b.id==="SIDE.Bulletin"?"Event":"Business Operation");
+  const bos=[{id:"op.save",label:"Op.SaveEquipment",sub:"create 6914 record + file serial",from:["RTN.ENR","DATA.6914","FLD.serial"],flowTo:["rest.post"]}];
+  const events=[]; const inlines=[]; let hasWO=false;
+  beh.forEach(b=>{ const d=disp(b);
+    if(d==="Drop") return;
+    if(d==="Event") events.push({id:"evt."+b.id,label:"Event "+clean(b.name),sub:b.call,from:[b.id],flowTo:[]});
+    else if(d==="Inline") inlines.push(clean(b.name));
+    else { const ch={id:"op."+b.id,label:"Op."+clean(b.name),sub:b.call,from:[b.id],flowTo:[]};
+      if(b.writes){ ch.flowTo=["rest.wo"]; hasWO=true; }
+      if(b.openQuestion){ ch.oq=b.openQuestion; ch.from.push(b.openQuestion); } bos.push(ch); }
+  });
+  const bp={id:"prod.bp",label:"BP Orchestrator",sub:"EquipmentEntry.Process.Orchestrator (BS ingress from AI Hub)"+(inlines.length?(" · inline: "+inlines.join(", ")):""),
+            from:["RTN.ADDEQ",c.entryPoint.id],flowTo:bos.map(b=>b.id).concat(events.map(e=>e.id))};
+  const restChips=[
+    {id:"rest.post",label:"POST /equipment",sub:"create data service (SaveEquipment6914)",from:["RTN.ENR","DATA.6914"],flowTo:["fm.class","fm.fields","fm.xref"]},
+    {id:"rest.get",label:"GET /equipment/{ien}",sub:"lookup by IEN",from:["XREF.B"],flowTo:["fm.xref"]},
+    {id:"rest.serial",label:"GET /equipment?serial=",sub:"dedup lookup (FC canonical)",from:["XREF.FC","RTN.ASKSER"],flowTo:["fm.xref"]},
+  ];
+  if(hasWO) restChips.push({id:"rest.wo",label:"POST /work-orders",sub:"work-order data service (6920)",from:["SIDE.WorkOrder"],flowTo:["fm.6920"]});
+  LAYERS=[
+    {key:"aih",title:"AI HUB",tag:"agent tool surface",orch:"agentic orchestration",chips:[
+      {id:"aih.tool",label:TARGET,sub:"IRIS AI Hub agent tool",from:["CAP.CreateEquipment",c.entryPoint.id],flowTo:["prod.bp"]}]},
+    {key:"prod",title:"IRIS PRODUCTION",tag:"interop: BS → BP → operations",orch:"deterministic orchestration",chips:[bp].concat(bos).concat(events)},
+    {key:"rest",title:"REST API DATA SERVICES",tag:"service contract over FileMan",orch:"",chips:restChips},
+    {key:"fm",title:"FILEMAN → CLASS",tag:"persistence",orch:"",chips:[
+      {id:"fm.class",label:"VISTA.EQUIPMENTINV6914",sub:"→ ^ENG(6914)",from:["DATA.6914"],flowTo:[]},
+      {id:"fm.fields",label:"fields .01 / 5 SERIAL …",sub:"FileMan-mapped fields",from:["FLD.entryNumber","FLD.serial"],flowTo:[]},
+      {id:"fm.xref",label:"xrefs B / F / FC",sub:"indexes · FC canonicalized",from:["XREF.B","XREF.F","XREF.FC"],flowTo:[]},
+      {id:"fm.6920",label:"WorkOrder → ^ENG(6920)",sub:"side-effect file",from:["SIDE.WorkOrder"],flowTo:[]}]},
+  ];
+  chipFrom={}; chipFlow={}; chipRev={};
+  LAYERS.forEach(l=>l.chips.forEach(ch=>{ chipFrom[ch.id]=ch.from||[]; chipFlow[ch.id]=ch.flowTo||[]; }));
+  Object.entries(chipFlow).forEach(([a,tos])=>tos.forEach(b=>{ (chipRev[b]=chipRev[b]||[]).push(a); }));
+}
+const CONN={prod:"↓ invokes",rest:"↓ calls data service",fm:"↓ reads / writes"};
+function renderLayers(){
+  let h="";
+  LAYERS.forEach(l=>{
+    if(CONN[l.key]) h+=`<div class="conn">${CONN[l.key]}</div>`;
+    h+=`<div class="layer ${l.key}"><div class="layer-h"><span class="nm">${esc(l.title)}</span><span class="tag">${esc(l.tag)}</span>${l.orch?`<span class="orch">${esc(l.orch)}</span>`:""}</div><div class="chips">`;
+    l.chips.forEach(ch=> h+=`<div class="chip" data-cid="${esc(ch.id)}"><div class="cl">${esc(ch.label)}</div><div class="cs">${esc(ch.sub||"")}</div>${ch.oq?`<span class="oqb" title="policy unresolved: ${esc(ch.oq)}">⚠ ${esc(ch.oq)}</span>`:""}</div>`);
+    h+=`</div></div>`;
+  });
+  document.getElementById("layers").innerHTML=h;
+}
+
+/* ---------- bidirectional highlight ---------- */
+const $all = sel => Array.from(document.querySelectorAll(sel));
+function clearHi(){ $all(".hi,.dim").forEach(e=>e.classList.remove("hi","dim")); }
+function chipEl(id){ return document.querySelector(`.chip[data-cid="${CSS.escape(id)}"]`); }
+function lrowEl(id){ return document.querySelector(`.lrow[data-lid="${CSS.escape(id)}"]`); }
+
+function fromLegacy(lid){
+  clearHi();
+  const matched=[];
+  Object.entries(chipFrom).forEach(([cid,froms])=>{ if(froms.includes(lid)) matched.push(cid); });
+  $all(".chip").forEach(e=> e.classList.add(matched.includes(e.dataset.cid)?"hi":"dim"));
+  $all(".lrow").forEach(e=> e.classList.add(e.dataset.lid===lid?"hi":"dim"));
+}
+function walk(start,map){ const seen=new Set(),stack=[start]; while(stack.length){const n=stack.pop(); (map[n]||[]).forEach(m=>{ if(!seen.has(m)){seen.add(m);stack.push(m);} }); } return seen; }
+function fromChip(cid){
+  clearHi();
+  const chain=new Set([cid]); walk(cid,chipFlow).forEach(x=>chain.add(x)); walk(cid,chipRev).forEach(x=>chain.add(x));
+  $all(".chip").forEach(e=> e.classList.add(chain.has(e.dataset.cid)?"hi":"dim"));
+  const legacyIds=new Set(); chain.forEach(c=>(chipFrom[c]||[]).forEach(l=>legacyIds.add(l)));
+  $all(".lrow").forEach(e=> e.classList.add(legacyIds.has(e.dataset.lid)?"hi":"dim"));
+}
+document.getElementById("legacy").addEventListener("mouseover",e=>{ const r=e.target.closest(".lrow"); if(r) fromLegacy(r.dataset.lid); });
+document.getElementById("layers").addEventListener("mouseover",e=>{ const c=e.target.closest(".chip"); if(c) fromChip(c.dataset.cid); });
+document.querySelector(".stage").addEventListener("mouseleave",clearHi);
+
+/* ---------- boot ---------- */
+(async function(){
+  G=EMBED;
+  try{ const r=await fetch("new-inventory-entry.json",{cache:"no-store"}); if(r.ok) G=await r.json(); }catch(e){}
+  loadDecisions();
+  document.getElementById("hdrSub").textContent = G.workflow.name + " → " + TARGET + " · reflects Decide dispositions";
+  renderLegacy(); buildTarget(); renderLayers();
+})();
+</script>
+</body>
+</html>

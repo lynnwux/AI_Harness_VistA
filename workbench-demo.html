@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VistA Service Enablement Workbench — New Inventory Entry</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#141b24; --panel2:#1b2430; --edge:#26303d;
+    --ink:#e6edf3; --dim:#8b98a5; --faint:#5b6672;
+    --accent:#3d9cf5; --accent2:#7ee787; --warn:#f0a020; --danger:#ff7b72;
+    --purple:#bc8cff; --term-bg:#f6f6f2; --term-ink:#101010;
+    --create:#7ee787;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:14px;line-height:1.5;overflow:hidden;
+  }
+  /* ---- header ---- */
+  header{
+    display:flex;align-items:center;gap:16px;height:52px;padding:0 18px;
+    background:linear-gradient(180deg,#182029,#10161d);border-bottom:1px solid var(--edge);
+  }
+  header .logo{
+    width:26px;height:26px;border-radius:6px;flex:0 0 auto;
+    background:linear-gradient(135deg,var(--accent),#1f6feb);
+    display:grid;place-items:center;font-weight:800;color:#fff;font-size:13px;
+  }
+  header h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
+  header .crumb{color:var(--dim);font-size:12.5px;margin-top:1px}
+  header .crumb b{color:var(--accent2);font-weight:600}
+  header .spacer{flex:1}
+  header .session{
+    font-family:var(--mono);font-size:11.5px;color:var(--dim);
+    border:1px solid var(--edge);border-radius:20px;padding:4px 12px;background:#0e141b;
+  }
+  header .session b{color:var(--ink)}
+
+  /* ---- layout ---- */
+  .stage{display:grid;grid-template-columns:1fr 1fr;height:calc(100% - 52px - 46px)}
+  .pane{display:flex;flex-direction:column;min-width:0;min-height:0}
+  .pane.left{border-right:1px solid var(--edge)}
+  .pane-hd{
+    display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--panel);
+    border-bottom:1px solid var(--edge);font-size:11px;letter-spacing:1.4px;
+    text-transform:uppercase;color:var(--faint);font-weight:700;
+  }
+  .pane-hd .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  .pane.left .pane-hd .dot{background:#33d17a}
+  .pane-hd .tag{
+    margin-left:auto;font-size:10px;letter-spacing:.5px;color:var(--dim);
+    text-transform:none;font-weight:500;
+  }
+
+  /* ---- terminal ---- */
+  .term-wrap{flex:1;min-height:0;padding:14px;overflow:hidden;display:flex}
+  .term{
+    flex:1;background:var(--term-bg);color:var(--term-ink);border-radius:8px;
+    box-shadow:0 8px 30px rgba(0,0,0,.45),inset 0 0 0 1px rgba(0,0,0,.08);
+    display:flex;flex-direction:column;overflow:hidden;min-height:0;
+  }
+  .term .titlebar{
+    display:flex;align-items:center;gap:8px;padding:6px 10px;background:#e4e4dd;
+    border-bottom:1px solid #cfcfc6;font-family:var(--sans);font-size:11.5px;color:#333;
+  }
+  .term .titlebar .tb-dot{width:10px;height:10px;border-radius:50%}
+  .term .titlebar .r{background:#ff5f57}.term .titlebar .y{background:#febc2e}.term .titlebar .g{background:#28c840}
+  .term .titlebar .name{margin-left:6px;color:#555}
+  .term .screen{
+    flex:1;min-height:0;padding:12px 14px;font-family:var(--mono);font-size:13px;
+    line-height:1.45;white-space:pre-wrap;overflow-y:auto;letter-spacing:.2px;
+  }
+  .term .screen::-webkit-scrollbar{width:10px}
+  .term .screen::-webkit-scrollbar-thumb{background:#cdcdc4;border-radius:6px}
+  .cursor{display:inline-block;width:8px;height:15px;background:var(--term-ink);
+    vertical-align:-3px;margin-left:1px;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .kbd{color:#0a5ad6;font-weight:700}
+  /* harness annotation — clearly NOT real terminal output */
+  .anno{
+    display:block;margin:10px 0 2px;padding:7px 11px 8px 12px;
+    border-left:3px solid var(--accent);background:rgba(61,156,245,.12);
+    border-radius:0 7px 7px 0;font-family:var(--sans);font-size:11.5px;
+    color:#0c4c8f;white-space:pre-wrap;line-height:1.55;font-style:normal;
+  }
+  .anno-tag{
+    display:inline-block;font-family:var(--sans);font-size:8.5px;font-weight:800;
+    letter-spacing:1.2px;color:#fff;background:var(--accent);border-radius:3px;
+    padding:1px 6px;margin-right:9px;vertical-align:1px;
+  }
+  .anno .m{font-family:var(--mono);color:#08386b}
+  /* confirmed = empirically verified against live 6914 */
+  .anno.confirmed{border-left-color:#2fae5f;background:rgba(47,174,95,.13);color:#0c5c31}
+  .anno.confirmed .m{color:#08462a}
+  .anno-tag.ok{background:#2fae5f}
+  /* cross-reference overlay on ScreenMan screens (toggle) */
+  .xr,.gate{position:relative}
+  .xtag,.gtag{display:none}
+  .screen.show-xref .xr{text-decoration:underline dotted #0a5ad6;text-underline-offset:3px}
+  .screen.show-xref .gate{text-decoration:underline dotted #b26a00;text-underline-offset:3px}
+  .screen.show-xref .xtag,.screen.show-xref .gtag{
+    display:inline-block;position:absolute;left:100%;top:-.62em;margin-left:2px;
+    font-family:var(--sans);font-size:8px;font-weight:800;line-height:1;
+    padding:1px 3px;border-radius:3px;letter-spacing:.3px;white-space:nowrap;z-index:2;
+  }
+  .screen.show-xref .xtag{background:#0a5ad6;color:#fff}
+  .screen.show-xref .gtag{background:#e08600;color:#1a1206}
+  .screen.show-xref .xr,.screen.show-xref .gate{cursor:help}
+  /* hover tooltip explaining a cross-reference / rule field */
+  #xrtip{
+    position:fixed;z-index:50;max-width:360px;pointer-events:none;display:none;
+    background:#0e1620;border:1px solid var(--accent);border-radius:9px;
+    box-shadow:0 12px 34px rgba(0,0,0,.55);padding:11px 13px;
+    font-family:var(--sans);font-size:12px;color:var(--ink);line-height:1.5;
+  }
+  #xrtip.rule{border-color:#e08600}
+  #xrtip .tt-title{font-weight:700;margin-bottom:5px;color:var(--accent)}
+  #xrtip.rule .tt-title{color:#f0a020}
+  #xrtip .tt-g{font-family:var(--mono);font-size:11px;color:var(--accent2);display:block;margin:5px 0;word-break:break-all}
+  #xrtip .tt-f{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  #xrtip .tt-d{margin-top:7px;color:var(--dim)}
+
+  /* ---- mapping pane ---- */
+  .map{flex:1;min-height:0;overflow-y:auto;padding:16px 18px 60px}
+  .map::-webkit-scrollbar{width:11px}
+  .map::-webkit-scrollbar-thumb{background:#2b3644;border-radius:6px}
+  .card{
+    background:var(--panel);border:1px solid var(--edge);border-radius:10px;
+    padding:0;margin-bottom:14px;opacity:.28;transform:translateY(6px);
+    transition:opacity .45s ease,transform .45s ease,border-color .45s ease;
+  }
+  .card.on{opacity:1;transform:none}
+  .card.hot{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 6px 22px rgba(61,156,245,.12)}
+  .card h3{
+    margin:0;padding:11px 14px;font-size:11px;letter-spacing:1.3px;text-transform:uppercase;
+    color:var(--dim);border-bottom:1px solid var(--edge);display:flex;align-items:center;gap:8px;
+  }
+  .card h3 .ic{font-size:13px;filter:grayscale(.1)}
+  .card .body{padding:12px 14px}
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:4px 10px;font-size:13px}
+  .kv dt{color:var(--dim)}
+  .kv dd{margin:0;font-family:var(--mono);font-size:12.5px;color:var(--ink)}
+  .kv dd.hl{color:var(--accent2)}
+
+  table.pipes{width:100%;border-collapse:collapse;font-size:12px}
+  table.pipes th{
+    text-align:left;color:var(--faint);font-weight:600;font-size:10.5px;letter-spacing:.6px;
+    text-transform:uppercase;padding:5px 8px;border-bottom:1px solid var(--edge);
+  }
+  table.pipes td{padding:6px 8px;border-bottom:1px solid #1c242f;vertical-align:top}
+  table.pipes tr:last-child td{border-bottom:none}
+  .mono{font-family:var(--mono)}
+  .g{color:var(--accent2)}
+  .rw{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;font-family:var(--sans);letter-spacing:.4px}
+  .rw.w{background:rgba(240,160,32,.16);color:var(--warn)}
+  .rw.r{background:rgba(61,156,245,.16);color:var(--accent)}
+  .rw.c{background:rgba(126,231,135,.16);color:var(--accent2)}
+  .rw.k{background:rgba(188,140,255,.16);color:var(--purple)}
+
+  .callchain{font-family:var(--mono);font-size:12px;line-height:1.7;color:var(--dim)}
+  .callchain .rt{color:var(--accent2)}
+  .callchain .side{color:var(--warn)}
+  .callchain .lbl{color:var(--faint)}
+
+  .rest li{margin-bottom:7px;font-size:12.5px}
+  .rest .verb{font-family:var(--mono);font-weight:700;color:var(--accent);font-size:11.5px;
+    border:1px solid rgba(61,156,245,.35);border-radius:4px;padding:0 5px;margin-right:6px}
+  .rest .src{color:var(--faint);font-family:var(--mono);font-size:11px}
+
+  .note{font-size:11.5px;color:var(--dim);margin-top:10px;padding-top:9px;border-top:1px dashed var(--edge)}
+  .note b{color:var(--accent2)}
+
+  .placeholder{color:var(--faint);font-size:13px;text-align:center;padding:40px 20px;font-style:italic}
+
+  /* ---- transport bar ---- */
+  .transport{
+    height:46px;display:flex;align-items:center;gap:14px;padding:0 18px;
+    background:linear-gradient(0deg,#10161d,#151d26);border-top:1px solid var(--edge);
+  }
+  .btn{
+    background:var(--panel2);color:var(--ink);border:1px solid var(--edge);border-radius:7px;
+    padding:6px 12px;font-size:13px;cursor:pointer;font-family:var(--sans);
+    display:inline-flex;align-items:center;gap:6px;transition:.15s;
+  }
+  .btn:hover{border-color:var(--accent);color:#fff}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:700}
+  .btn.primary:hover{background:#5aabf7}
+  .btn:disabled{opacity:.4;cursor:default;border-color:var(--edge);color:var(--dim)}
+  .scrub{flex:1;display:flex;align-items:center;gap:12px}
+  .scrub input[type=range]{flex:1;accent-color:var(--accent);cursor:pointer}
+  .stepcount{font-family:var(--mono);font-size:12px;color:var(--dim);min-width:112px}
+  .stepcount b{color:var(--ink)}
+  .speed{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim)}
+  .speed select{background:var(--panel2);color:var(--ink);border:1px solid var(--edge);
+    border-radius:6px;padding:4px 6px;font-size:12px}
+  .steplabel{font-size:12px;color:var(--accent2);font-weight:600;min-width:190px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">SE</div>
+  <div>
+    <h1>VistA Service Enablement Workbench</h1>
+    <div class="crumb">Engineering → Equipment Management → <b>New Inventory Entry</b></div>
+  </div>
+  <div class="spacer"></div>
+  <div class="session">Node <b>isc-vademo</b> · NS <b>VISTA-DIEGO</b> · File <b>#6914</b></div>
+</header>
+
+<div class="stage">
+  <!-- LEFT: terminal -->
+  <div class="pane left">
+    <div class="pane-hd"><span class="dot"></span>VistA Simulation
+      <span class="tag" id="leftTag">roll-and-scroll replay · IRISHEALTH TRM</span>
+    </div>
+    <div class="term-wrap">
+      <div class="term">
+        <div class="titlebar">
+          <span class="tb-dot r"></span><span class="tb-dot y"></span><span class="tb-dot g"></span>
+          <span class="name">IRISHEALTH InterSystems IRIS TRM:14892</span>
+        </div>
+        <div class="screen" id="screen"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: mapping -->
+  <div class="pane right">
+    <div class="pane-hd"><span class="dot"></span>Service / Data Mapping
+      <span class="tag" id="mapTag">discovery correlates as you step</span>
+    </div>
+    <div class="map" id="map">
+      <!-- Interaction -->
+      <div class="card" id="c-interaction">
+        <h3><span class="ic">🧭</span>Interaction</h3>
+        <div class="body">
+          <dl class="kv">
+            <dt>Menu path</dt><dd id="i-path">—</dd>
+            <dt>Option</dt><dd id="i-option">—</dd>
+            <dt>Option type</dt><dd id="i-type">—</dd>
+            <dt>Dispatches to</dt><dd id="i-routine" class="hl">—</dd>
+            <dt>User / DUZ</dt><dd>BLACK,JOHN (DUZ=1) · TEST ACCOUNT</dd>
+          </dl>
+        </div>
+      </div>
+
+      <!-- Data pipes -->
+      <div class="card" id="c-pipes">
+        <h3><span class="ic">🔌</span>Data Pipes — globals &amp; files touched</h3>
+        <div class="body">
+          <table class="pipes">
+            <thead><tr><th>Global / File</th><th>#</th><th>Access</th><th>Role</th></tr></thead>
+            <tbody>
+              <tr><td class="mono g">^ENG(6914,*)</td><td>6914</td><td><span class="rw c">CREATE</span></td><td>equipment record (FILE^DICN + DINUM)</td></tr>
+              <tr><td class="mono">^ENG(6914,ien,0/1)</td><td>6914</td><td><span class="rw w">WRITE</span></td><td>serial via ^DIE (DR="5////")</td></tr>
+              <tr><td class="mono">^ENG(6914,"FC",…)</td><td>6914 xref</td><td><span class="rw r">READ</span></td><td>duplicate-serial check</td></tr>
+              <tr><td class="mono">^ENG(6910.2,…)</td><td>6910.2</td><td><span class="rw r">READ</span></td><td>"ask incoming inspection W.O." param</td></tr>
+              <tr><td class="mono">^ENG(6920,*)</td><td>6920</td><td><span class="rw c">CREATE</span></td><td>inspection work order (side effect)</td></tr>
+              <tr><td class="mono">^XUSEC(key,DUZ)</td><td>keys</td><td><span class="rw k">KEY</span></td><td>ENEDPM, ENFACS authorization</td></tr>
+              <tr><td class="mono">^DIE("B",…)</td><td>templates</td><td><span class="rw r">READ</span></td><td>edit-method selection</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Empirical confirmation -->
+      <div class="card" id="c-confirm">
+        <h3><span class="ic">✅</span>Empirical Confirmation — diffed against live 6914</h3>
+        <div class="body">
+          <table class="pipes">
+            <thead><tr><th>Claim</th><th>Evidence</th><th>Result</th></tr></thead>
+            <tbody>
+              <tr><td><span class="mono">^ENG(6914,455)</span> created</td><td>row now exists</td><td><span class="rw c">CONFIRMED</span></td></tr>
+              <tr><td>SERIAL 10001 filed (fld 5)</td><td>SERIAL_ = 10001</td><td><span class="rw c">CONFIRMED</span></td></tr>
+              <tr><td>serial "F" cross-reference</td><td>xref count = 1</td><td><span class="rw c">CONFIRMED</span></td></tr>
+              <tr><td>DATE_ENTERED / ENTERED_BY</td><td>3260917 · DUZ 1</td><td><span class="rw c">CONFIRMED</span></td></tr>
+              <tr><td>NAME / USE STATUS / CONTROLLED</td><td>left blank in form</td><td><span class="rw r">EMPTY</span></td></tr>
+              <tr><td>6920 inspection work order</td><td>answered NO</td><td><span class="rw w">NOT FIRED</span></td></tr>
+            </tbody>
+          </table>
+          <div class="note">Read live via Atelier API: <span class="mono">SELECT … FROM VISTA.EQUIPMENT_INV_6914 WHERE IEN=455</span>. <b>Inference</b> = what the workflow <i>can</i> touch; <b>confirmation</b> = what it <i>actually</i> did — form fields left blank stay blank, and the declined WO never fires.</div>
+        </div>
+      </div>
+
+      <!-- Call chain -->
+      <div class="card" id="c-routines">
+        <h3><span class="ic">🧬</span>Touching Routines — <span class="mono g" style="text-transform:none;letter-spacing:0">EQAD^ENEQ1</span></h3>
+        <div class="body">
+<pre class="callchain"><span class="rt">EQAD^ENEQ1</span>  <span class="lbl">(New Inventory Entry Point)</span>
+├─ ZIS^ENUTL           <span class="lbl">device setup</span>
+├─ ASKEDM              <span class="lbl">ask "Screen entry?" → ^DIE("B","ENZEQENTER")</span>
+├─ ^DIR                <span class="lbl">Kernel reader (all prompts)</span>
+├─ ASKSER              <span class="lbl">serial (fld 6914,5) → "FC" xref + $$GET1^DIQ</span>
+└─ <span class="rt">ADDEQ</span>               <span class="lbl">create record</span>
+    ├─ ENR             <span class="lbl">next IEN → FILE^DICN (DINUM)</span>
+    ├─ ^DIE            <span class="lbl">write SERIAL into ^ENG(6914,ien</span>
+    ├─ <span class="side">XNPMSE^ENEQPMP</span>    <span class="lbl">PM enroll · key ENEDPM</span>
+    ├─ <span class="side">IIWO^ENWONEW3</span>     <span class="lbl">insp. work order → 6920</span>
+    ├─ <span class="side">^ENFAACQ</span>         <span class="lbl">FA doc → Austin · key ENFACS</span>
+    └─ <span class="side">BULL^ENEQ3</span>       <span class="lbl">new-equipment bulletin (MailMan)</span></pre>
+        </div>
+      </div>
+
+      <!-- REST candidates -->
+      <div class="card" id="c-rest">
+        <h3><span class="ic">🚀</span>Where to stand up REST</h3>
+        <div class="body">
+          <ul class="rest" style="margin:0;padding-left:2px;list-style:none">
+            <li><span class="verb">POST /equipment</span>CreateEquipment <span class="src">← ENR + serial ^DIE (FILE^DICN)</span></li>
+            <li><span class="verb">GET /equipment?serial=</span>FindBySerial <span class="src">← ASKSER ("FC" xref + GET1^DIQ)</span></li>
+            <li><span class="verb">POST /work-orders</span>InspectionWO <span class="src">← IIWO^ENWONEW3 → 6920</span></li>
+          </ul>
+          <div class="note">Legacy seam a REST layer replaces: <b>FILE^DICN</b> · <b>^DIE</b> · <b>$$GET1^DIQ</b> · <b>^DIR</b>. File 6914 access is <b>shared</b> by New Entry, Inventory Edit &amp; Display — the workflows diverge at the prompt layer, converge on 6914.</div>
+        </div>
+      </div>
+
+      <!-- DD Survey -->
+      <div class="card" id="c-dd">
+        <h3><span class="ic">📋</span>DD Survey — file 6914 field manifest</h3>
+        <div class="body">
+          <div class="note" style="margin-bottom:8px">
+            <b>Atelier query</b> <code>SELECT Name, SqlFieldName, Type FROM %Dictionary.CompiledProperty WHERE parent = 'VISTA.EQUIPMENTINV6914'</code>
+            <br>→ 84 FileMan fields · 3 ScreenMan entry screens · 6 multiples + 6 fields that point into 6914 sub-files · provenance <b>derived</b>
+          </div>
+          <table class="pipes" style="font-size:10px">
+            <tr><th>Field #</th><th>Label</th><th>Type / pointer</th><th>Screen</th></tr>
+            <tr><td>.01</td><td>ENTRY NUMBER</td><td>Numeric (IEN · XREF: B)</td><td style="color:var(--warn)">system</td></tr>
+            <tr><td>1</td><td>MANUFACTURER</td><td>→ 6912</td><td>1</td></tr>
+            <tr><td>4</td><td>MODEL</td><td>String</td><td>1</td></tr>
+            <tr><td>5</td><td>SERIAL #</td><td>String (XREF: F, FC)</td><td>1</td></tr>
+            <tr><td>6</td><td>EQUIPMENT CATEGORY</td><td>→ 6911</td><td>1</td></tr>
+            <tr><td>7</td><td>TYPE OF ENTRY</td><td>Enum NX/BSE/EXP (XREF: AR)</td><td>1</td></tr>
+            <tr><td>9</td><td>LOCKOUT REQUIRED?</td><td>Enum YES/NO (XREF: AJ)</td><td>2</td></tr>
+            <tr><td>20</td><td>USE STATUS</td><td>Enum IN USE/OOS…</td><td>2</td></tr>
+            <tr><td>24</td><td>LOCATION</td><td>→ 6928 ENG SPACE</td><td>2</td></tr>
+            <tr><td>33</td><td>CONTROLLED ITEM?</td><td>Enum YES/NO</td><td>3</td></tr>
+            <tr><td>34</td><td>INVESTMENT CATEGORY</td><td>Enum CAPITALIZED…</td><td>3 ⚑ gates FA</td></tr>
+            <tr><td>61</td><td>BUDGET OBJECT CODE</td><td>→ sub-file 6914.4 (NX BOC)</td><td>3</td></tr>
+            <tr><td>62</td><td>FUND</td><td>→ sub-file 6914.6 (NX FUND)</td><td>3</td></tr>
+            <tr style="color:var(--faint)"><td colspan="4">…+25 more fields across screens 1–3</td></tr>
+          </table>
+          <div class="note" style="margin-top:8px">38 <span style="color:#f0a020">derived</span> field nodes in the capability graph, keyed by DD field number</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="xrtip"></div>
+
+<!-- transport -->
+<div class="transport">
+  <button class="btn primary" id="playBtn">▶ Play</button>
+  <button class="btn" id="prevBtn">◀ Step</button>
+  <button class="btn" id="nextBtn">Step ▶</button>
+  <button class="btn" id="restartBtn">↺ Restart</button>
+  <button class="btn" id="xrefBtn" title="Overlay FileMan cross-reference &amp; rule-driving fields on the ScreenMan forms">⌗ Cross-refs</button>
+  <button class="btn" id="graphBtn" title="Open the interactive Legacy Capability Graph" onclick="window.open('capability-graph/graph.html','_blank')">🕸 Graph</button>
+  <button class="btn" id="decideBtn" title="Open the Decide stage (graph → dev spec)" onclick="window.open('capability-graph/decide.html','_blank')">⚖ Decide</button>
+  <button class="btn" id="mapBtn" title="Open the Layer Map (legacy ↔ target)" onclick="window.open('capability-graph/map.html','_blank')">🔗 Map</button>
+  <div class="scrub">
+    <span class="steplabel" id="stepLabel">Ready</span>
+    <input type="range" id="scrub" min="0" max="0" value="0">
+    <span class="stepcount">Step <b id="curStep">0</b> / <span id="maxStep">0</span></span>
+  </div>
+  <div class="speed">Speed
+    <select id="speed">
+      <option value="1.6">0.5×</option>
+      <option value="1" selected>1×</option>
+      <option value="0.55">2×</option>
+      <option value="0.3">3×</option>
+    </select>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   Each step = one terminal screen + which right-pane cards to
+   reveal / highlight. Screen text is the captured VADEMO session.
+   ============================================================ */
+const C = "<span class='cursor'></span>";
+const K = s => `<span class='kbd'>${s}</span>`;   // user keystrokes (real, highlighted)
+const A = t => `<span class="anno"><span class="anno-tag">HARNESS</span>${t}</span>`;  // inferred annotation
+const V = t => `<span class="anno confirmed"><span class="anno-tag ok">CONFIRMED · live 6914</span>${t}</span>`;  // empirical
+const XR = (l,k) => `<span class="xr">${l}<span class="xtag">${k}</span></span>`;   // cross-referenced field
+const GT = (l,k) => `<span class="gate">${l}<span class="gtag">${k}</span></span>`; // rule-driving field
+
+const STEPS = [
+  { label:"Sign on · enter VistA namespace",
+    reveal:[], hot:[],
+    screen:
+`Node: isc-vademo,  Instance: IRISHEALTH
+
+Username: _SYSTEM
+Password:
+USER>${K('ZN "VISTA-DIEGO"')}
+
+VISTA-DIEGO>${K('S DUZ=1')}
+
+VISTA-DIEGO>${K('D ^XUP')}
+
+Setting up programmer environment
+This is a TEST account.
+
+Terminal Type set to: C-VT320
+
+Select OPTION NAME: ${C}` },
+
+  { label:"EVE → Systems Manager Menu",
+    reveal:["c-interaction"], hot:["c-interaction"],
+    screen:
+`Select OPTION NAME: ${K('EVE')}
+     1   EVE          Systems Manager Menu
+     2   EVET BLOCK/UNBLOCK DOWNLOAD
+     3   EVET CHECK INCOMING
+     4   EVET DAILY DOWNLOAD ACTIVITY
+     5   EVET EMAIL DOWNLOAD REPORT
+CHOOSE 1-5: ${K('1')}${C}` },
+
+  { label:"Systems Manager Menu → Core Applications",
+    reveal:["c-interaction"], hot:["c-interaction"],
+    screen:
+`          Core Applications ...
+          Device Management ...
+   FM     VA FileMan ...
+          Menu Management ...
+          Operations Management ...
+          Taskman Management ...
+          User Management ...
+
+Select Systems Manager Menu <TEST ACCOUNT> Option: ${K('Core Applications')}${C}` },
+
+  { label:"Core Applications → EN (Engineering)",
+    reveal:["c-interaction"], hot:["c-interaction"],
+    screen:
+`   PS    PHARMACY MASTER MENU ...
+   RA    Rad/Nuc Med Total System Menu ...
+   SR    Surgery Menu ...
+   TIU   TIU Maintenance Menu ...
+         Consult Management ...
+         PCE IRM Main Menu ...
+
+Select Core Applications <TEST ACCOUNT> Option: ${K('EN')}${C}` },
+
+  { label:"Engineering Main Menu → EQ",
+    reveal:["c-interaction"], hot:["c-interaction"],
+    screen:
+`                       ALBANY ISC
+                 Sep 17, 2026  12:47:35 pm
+
+   WO     Work Order & MERS ...
+   FYFP   Five Year Facility Plan (FYFP) ...
+   APPL   Project Applications ...
+   TRK    Project Tracking ...
+   EQ     Equipment Management ...
+   SP     Space/Facility Management ...
+   FSA    2162 Report of Accident ...
+
+Select Engineering Main Menu <TEST ACCOUNT> Option: ${K('EQ')}${C}` },
+
+  { label:"Equipment Management → 1 New Inventory Entry",
+    reveal:["c-interaction"], hot:["c-interaction"],
+    screen:
+`ENGINEERING EQUIPMENT MANAGEMENT MODULE
+Version 7
+
+     1     New Inventory Entry
+     2     Multiple Inventory Entry
+     3     Inventory Edit
+     4     Display Equipment Record
+     5     Equipment Reports ...
+     6     PM Parameters ...
+     7     Generate PM Schedule ...
+     8     Record Equipment PMI ...
+
+Select Equipment Management <TEST ACCOUNT> Option: ${K('1')}  New Inventory Entry${C}` },
+
+  { label:"Option resolved → EQAD^ENEQ1",
+    reveal:["c-interaction","c-pipes","c-routines"], hot:["c-routines"],
+    screen:
+`Select Equipment Management <TEST ACCOUNT> Option: 1  New Inventory Entry
+${A("OPTION #19  <span class='m'>'ENINVNEW'</span>   ·   TYPE = R  (run routine)\ndispatch  →  <span class='m'>EQAD^ENEQ1</span>")}
+Screen entry? YES// ${C}` },
+
+  { label:"ASKSER — enter serial (field 6914,5)",
+    reveal:["c-interaction","c-pipes","c-routines"], hot:["c-pipes"],
+    screen:
+`Screen entry? YES// ${K('YES')}
+
+Enter a new equipment inventory item? NO// ${K('YES')}
+
+Please enter SERIAL # if available. Otherwise press <return>.
+SERIAL #: ${K('10001')}${C}` },
+
+  { label:"ADDEQ — record created · ScreenMan 1/3 (identity)",
+    reveal:["c-interaction","c-pipes","c-confirm","c-routines"], hot:["c-confirm"],
+    screen:
+`                Equipment Inventory (screen 1 of 3)   09/17/26
+
+ 1 ${XR("ENTRY #(R)","B")}: 455
+
+ 2 ${XR("MANUFACTURER","K")}: ${C}..........................
+ 3 ${XR("MODEL","E")}: .....................    4 ${XR("SN","F·FC")}: 10001
+ 5 ${XR("CSN","J")}: ..................    6 LIFE EXPECTANCY: ...
+ 7 ${XR("MFGR EQPT NAME","H")}: ...............................
+ 8 CMR: .....         9 ${XR("CATEGORY","G")}: ...........................
+10 ${XR("P.O. NO.","M")}: .............     11 ACQ. METHOD: ....................
+12 VENDOR: ..................................
+13 LEASE COST: ..........     14 ASSET VALUE: ............
+15 ACQ. DATE: ...........     16 WARRANTY EXP. DATE: ...........
+17 REPLACEMENT DATE: ...........  18 SOURCE: ...............
+19 ${GT("TYPE","→FA")}: ................    20 REPLACING: ...............
+${A("ENR: <span class='m'>FILE^DICN</span>  →  <span class='m'>^ENG(6914,455)</span> created  ·  IEN = 455\n<span class='m'>^DIE</span>:  SERIAL 10001 filed")}${V("<span class='m'>^ENG(6914,455)</span> now exists · SERIAL 10001 · DATE_ENTERED 2026-09-17 · ENTERED_BY BLACK,JOHN\nserial \"F\" cross-reference: created ✓")}` },
+
+  { label:"ScreenMan 2/3 — status / location / disposition",
+    reveal:["c-interaction","c-pipes","c-confirm","c-routines","c-rest","c-dd"], hot:["c-dd"],
+    screen:
+`                Equipment Inventory ( screen 2 of 3)   09/17/26
+   ***ENTRY NUMBER:455***
+
+ 1 USE STATUS: ................  2 PARENT SYSTEM: ${C}..........
+ 3 SERVICE: ...........................   4 ${XR("NXRN","I")}: ........
+ 5 ${XR("LOCATION","D")}: ...............   6 LAST INVENTORIED(R): ...........
+ 7 ${XR("VA PM NUMBER","C")}: ..........       8 ${XR("LOCAL IDENTIFIER","L")}: ..............
+ 9 SERVICE CONTRACT: ...      10 CONTRACT COST: ........
+11 JCAHO: ...                12 RUC: .....................
+13 TURN-IN DATE: ...........   14 FINAL DISP DATE: ............
+15 DISP METHOD: ...                    16 ORIG. VALUE(R): ...........
+17 DISP VALUE: ........... 18 COMMENTS(W): ...    19 SPEX(W): ...
+20 FUNCT CLASS: ......................    21 UTILITY SYSTEM: .....
+22 ${XR("LOCKOUT REQUIRED?(R)","AJ")}: ...    23 CONDITION CODE: ........
+24 OWNING STATION NUMBER: .....     25 Y2K CAT: ....................
+${A("fields map to <span class='m'>^ENG(6914,ien, nodes 2 & 3)</span>  via  <span class='m'>^DIE</span>")}` },
+
+  { label:"ScreenMan 3/3 — financial fields · work-order prompt",
+    reveal:["c-interaction","c-pipes","c-confirm","c-routines","c-rest","c-dd"], hot:["c-routines","c-pipes"],
+    screen:
+`  ***ENTRY NUMBER:455***
+
+
+1 CONTROLLED ITEM?: ...
+2 ${GT("INVESTMENT CATEGORY","→FA")}: ..............................
+3 FUND: ......                   4 FCP: ..............................
+
+5 BOC: ....
+6 SGL ACCOUNT: ....              7 A/O: ....
+8 EQUITY ACCOUNT: ....................
+
+
+Create an Incoming Inspection Work Order? YES// ${K('NO')}${C}
+${A("financial fields  →  <span class='m'>^ENG(6914,ien, nodes 8 & 9)</span>\n33 CONTROLLED · 34 INV.CAT · 35 FCP · 38 SGL · 61 BOC · 62 FUND · 63 A/O · 64 EQUITY\nwork order: asked only if site param <span class='m'>^ENG(6910.2 \"ASK INCOMING INSPECTION W.O.\"</span> is set · clerk answers\nPM: key ENEDPM + clerk prompt  ·  FA: key ENFACS + NX + capitalized + clerk confirms\nbulletin: <span class='m'>BULL^ENEQ3</span> always runs · sent if mail group EN NEW EQUIPMENT exists")}${V("observed: Incoming Inspection W.O. (<span class='m'>file 6920</span>) NOT created — answered NO ✓\nno PM / FA side-effects fired")}` },
+];
+
+/* ---- wiring ---- */
+const screenEl = document.getElementById('screen');
+const mapEl    = document.getElementById('map');
+const scrub    = document.getElementById('scrub');
+const curStep  = document.getElementById('curStep');
+const maxStep  = document.getElementById('maxStep');
+const stepLabel= document.getElementById('stepLabel');
+const playBtn  = document.getElementById('playBtn');
+const prevBtn  = document.getElementById('prevBtn');
+const nextBtn  = document.getElementById('nextBtn');
+const speedSel = document.getElementById('speed');
+const xrefBtn  = document.getElementById('xrefBtn');
+const leftTag  = document.getElementById('leftTag');
+const iPath    = document.getElementById('i-path');
+const iOption  = document.getElementById('i-option');
+const iType    = document.getElementById('i-type');
+const iRoutine = document.getElementById('i-routine');
+
+// Real values read live from VISTA.OPTION19 (IEN 307, NAME ENINVNEW, TYPE R, ROUTINE EQAD^ENEQ1).
+// Menu path resolves as the user descends; the option resolves at step 6 (index 6).
+const NAV_PATH = [
+  'USER ▸ ZN "VISTA-DIEGO" ▸ D ^XUP',
+  'EVE — Systems Manager Menu',
+  'EVE ▸ Core Applications',
+  'Core Applications ▸ EN — Engineering Main Menu',
+  'EN ▸ EQ — Equipment Management',
+  'Equipment Management ▸ [1]',
+  'Equipment Mgmt ▸ New Inventory Entry',
+];
+function applyInteraction(n){
+  iPath.textContent = NAV_PATH[Math.min(n, NAV_PATH.length-1)];
+  const resolved = n >= 6;                          // option selected at step index 6
+  iOption.textContent  = resolved ? "ENINVNEW  ·  OPTION #19 (IEN 307)" : "—";
+  iType.textContent    = resolved ? "R — run routine" : "—";
+  iRoutine.textContent = resolved ? "EQAD^ENEQ1" : "—";
+}
+
+let idx = 0, playing = false, typing = null, autoTimer = null;
+
+scrub.max = STEPS.length - 1;
+maxStep.textContent = STEPS.length;
+
+const allCards = ["c-interaction","c-pipes","c-confirm","c-routines","c-rest","c-dd"];
+
+function applyMap(step){
+  allCards.forEach(id=>{
+    const el = document.getElementById(id);
+    el.classList.toggle('on', step.reveal.includes(id));
+    el.classList.toggle('hot', step.hot.includes(id));
+  });
+  // scroll the hottest revealed card into view
+  if(step.hot.length){
+    const t = document.getElementById(step.hot[0]);
+    if(t) t.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+}
+
+function typeScreen(html, done){
+  clearInterval(typing);
+  // Tokenize: HTML tags are atomic; every other char counts as one "typed" unit.
+  const tokens = html.match(/<[^>]+>|[\s\S]/g) || [];
+  const total = tokens.reduce((n,t)=> n + (t[0]==='<' ? 0 : 1), 0);
+  let shown = 0;
+  const base = parseFloat(speedSel.value);
+  const per = Math.max(4, 9 * base);
+  // Rebuild the whole frame each tick so nested spans (kbd / anno) stay balanced.
+  function paint(){
+    let out = "", c = 0;
+    for(const t of tokens){
+      if(t[0]==='<'){ out += t; continue; }   // tag: always include once reached
+      if(c >= shown) break;                    // stop at the typing frontier
+      out += t; c++;
+    }
+    screenEl.innerHTML = out;
+    screenEl.scrollTop = screenEl.scrollHeight;
+  }
+  typing = setInterval(()=>{
+    shown = Math.min(total, shown + 3);
+    paint();
+    if(shown >= total){ clearInterval(typing); typing = null; if(done) done(); }
+  }, per);
+}
+
+function render(n, animate=true){
+  idx = Math.max(0, Math.min(STEPS.length-1, n));
+  const step = STEPS[idx];
+  scrub.value = idx; curStep.textContent = idx+1;
+  stepLabel.textContent = step.label;
+  applyMap(step);
+  applyInteraction(idx);
+  if(animate){ typeScreen(step.screen, ()=>{ if(playing) queueNext(); }); }
+  else { clearInterval(typing); screenEl.innerHTML = step.screen; screenEl.scrollTop = screenEl.scrollHeight; }
+  updateBtns();
+}
+
+function updateBtns(){
+  prevBtn.disabled = idx===0;
+  nextBtn.disabled = idx===STEPS.length-1;
+}
+
+function queueNext(){
+  clearTimeout(autoTimer);
+  if(idx >= STEPS.length-1){ stopPlay(); return; }
+  const base = parseFloat(speedSel.value);
+  autoTimer = setTimeout(()=>{ if(playing) render(idx+1); }, 1100*base);
+}
+
+function startPlay(){
+  playing = true; playBtn.textContent = '❚❚ Pause'; playBtn.classList.remove('primary');
+  if(idx >= STEPS.length-1) render(0); else render(idx, true);
+}
+function stopPlay(){
+  playing = false; playBtn.textContent = '▶ Play'; playBtn.classList.add('primary');
+  clearTimeout(autoTimer);
+}
+
+playBtn.onclick   = ()=> playing ? stopPlay() : startPlay();
+nextBtn.onclick   = ()=>{ stopPlay(); render(idx+1); };
+prevBtn.onclick   = ()=>{ stopPlay(); render(idx+1>0?idx-1:0); };
+document.getElementById('restartBtn').onclick = ()=>{ stopPlay(); render(0); };
+scrub.oninput     = ()=>{ stopPlay(); render(parseInt(scrub.value,10), false); };
+speedSel.onchange = ()=>{ if(playing){ clearTimeout(autoTimer); queueNext(); } };
+
+let xrefOn = false;
+xrefBtn.onclick = ()=>{
+  xrefOn = !xrefOn;
+  screenEl.classList.toggle('show-xref', xrefOn);
+  xrefBtn.classList.toggle('primary', xrefOn);
+  leftTag.textContent = xrefOn
+    ? "cross-ref overlay ON · hover a field for detail · orange = rule field"
+    : "roll-and-scroll replay · IRISHEALTH TRM";
+  if(!xrefOn) xrtip.style.display='none';
+};
+
+/* ---- hover tooltips for the overlay badges ---- */
+const xrtip = document.getElementById('xrtip');
+const XREF_INFO = {
+  // Every claim here is from the legacy source (ENEQ1, ENEQ3, ENEQPMP, ENWONEW3) or the 6914 DD — never from a modern prototype.
+  "B":   {t:"B — entry-number index", g:'^ENG(6914,"B",ENTRY_NUMBER,IEN)', f:".01 ENTRY NUMBER", d:"ENTRY NUMBER is the IEN: ENR in ENEQ1 files each new record with DINUM = the next free IEN (FILE^DICN), which sets this index — so every record has a B entry."},
+  "K":   {t:"K — manufacturer index", g:'^ENG(6914,"K",MANUFACTURER,IEN)', f:"1 MANUFACTURER (→ file 6912)", d:"Find all equipment for a manufacturer."},
+  "E":   {t:"E — model index", g:'^ENG(6914,"E",MODEL,IEN)', f:"4 MODEL", d:"Lookup by exact model. The DD also has EC, a canonical-model index (MODEL(C), first 30 characters) — the model counterpart of FC."},
+  "F·FC":{t:"F + FC — serial indexes", g:'^ENG(6914,"F",SERIAL,IEN)\n^ENG(6914,"FC",&lt;canonical serial&gt;,IEN)', f:"5 SERIAL # · 5.1 SERIAL #(C)", d:"F = exact serial. FC = canonical serial, cut to 30 characters — the index ASKSER (ENEQ1) walks for duplicate detection. ASKSER builds the key by uppercasing, stripping spaces and punctuation, appending one trailing space and cutting to 30 characters ($E(ENX_\" \",1,30)). A modern duplicate check must build the key exactly this way or it will miss matches."},
+  "J":   {t:"J — stock-number index", g:'^ENG(6914,"J",CATEGORY_STOCK_NUMBER,IEN)', f:"18 CATEGORY STOCK NUMBER (→ file 6917)", d:"Lookup by category stock number."},
+  "H":   {t:"H — name index", g:'^ENG(6914,"H",MFGR__EQUIPMENT_NAME,IEN)', f:"3 MFGR. EQUIPMENT NAME", d:"Lookup by equipment name (first 40 characters)."},
+  "G":   {t:"G — category index", g:'^ENG(6914,"G",EQUIPMENT_CATEGORY,IEN)', f:"6 EQUIPMENT CATEGORY (→ file 6911)", d:"Find equipment by category. Each category can carry a standard PM schedule (^ENG(6911,cat,4)); when PM is set up for the item, ENEQPMP offers that schedule and, if the clerk accepts, copies it onto the item (^ENG(6914,ien,4))."},
+  "M":   {t:"M — purchase-order index", g:'^ENG(6914,"M",PURCHASE_ORDER,IEN)', f:"11 PURCHASE ORDER #", d:"Lookup by purchase order."},
+  "I":   {t:"I — NXRN index", g:'^ENG(6914,"I",NXRN,IEN)', f:"17 NXRN #", d:"Sequential number assigned by the centralized CMR management system in Austin; should be unique within the facility (DD)."},
+  "D":   {t:"D — location index", g:'^ENG(6914,"D",LOCATION,IEN)', f:"24 LOCATION (→ file 6928)", d:"Find equipment by location."},
+  "C":   {t:"C — VA PM number index", g:'^ENG(6914,"C",VA_PM_NUMBER,IEN)', f:"25 VA PM NUMBER", d:"PM here means Property Management, not preventive maintenance: the number Supply Service assigns on receipt; first four digits are the Federal Supply Classification (DD)."},
+  "L":   {t:"L — local-id index", g:'^ENG(6914,"L",LOCAL_IDENTIFIER,IEN)', f:"26 LOCAL IDENTIFIER", d:"Lookup by local identifier."},
+  "AJ":  {t:"AJ — lockout index", g:'^ENG(6914,"AJ",LOCKOUT_REQUIRED,IEN)', f:"9 LOCKOUT REQUIRED?", d:"OSHA lockout/tagout flag: YES when energy-control procedures are required before servicing (DD). This index only lists such items. NOT a rule field — no routine in this workflow reads it (ENEQ1, IIWO^ENWONEW3, ENWONEW, ENEQ3), and it does not create a work order. The incoming-inspection work order is gated by the site parameter ASK INCOMING INSPECTION W.O. (file 6910.2) plus the clerk's answer."},
+};
+const RULE_INFO = {
+  "→FA": {t:"Rule field → FA document", f:"7 TYPE OF ENTRY (node 0, piece 4) · 34 INVESTMENT CATEGORY (node 8, piece 2)", d:"ENEQ1 ADDEQ: I $D(^XUSEC(\"ENFACS\",DUZ)),$P(^ENG(6914,ENNXL,0),U,4)=\"NX\",$P($G(^(8)),U,2). The FA prompt appears only when the clerk holds the ENFACS key, TYPE = NX, and INVESTMENT CATEGORY = 1 (CAPITALIZED/ACCOUNTABLE — the only code MUMPS treats as true). The clerk is then asked 'Do you wish to send an FA document to Austin' (default YES); only on YES does ^ENFAACQ run. BULL^ENEQ3 reads the same two fields for the bulletin's capitalized-NX line."},
+};
+function showTip(key, isRule){
+  const info = (isRule ? RULE_INFO : XREF_INFO)[key];
+  if(!info){ xrtip.style.display='none'; return; }
+  xrtip.className = isRule ? 'rule' : '';
+  let html = `<div class="tt-title">${info.t}</div>`;
+  if(info.g) html += `<span class="tt-g">${info.g.replace(/\n/g,'<br>')}</span>`;
+  if(info.f) html += `<div class="tt-f">field ${info.f}</div>`;
+  html += `<div class="tt-d">${info.d}</div>`;
+  xrtip.innerHTML = html;
+  xrtip.style.display='block';
+}
+function placeTip(x,y){
+  const pad=14, r=xrtip.getBoundingClientRect();
+  let left=x+pad, top=y+pad;
+  if(left+r.width > innerWidth-8) left = x-r.width-pad;
+  if(top+r.height > innerHeight-8) top = y-r.height-pad;
+  xrtip.style.left=Math.max(8,left)+'px'; xrtip.style.top=Math.max(8,top)+'px';
+}
+screenEl.addEventListener('mouseover', e=>{
+  if(!xrefOn) return;
+  const el = e.target.closest('.xr,.gate'); if(!el) return;
+  const isRule = el.classList.contains('gate');
+  const badge = el.querySelector(isRule?'.gtag':'.xtag'); if(!badge) return;
+  showTip(badge.textContent.trim(), isRule);
+});
+screenEl.addEventListener('mousemove', e=>{ if(xrtip.style.display==='block') placeTip(e.clientX,e.clientY); });
+screenEl.addEventListener('mouseout', e=>{
+  const el = e.target.closest('.xr,.gate');
+  if(el && !el.contains(e.relatedTarget)) xrtip.style.display='none';
+});
+
+document.addEventListener('keydown', e=>{
+  if(e.key===' '){ e.preventDefault(); playBtn.click(); }
+  else if(e.key==='ArrowRight'){ nextBtn.click(); }
+  else if(e.key==='ArrowLeft'){ prevBtn.click(); }
+});
+
+render(0, false);
+</script>
+</body>
+</html>

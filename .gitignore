@@ -1,0 +1,19 @@
+# dependencies & build output
+node_modules/
+agent/_build/
+prototype/build/
+
+# runtime state and logs (regenerated)
+agent/server.log
+agent/build-status.json
+agent/build-decisions.json
+agent/decisions.backup-*.json
+agent/*.corrupt-*.json
+*.tmp
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# local secrets — never commit (template: agent/.env.example)
+.env

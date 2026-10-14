@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Decide — Legacy Capability → Development Spec</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#141b24; --panel2:#1b2430; --edge:#26303d;
+    --ink:#e6edf3; --dim:#8b98a5; --faint:#5b6672;
+    --accent:#3d9cf5; --accent2:#7ee787; --warn:#f0a020; --question:#ff6b5e; --purple:#bc8cff;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px;overflow:hidden}
+  header{display:flex;align-items:center;gap:14px;height:50px;padding:0 16px;
+    background:linear-gradient(180deg,#182029,#10161d);border-bottom:1px solid var(--edge)}
+  header .logo{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,#3d9cf5,#1f6feb);
+    display:grid;place-items:center;font-weight:800;color:#fff;font-size:12px}
+  header h1{font-size:14px;margin:0;font-weight:650}
+  header .sub{color:var(--dim);font-size:11.5px}
+  header .sp{flex:1}
+  .btn{background:var(--panel2);color:var(--ink);border:1px solid var(--edge);border-radius:7px;
+    padding:6px 11px;font-size:12.5px;cursor:pointer;font-family:var(--sans)}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:700}
+
+  .stage{display:grid;grid-template-columns:1fr 1fr;height:calc(100% - 50px)}
+  .pane{min-height:0;overflow-y:auto;padding:14px 16px 60px}
+  .pane.left{border-right:1px solid var(--edge)}
+  .pane-title{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:1.3px;text-transform:uppercase;
+    color:var(--faint);font-weight:700;margin:0 0 12px}
+  .pane-title .prog{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500;color:var(--dim);font-size:11px}
+
+  /* categories */
+  .cat{margin-bottom:16px}
+  .cat-h{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--ink);
+    padding:6px 0;border-bottom:1px solid var(--edge);margin-bottom:8px}
+  .cat-h .ic{font-size:13px}
+  .cat-h .n{color:var(--faint);font-weight:600;font-size:11px}
+  .cat.oq .cat-h{color:var(--question)}
+
+  .row{background:var(--panel);border:1px solid var(--edge);border-radius:9px;padding:9px 11px;margin-bottom:8px}
+  .row.block{border-color:var(--question);box-shadow:0 0 0 1px rgba(255,107,94,.25)}
+  .row .lbl{font-size:12.5px;font-weight:600}
+  .row .lbl .warni{color:var(--question);margin-right:5px}
+  .row .sub{color:var(--dim);font-size:11px;font-family:var(--mono);margin-top:2px;word-break:break-word}
+  .seg{display:inline-flex;gap:4px;margin-top:8px;flex-wrap:wrap}
+  .opt{background:var(--panel2);color:var(--dim);border:1px solid var(--edge);border-radius:6px;
+    padding:3px 9px;font-size:11px;cursor:pointer;font-family:var(--sans)}
+  .opt:hover{color:var(--ink)}
+  .opt.active{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:700}
+  .cat.oq .opt.active{background:var(--question);border-color:var(--question);color:#1a0d0b}
+  .oqp{width:100%;margin-top:8px;background:#0e141b;color:var(--ink);border:1px solid var(--edge);
+    border-radius:6px;padding:7px 9px;font-size:12px;font-family:var(--sans);resize:vertical;min-height:34px}
+  .oqp::placeholder{color:var(--faint)}
+  .hintline{font-size:10.5px;color:var(--faint);margin-top:5px}
+  .seg.scope{margin-top:6px}
+  .scopt{background:transparent;color:var(--dim);border:1px dashed var(--edge);border-radius:6px;padding:3px 9px;font-size:10.5px;cursor:pointer;font-family:var(--sans)}
+  .scopt:hover{color:var(--ink)}
+  .scopt.active{background:var(--accent2);border-style:solid;border-color:var(--accent2);color:#04121f;font-weight:700}
+  .intbox{margin-top:8px;padding:8px 9px;background:#0e141b;border:1px solid var(--edge);border-left:3px solid var(--purple);border-radius:6px}
+  .intbox .intf{width:100%;margin-top:5px;background:#141b24;color:var(--ink);border:1px solid var(--edge);border-radius:5px;padding:5px 8px;font-size:11.5px;font-family:var(--mono)}
+  .intbox .intf::placeholder{color:var(--faint)}
+
+  /* spec doc (right) */
+  .doc{font-size:12.5px;line-height:1.6}
+  .doc h2{font-size:15px;margin:18px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--edge)}
+  .doc h2:first-child{margin-top:0}
+  .doc h3{font-size:12.5px;margin:12px 0 5px;color:var(--accent)}
+  .doc ul{margin:4px 0 8px;padding-left:18px}
+  .doc li{margin-bottom:4px}
+  .doc code{font-family:var(--mono);font-size:11.5px;background:#0e141b;border:1px solid var(--edge);border-radius:4px;padding:0 4px;color:#9ecbff}
+  .doc pre{background:#0e141b;border:1px solid var(--edge);border-radius:7px;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:11px;color:#c9d3dd}
+  .doc .block{background:#2a1713;border:1px solid var(--question);border-radius:8px;padding:9px 12px;color:#ffb3aa}
+  .doc .ok{color:var(--accent2)}
+  .doc .muted{color:var(--faint)}
+
+  /* chat assistant (served mode) */
+  .chat-fab{position:fixed;right:18px;bottom:18px;z-index:40;display:none;
+    background:var(--accent);color:#04121f;border:none;border-radius:22px;padding:10px 16px;
+    font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+  .chat-drawer{position:fixed;right:18px;bottom:18px;z-index:41;width:380px;max-width:calc(100vw - 36px);
+    height:520px;max-height:calc(100vh - 90px);display:none;flex-direction:column;
+    background:var(--panel);border:1px solid var(--edge);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.55);overflow:hidden}
+  .chat-drawer.open{display:flex}
+  .chat-hd{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#131b24;border-bottom:1px solid var(--edge)}
+  .chat-hd b{font-size:13px}.chat-hd .m{font-size:10px;color:var(--faint);font-family:var(--mono)}
+  .chat-hd .x{margin-left:auto;background:none;border:none;color:var(--dim);font-size:16px;cursor:pointer}
+  .chat-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:9px}
+  .cmsg{max-width:88%;padding:8px 11px;border-radius:10px;font-size:12.5px;line-height:1.5;white-space:pre-wrap}
+  .cmsg.user{align-self:flex-end;background:var(--accent);color:#04121f}
+  .cmsg.assistant{align-self:flex-start;background:var(--panel2);border:1px solid var(--edge)}
+  .cmsg.muted{color:var(--faint)}
+  .chat-in{display:flex;gap:8px;padding:10px;border-top:1px solid var(--edge)}
+  .chat-in input{flex:1;background:#0e141b;color:var(--ink);border:1px solid var(--edge);border-radius:8px;padding:8px 10px;font-size:12.5px;font-family:var(--sans)}
+  .chat-in button{background:var(--accent);color:#04121f;border:none;border-radius:8px;padding:0 13px;font-weight:700;cursor:pointer}
+  .chat-hint{padding:0 12px 8px;font-size:10.5px;color:var(--faint)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">SE</div>
+  <div><h1>Decide — Legacy Capability → Development Spec</h1><div class="sub" id="hdrSub">—</div></div>
+  <div class="sp"></div>
+  <button class="btn" title="Open the Layer Map (legacy ↔ target)" onclick="window.open('map.html','_blank')">🔗 Layer Map</button>
+  <button class="btn" id="resetBtn">Reset decisions</button>
+  <button class="btn primary" id="dlBtn">⬇ Download spec.md</button>
+</header>
+
+<div class="stage">
+  <div class="pane left">
+    <div class="pane-title">Legacy Capability — decisions <span class="prog" id="prog"></span></div>
+    <div id="cats"></div>
+  </div>
+  <div class="pane right">
+    <div class="pane-title">Development Spec — Angular · REST · IRIS Interop · AI Hub</div>
+    <div class="doc" id="doc"></div>
+  </div>
+</div>
+
+<button class="chat-fab" id="chatFab">💬 Assistant</button>
+<div class="chat-drawer" id="chatDrawer">
+  <div class="chat-hd"><b>Decide Assistant</b><span class="m" id="chatModel"></span><button class="x" id="chatClose">✕</button></div>
+  <div class="chat-msgs" id="chatMsgs"></div>
+  <div class="chat-hint">Ask me to explain an option / the mapping, or to apply a decision (“make PM an event”, “resolve the work-order question as a required input”).</div>
+  <div class="chat-in"><input id="chatInp" placeholder="Ask or instruct…" autocomplete="off"><button id="chatSend">Send</button></div>
+</div>
+
+<script>
+const EMBED = %%GRAPH%%;
+const cap = g => g.capabilities[0];
+const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const TARGET = "RegisterEquipment";
+
+/* decision categories: parse the graph */
+const CATS = [
+  { key:"oq",   ic:"⚠", title:"Open Questions", note:"resolve policy before build", opts:["Business rule","Required input","Defer"],
+    items:g=>cap(g).openQuestions||[], label:i=>i.decisionPoint, sub:i=>i.promptText },
+  { key:"rule", ic:"§", title:"Rules & Validations", opts:["Preserve","Inline","Drop"],
+    items:g=>cap(g).businessRules||[], label:i=>i.name, sub:i=>i.condition },
+  { key:"beh",  ic:"⚙", title:"Behaviors & Side Effects", opts:["Business Operation","Event","Integration","Inline","Drop"],
+    items:g=>cap(g).sideEffects||[], label:i=>i.name, sub:i=>i.call },
+  { key:"data", ic:"▤", title:"Data Contract", opts:["Include","Omit"],
+    items:g=>(cap(g).data||[]).filter(d=>d.kind==="field"||d.kind==="crossReference"),
+    label:i=>i.name||i.global||("xref "+i.index)||i.id, sub:i=>i.kind==="crossReference"?("query filter · "+(i.purpose||"")):("field "+(i.field||"")+" · "+(i.access||"")) },
+  { key:"sec",  ic:"⚿", title:"Security & Policy", opts:["Require (auth)","Note","Drop"],
+    items:g=>cap(g).security||[], label:i=>i.key, sub:i=>i.gates },
+  { key:"dep",  ic:"⇗", title:"Dependencies", opts:["Platform (reuse)","Reimplement","Integration"],
+    items:g=>cap(g).dependencies||[], label:i=>i.target, sub:i=>i.why },
+];
+
+function defaultFor(cat,item){
+  if(cat.key==="oq")   return "Defer";
+  if(cat.key==="rule") return "Preserve";
+  if(cat.key==="beh")  return item.id==="SIDE.Bulletin" ? "Event" : "Business Operation";
+  if(cat.key==="sec")  return "Require (auth)";
+  if(cat.key==="data") return "Include";
+  if(cat.key==="dep")  return /FileMan|DIC|DIE|DIQ|DIR|XLFSTR|ENUTL|ENJ/.test(item.target||item.id) ? "Platform (reuse)" : "Integration";
+  return cat.opts[0];
+}
+
+let G, dec={}, oqPolicy={}, scope={}, integration={}, LSKEY="decide";
+
+function isBlocking(id){
+  // open-question row is blocking if deferred, or resolved-but-no-policy-entered
+  const cat = CATS.find(c=>c.key==="oq"); if(!cat) return false;
+  if(!cat.items(G).some(i=>i.id===id)) return false;
+  if(dec[id]==="Defer") return true;
+  return !((oqPolicy[id]||"").trim());
+}
+function blockingList(){
+  return (cap(G).openQuestions||[]).filter(q=>isBlocking(q.id));
+}
+
+/* ---------- left pane ---------- */
+function renderLeft(){
+  let h="";
+  CATS.forEach(cat=>{
+    const items=cat.items(G); if(!items.length) return;
+    h+=`<div class="cat ${cat.key}"><div class="cat-h"><span class="ic">${cat.ic}</span>${cat.title}<span class="n">(${items.length})</span>${cat.note?`<span class="n"> · ${cat.note}</span>`:""}</div>`;
+    items.forEach(it=>{
+      const id=it.id, cur=dec[id];
+      const blk = cat.key==="oq" && isBlocking(id);
+      h+=`<div class="row ${blk?'block':''}" data-row="${esc(id)}">
+        <div class="lbl">${blk?'<span class="warni">⚠</span>':''}${esc(cat.label(it)||id)}</div>
+        <div class="sub">${esc(cat.sub(it)||"")}</div>
+        <div class="seg">${cat.opts.map(o=>`<button class="opt ${o===cur?'active':''}" data-id="${esc(id)}" data-opt="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
+      if(cat.key==="oq"){
+        h+=`<textarea class="oqp" data-oq="${esc(id)}" placeholder="${cur==='Defer'?'Deferred — pick Business rule or Required input, then state the resolved policy…':'State the resolved policy (becomes the rule / input definition)…'}">${esc(oqPolicy[id]||"")}</textarea>`;
+        h+=`<div class="hintline">${esc(it.whatIsNotCoded||"")}</div>`;
+      }
+      if(cat.key==="beh" && cur!=="Drop"){
+        const sc = scope[id]||"Build now";
+        h+=`<div class="seg scope">${["Build now","Defer"].map(o=>`<button class="scopt ${o===sc?'active':''}" data-sid="${esc(id)}" data-scope="${esc(o)}">${o==="Build now"?"● Build now":"◷ Defer to later phase"}</button>`).join("")}</div>`;
+        if(cur==="Integration"){
+          const t=integration[id]||{};
+          h+=`<div class="intbox"><div class="hintline">External integration target — the coding agent builds this call:</div>
+            <input class="intf" data-int="${esc(id)}" data-f="system"   placeholder="System (e.g. Jira)" value="${esc(t.system||"")}">
+            <input class="intf" data-int="${esc(id)}" data-f="endpoint" placeholder="Endpoint / interface (e.g. POST /rest/api/2/issue)" value="${esc(t.endpoint||"")}">
+            <input class="intf" data-int="${esc(id)}" data-f="trigger"  placeholder="Trigger (e.g. on PM enrollment)" value="${esc(t.trigger||"")}">
+            <input class="intf" data-int="${esc(id)}" data-f="mapping"  placeholder="Field mapping (e.g. serial + category → issue summary; project=ENG)" value="${esc(t.mapping||"")}"></div>`;
+        }
+      }
+      h+=`</div>`;
+    });
+    h+=`</div>`;
+  });
+  document.getElementById("cats").innerHTML=h;
+  updateProg();
+}
+function updateProg(){
+  const oqs=cap(G).openQuestions||[]; const resolved=oqs.filter(q=>!isBlocking(q.id)).length;
+  document.getElementById("prog").textContent = `${resolved}/${oqs.length} open questions resolved`;
+}
+
+/* ---------- spec doc (right) ---------- */
+function specMD(){
+  const c=cap(G), beh=c.sideEffects||[], rules=c.businessRules||[], oqs=c.openQuestions||[];
+  const disp = id => dec[id];
+  const byDisp = d => beh.filter(b=>disp(b.id)===d);
+  const isDeferred = id => (scope[id]||"Build now")==="Defer";
+  const built = d => beh.filter(b=>disp(b.id)===d && !isDeferred(b.id));   // in this build phase
+  const dataFields=(c.data||[]).filter(d=>d.kind==="field" && dec[d.id]!=="Omit");
+  const xrefs=(c.data||[]).filter(d=>d.kind==="crossReference" && dec[d.id]!=="Omit");
+  const blk=blockingList();
+  let L=[];
+  L.push(`# Development Spec — ${TARGET}`);
+  L.push(`Source: ${G.workflow.name} · legacy ${c.entryPoint?c.entryPoint.dispatch:""} (file 6914). Generated from the capability graph; every element traces to legacy evidence.`);
+  L.push("");
+  L.push(`## 🚫 Blocking — resolve before build`);
+  if(blk.length){ blk.forEach(q=> L.push(`- ${q.decisionPoint} — ${dec[q.id]==="Defer"?"deferred (no decision)":"needs policy text"}`)); }
+  else L.push(`- None — all open questions resolved.`);
+  L.push("");
+  L.push(`## Command & REST contract`);
+  L.push(`- Command: \`${TARGET}\``);
+  L.push(`- \`POST /equipment\` — create; body = the request data contract below; returns the response contract below.`);
+  L.push(`- \`GET /equipment/next-ien\` — returns \`{ status, ien }\`; the form pre-fetches this to show the IEN display-only (server re-allocates authoritatively on POST).`);
+  const bigLookups=(c.data||[]).filter(d=>d.kind==="field" && d.pointsTo && typeof d.lookupCount==="number" && d.lookupCount>60 && dec[d.id]!=="Omit");
+  if(bigLookups.length){
+    const files=[...new Set(bigLookups.map(d=>d.lookupTable||d.pointsTo))];
+    L.push(`- \`GET /lookup/{file}?q=\` — type-ahead search for large pointer files; returns \`[{ ien, display }]\`. Files: ${files.map(n=>"`"+n+"`").join(", ")}.`);
+  }
+  L.push(`- Exposed as an IRIS AI Hub agent tool (see below).`);
+  L.push("");
+  L.push(`## REST request — data contract`);
+  if(dataFields.length){
+    L.push("```");
+    dataFields.forEach(d=> L.push(`${(d.name||d.field)}${/create|write/.test(d.access||"")?"":"  (read-only)"}   [fld ${d.field}]`));
+    L.push("```");
+  } else L.push(`- (no fields selected)`);
+  const xrefNames=xrefs.map(x=>x.index||x.name).filter(Boolean);
+  if(xrefNames.length){ L.push(`Query filters (from cross-references): ${xrefNames.map(n=>"`"+n+"`").join(", ")}.`); }
+  L.push("");
+  L.push(`## REST response — data contract`);
+  L.push("```");
+  L.push(`{ status, equipmentIEN, lifecycleStatus${built("Business Operation").some(b=>b.id==="SIDE.WorkOrder")?", workOrderIEN":""}${built("Business Operation").some(b=>b.id==="SIDE.FinancialAsset")?", financialAssetId":""} }`);
+  L.push("```");
+  L.push(`- \`status\` — \`"OK"\` or an error code/message.`);
+  L.push(`- \`equipmentIEN\` — new IEN allocated in \`^ENG(6914)\`; drives the confirmation page.`);
+  L.push(`- \`lifecycleStatus\` — orchestration outcome (created / partial / failed).`);
+  if(built("Business Operation").some(b=>b.id==="SIDE.WorkOrder")) L.push(`- \`workOrderIEN\` — present when an incoming-inspection work order was created (file 6920; see OQ.WorkOrderPolicy).`);
+  if(built("Business Operation").some(b=>b.id==="SIDE.FinancialAsset")) L.push(`- \`financialAssetId\` — present when an FA document was sent to Austin (see OQ.FAConfirmation).`);
+  L.push("");
+  L.push(`## Business rules`);
+  rules.filter(r=>dec[r.id]!=="Drop").forEach(r=> L.push(`- **${r.name}** (${dec[r.id]||"Preserve"}): assert \`${r.condition}\` → ${r.effect}`));
+  oqs.forEach(q=>{ if(!isBlocking(q.id)){ const mode=dec[q.id]; L.push(`- **${q.decisionPoint}** (resolved → ${mode}): ${(oqPolicy[q.id]||"").trim()}`);} });
+  if(!rules.filter(r=>dec[r.id]!=="Drop").length && !oqs.some(q=>!isBlocking(q.id))) L.push(`- (none yet)`);
+  L.push("");
+  L.push(`## Interop production (IRIS)`);
+  L.push(`- Business Service: \`EquipmentEntry.Service.REST\` — \`POST /equipment\``);
+  L.push(`- Orchestrator BP: \`EquipmentEntry.Process.Orchestrator\``);
+  L.push(`- **Build scope:** implement only the items below marked for this phase; deferred items are explicitly out of this build.`);
+  const ops=built("Business Operation");
+  if(ops.length){ L.push(`- Business Operations:`); ops.forEach(b=> L.push(`  - \`Op.${b.name.replace(/[^A-Za-z0-9]/g,"")}\` — from \`${b.call}\` (derivedFrom ${b.id})`)); }
+  const integ=built("Integration");
+  if(integ.length){ L.push(`- External integrations:`); integ.forEach(b=>{ const t=integration[b.id]||{};
+    L.push(`  - **${b.name}** → **${t.system||"(target TBD)"}** — ${t.endpoint||"(endpoint TBD)"}${t.trigger?` · trigger: ${t.trigger}`:""}${t.mapping?` · mapping: ${t.mapping}`:""} (from \`${b.call}\`, ${b.id})`); }); }
+  const inl=built("Inline"); if(inl.length) L.push(`- Inline in BP: ${inl.map(b=>b.name).join(", ")}`);
+  const ev=built("Event"); if(ev.length) L.push(`- Published events: ${ev.map(b=>"`"+b.name.replace(/[^A-Za-z0-9]/g,"")+"`").join(", ")}`);
+  const dr=byDisp("Drop"); if(dr.length) L.push(`- Dropped (legacy-only, not carried forward): ${dr.map(b=>b.name).join(", ")}`);
+  const deferred=beh.filter(b=>isDeferred(b.id) && disp(b.id)!=="Drop");
+  if(deferred.length) L.push(`- ⏸ Deferred to a later phase (NOT built now): ${deferred.map(b=>b.name+" ("+disp(b.id)+")").join(", ")}`);
+  L.push("");
+  L.push(`## Security / auth`);
+  (c.security||[]).forEach(s=>{ const d=dec[s.id]; if(d==="Drop")return; L.push(`- \`${s.key}\` → ${d==="Require (auth)"?"required role/scope":"note"}: ${s.gates}`); });
+  L.push("");
+  L.push(`## AI Hub agent tool`);
+  L.push(`- Tool \`${TARGET}\`: registers a new equipment item. Input schema = the REST request above; invokes \`POST /equipment\`. Returns the new IEN + lifecycle status.`);
+  L.push("");
+  L.push(`## Front end (Angular)`);
+  L.push(`- Angular 21 SPA (matches the existing Vista_Equipment stack); calls \`POST /equipment\` via \`HttpClient\` through the dev proxy.`);
+  const fieldById = id => (c.data||[]).find(x=>x.id===id);
+  const DROPDOWN_MAX = 60;   // ≤ this many rows → render as a <select> dropdown; larger → type-ahead
+  L.push(`- **Form-control convention:** set-of-codes fields render as a native \`<select>\`; pointer/lookup fields render as a \`<select>\` when the source file has ≤ ${DROPDOWN_MAX} rows, otherwise as a **type-ahead autocomplete** backed by a search endpoint (\`GET /lookup/<file>?q=\`). Dates → date picker; numerics → number input. Each field below states its resolved control.`);
+  const control = d => {
+    if(d.enumValues) return "select (dropdown) — options: " + d.enumValues;
+    if(d.pointsTo){
+      const n=d.lookupCount, tbl=d.lookupTable?` from \`${d.lookupTable}\``:"";
+      if(typeof n==="number"){
+        return n<=DROPDOWN_MAX
+          ? `select (dropdown) — ${n} options${tbl} · lookup file ${d.pointsTo}`
+          : `autocomplete / type-ahead — ${n} rows${tbl} · lookup file ${d.pointsTo}`;
+      }
+      return "autocomplete / lookup → file " + d.pointsTo;
+    }
+    if(/date/i.test(d.name)||/Date/.test(d.type||"")) return "date picker";
+    if(/Numeric/.test(d.type||"")||/value|cost/i.test(d.name)) return "number";
+    if(d.type) return d.type;
+    return "text";
+  };
+  const screens = (c.formScreens||[]);
+  const reqInputs = oqs.filter(q=>!isBlocking(q.id) && dec[q.id]==="Required input");
+  if(screens.length){
+    L.push(`- Container component \`register-equipment\` drives a **multi-step wizard**. **Rule: each legacy ScreenMan screen becomes one Angular page** — preserving the operator's screen-by-screen entry flow. A **confirmation page is always appended** as the final step.`);
+    const entryScreens = screens.filter(s=>s.fields && s.fields.length);
+    entryScreens.forEach(s=>{
+      L.push("");
+      L.push(`### Page ${s.screen} — ${s.title}  _(← ScreenMan screen ${s.screen} of ${entryScreens.length})_`);
+      s.fields.forEach(fid=>{
+        const d=fieldById(fid); if(!d) return; if(dec[d.id]==="Omit") return;
+        const displayOnly = d.field===".01";
+        const embedded = Array.isArray(d.options) && d.options.length ? " · options embedded below" : "";
+        L.push(`- **${d.name}** \`[fld ${d.field}]\` — ${displayOnly?"display-only (system-allocated IEN)":control(d)+embedded}${d.condition?` · _${d.condition}_`:""}`);
+      });
+    });
+    // confirmation page (always last)
+    const confN = entryScreens.length + 1;
+    L.push("");
+    L.push(`### Page ${confN} — Confirmation & Submit`);
+    L.push(`- Read-only summary of every entered field, grouped under the page headings above — the operator reviews before committing.`);
+    L.push(`- **Submit** → \`POST /equipment\`; show "Saving…", then the new **IEN + lifecycle status**, or an error banner on failure.`);
+    if(reqInputs.length) L.push(`- Prompt for resolved open questions on this page: ${reqInputs.map(q=>`_${q.decisionPoint}_`).join("; ")}.`);
+    const confScreen = screens.find(s=>s.sideEffectPrompts && s.sideEffectPrompts.length);
+    if(confScreen){ const still = confScreen.sideEffectPrompts.filter(id=>isBlocking(id)); if(still.length) L.push(`- Blocked side-effect prompts (resolve in Decide first): ${still.map(id=>{const q=oqs.find(x=>x.id===id);return q?q.decisionPoint:id;}).join("; ")}.`); }
+  } else {
+    L.push(`- Single \`register-equipment\` form bound to the data-contract fields above (no ScreenMan screen structure detected); append a confirmation step before submit.`);
+    if(reqInputs.length) L.push(`- Additional inputs from resolved open questions: ${reqInputs.map(q=>"`"+q.decisionPoint+"`").join(", ")}.`);
+  }
+  L.push("");
+  L.push(`- Form uses template-driven bindings (\`FormsModule\`), matching the existing Vista_Equipment stack.`);
+  L.push(`- Fetch the next IEN up front (\`GET /equipment/next-ien\`) so page 1 can show it display-only; the POST allocates authoritatively server-side.`);
+  L.push(`- Client-side validation mirrors the business rules (e.g. serial required/format); server remains source of truth.`);
+  L.push("");
+  L.push(`## Look & feel (design system)`);
+  L.push(`Adopt the **U.S. Web Design System (USWDS v3) with the VA.gov theme** — this is a federal VA application, so the visual language must match VA.gov (reference: the Million Veteran Program site). Recommended: the \`@department-of-veterans-affairs/component-library\` (VA design system) or \`@uswds/uswds\` for tokens + components.`);
+  L.push(`- **Color tokens:** header/footer band navy \`#112e51\`; accent section band blue \`#2a5599\` (lighter \`#4a6ba5\`); primary action (buttons/links) \`#0071bc\`, hover/active \`#205493\`; page background \`#f1f1f1\`; content surfaces white \`#ffffff\`; ink \`#1b1b1b\`, muted \`#5b616b\`, borders \`#d6d7d9\`; crisis/error red \`#e31c3d\`.`);
+  L.push(`- **Typography:** serif headings (\`Bitter\` / \`Merriweather\`), sans body (\`Source Sans Pro\`); base 16–17px, line-height 1.5; bold section headings.`);
+  L.push(`- **Layout:** centered container (max-width ~1000px); top utility bar (Contact Us / Sign In) → navy primary nav → content in alternating white / blue section bands; white cards with 1px \`#d6d7d9\` border + subtle shadow; generous vertical rhythm.`);
+  L.push(`- **App shell:** keep it minimal — just a navy app header showing the app title. Do NOT add a VA masthead/"official website" strip, a crisis-line banner, footer link columns, or a contact/phone block; this is an internal data-entry tool, only the VA visual language (color, type, components) is wanted.`);
+  L.push(`- **Form components (USWDS):** labels **bold, above** each control; large inputs (≥44px touch target), 2px border, focus ring \`#0071bc\`; wizard steps → USWDS **Step indicator** (numbered, current highlighted); primary Next/Submit = solid primary button, Back = outline button; lookup combobox / left-rail → USWDS **combo box**, enum selects → USWDS **dropdown**; confirmation → USWDS **Summary box**; success → green alert, errors → red alert.`);
+  L.push(`- **Accessibility:** Section 508 / WCAG 2.1 AA — semantic landmarks, every control labeled, visible focus, ≥4.5:1 text contrast, fully keyboard-navigable wizard and lookups.`);
+  L.push("");
+  // embedded option sets for small dropdowns (values shipped in-spec so the build needs no extra query)
+  const optFields=(c.data||[]).filter(d=>d.kind==="field" && Array.isArray(d.options) && d.options.length && dec[d.id]!=="Omit");
+  if(optFields.length){
+    L.push(`## Lookup option sets (embedded)`);
+    L.push(`Full option lists for the small dropdown fields — pulled live from the sandbox, shipped in-spec so the build needs no extra query. Large lookups use \`GET /lookup/{file}?q=\` instead.`);
+    optFields.forEach(d=>{
+      L.push("");
+      L.push(`### ${d.name} \`[fld ${d.field}]\` — ${d.options.length} options${d.lookupTable?` (\`${d.lookupTable}\`)`:""}`);
+      L.push("```");
+      d.options.forEach(o=> L.push(`${o.value}${o.label && o.label!==o.value?"  —  "+o.label:""}`));
+      L.push("```");
+    });
+    L.push("");
+  }
+  L.push(`## Acceptance criteria — differential vs. legacy`);
+  L.push(`- Creates a record in \`^ENG(6914)\` with a new IEN (next-IEN = \`$P(^ENG(6914,0),"^",3)+1\`).`);
+  if(dataFields.some(d=>d.id==="FLD.serial")) L.push(`- Files SERIAL (field 5) and maintains the \`F\` + \`FC\` cross-references; \`FC\` uses the canonicalized serial (UPPERCASE, punctuation stripped, 30 chars) for duplicate detection.`);
+  ops.concat(ev).forEach(b=> L.push(`- ${b.name} occurs per its disposition (${dec[b.id]}).`));
+  rules.filter(r=>dec[r.id]==="Preserve").forEach(r=> L.push(`- Rule holds: ${r.condition}.`));
+  L.push(`- Given identical sandbox input, target output & state match the legacy option on all of the above.`);
+  L.push("");
+  L.push(`## Traceability`);
+  L.push(`- \`${TARGET}\` ← ${c.id}, ${c.entryPoint?c.entryPoint.id:""}, ${c.entryPoint?c.entryPoint.dispatch:""}`);
+  ops.forEach(b=> L.push(`- \`Op.${b.name.replace(/[^A-Za-z0-9]/g,"")}\` ← ${b.id}${b.candidateCapability?(" ("+b.candidateCapability+")"):""}`));
+  return L.join("\n");
+}
+
+/* tiny markdown -> html */
+function mdToHtml(md){
+  const lines=md.split("\n"); let h="", inUl=false, inPre=false;
+  const closeUl=()=>{ if(inUl){h+="</ul>";inUl=false;} };
+  const inline=s=>esc(s).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>");
+  lines.forEach(ln=>{
+    if(ln.trim()==="```"){ if(inPre){h+="</pre>";inPre=false;} else {closeUl();h+="<pre>";inPre=true;} return; }
+    if(inPre){ h+=esc(ln)+"\n"; return; }
+    if(ln.startsWith("## ")){ closeUl(); h+=`<h2>${inline(ln.slice(3))}</h2>`; return; }
+    if(ln.startsWith("# ")){ closeUl(); h+=`<h2 style="font-size:17px">${inline(ln.slice(2))}</h2>`; return; }
+    if(ln.startsWith("- ")||ln.startsWith("  - ")){ if(!inUl){h+="<ul>";inUl=true;} const ind=ln.startsWith("  - "); h+=`<li${ind?' style="margin-left:16px"':''}>${inline(ln.replace(/^\s*- /,""))}</li>`; return; }
+    closeUl();
+    if(ln.trim()===""){ h+=""; return; }
+    if(ln.startsWith("🚫")||ln.startsWith("Source:")){ h+=`<p class="muted">${inline(ln)}</p>`; return; }
+    h+=`<p>${inline(ln)}</p>`;
+  });
+  closeUl(); if(inPre)h+="</pre>";
+  // highlight blocking header section
+  return h;
+}
+function renderRight(){ document.getElementById("doc").innerHTML = mdToHtml(specMD()); updateProg(); }
+
+/* ---------- state + events ---------- */
+const SERVED = location.protocol === "http:" || location.protocol === "https:";
+function persist(){
+  try{ localStorage.setItem(LSKEY, JSON.stringify({dec,oqPolicy,scope,integration})); }catch(e){}
+  if(SERVED){ fetch("/api/decisions",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({dec,oqPolicy,scope,integration})}).catch(()=>{}); }
+}
+
+/* ---- chat assistant (served mode) ---- */
+let chatHistory=[];
+function addMsg(role,text,cls){ const box=document.getElementById("chatMsgs"); const d=document.createElement("div"); d.className="cmsg "+role+(cls?(" "+cls):""); d.textContent=text; box.appendChild(d); box.scrollTop=box.scrollHeight; return d; }
+async function sendChat(){
+  const inp=document.getElementById("chatInp"); const msg=inp.value.trim(); if(!msg) return;
+  inp.value=""; addMsg("user",msg); const prior=chatHistory.slice(); chatHistory.push({role:"user",text:msg});
+  const pending=addMsg("assistant","…","muted");
+  try{
+    const r=await fetch("/api/agent/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:msg,history:prior})});
+    const res=await r.json(); pending.remove();
+    if(res.error){ addMsg("assistant","⚠ "+res.error); return; }
+    addMsg("assistant",res.reply); chatHistory.push({role:"assistant",text:res.reply});
+    if(res.decisions&&res.decisions.dec){ dec=res.decisions.dec; oqPolicy=res.decisions.oqPolicy||{}; renderLeft(); renderRight(); }
+  }catch(e){ pending.remove(); addMsg("assistant","⚠ "+e.message); }
+}
+function initChat(){
+  document.getElementById("chatFab").style.display="block";
+  const dr=document.getElementById("chatDrawer");
+  document.getElementById("chatFab").onclick=()=>{ dr.classList.add("open"); document.getElementById("chatFab").style.display="none"; document.getElementById("chatInp").focus(); };
+  document.getElementById("chatClose").onclick=()=>{ dr.classList.remove("open"); document.getElementById("chatFab").style.display="block"; };
+  document.getElementById("chatSend").onclick=sendChat;
+  document.getElementById("chatInp").addEventListener("keydown",e=>{ if(e.key==="Enter") sendChat(); });
+}
+function restore(){ try{ const s=JSON.parse(localStorage.getItem(LSKEY)||"{}"); if(s.dec)dec=s.dec; if(s.oqPolicy)oqPolicy=s.oqPolicy; if(s.scope)scope=s.scope; if(s.integration)integration=s.integration; }catch(e){} }
+
+document.getElementById("cats").addEventListener("click", e=>{
+  const sb=e.target.closest(".scopt");
+  if(sb){ scope[sb.dataset.sid]=sb.dataset.scope; sb.parentElement.querySelectorAll(".scopt").forEach(o=>o.classList.toggle("active",o===sb)); persist(); renderRight(); return; }
+  const b=e.target.closest(".opt"); if(!b) return;
+  const id=b.dataset.id, opt=b.dataset.opt; dec[id]=opt;
+  const row0=b.closest(".row");
+  if(row0 && row0.parentElement.classList.contains("beh")){ persist(); renderLeft(); renderRight(); return; }
+  const seg=b.parentElement; seg.querySelectorAll(".opt").forEach(o=>o.classList.toggle("active", o===b));
+  // refresh blocking state on that row if open-question
+  const row=b.closest(".row");
+  if(row && row.parentElement.classList.contains("oq")){
+    const blk=isBlocking(id); row.classList.toggle("block",blk);
+    const lbl=row.querySelector(".lbl"); lbl.innerHTML=(blk?'<span class="warni">⚠</span>':'')+lbl.textContent.replace(/^⚠\s*/,"");
+    const ta=row.querySelector(".oqp"); if(ta) ta.placeholder = opt==="Defer" ? "Deferred — pick Business rule or Required input, then state the resolved policy…" : "State the resolved policy (becomes the rule / input definition)…";
+  }
+  persist(); renderRight();
+});
+document.getElementById("cats").addEventListener("input", e=>{
+  const inf=e.target.closest(".intf");
+  if(inf){ const id=inf.dataset.int; (integration[id]=integration[id]||{})[inf.dataset.f]=inf.value; persist(); renderRight(); return; }
+  const t=e.target.closest(".oqp"); if(!t) return;
+  const id=t.dataset.oq; oqPolicy[id]=t.value;
+  const row=t.closest(".row"); const blk=isBlocking(id); row.classList.toggle("block",blk);
+  const lbl=row.querySelector(".lbl"); lbl.innerHTML=(blk?'<span class="warni">⚠</span>':'')+lbl.textContent.replace(/^⚠\s*/,"");
+  persist(); renderRight();
+});
+document.getElementById("resetBtn").onclick=()=>{
+  dec={}; oqPolicy={}; scope={}; integration={}; CATS.forEach(c=>c.items(G).forEach(i=>dec[i.id]=defaultFor(c,i)));
+  persist(); renderLeft(); renderRight();
+};
+document.getElementById("dlBtn").onclick=()=>{
+  const blob=new Blob([specMD()],{type:"text/markdown"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="spec.md"; a.click();
+};
+
+/* ---------- boot ---------- */
+(async function(){
+  G=EMBED;
+  try{ const r=await fetch("new-inventory-entry.json",{cache:"no-store"}); if(r.ok) G=await r.json(); }catch(e){}
+  LSKEY="decide:"+G.workflow.id;
+  document.getElementById("hdrSub").textContent = G.workflow.name + " → " + TARGET;
+  CATS.forEach(c=>c.items(G).forEach(i=>{ if(dec[i.id]==null) dec[i.id]=defaultFor(c,i); }));
+  if(SERVED){
+    try{ const s=await (await fetch("/api/decisions",{cache:"no-store"})).json(); if(s&&s.dec){ dec=s.dec; oqPolicy=s.oqPolicy||{}; scope=s.scope||{}; integration=s.integration||{}; } }catch(e){}
+    initChat();
+  } else {
+    restore();
+  }
+  CATS.forEach(c=>c.items(G).forEach(i=>{ if(dec[i.id]==null) dec[i.id]=defaultFor(c,i); }));
+  renderLeft(); renderRight();
+})();
+</script>
+</body>
+</html>

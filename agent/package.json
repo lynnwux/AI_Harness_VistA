@@ -1,0 +1,14 @@
+{
+  "name": "vista-se-workbench-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Interactive Decide-stage agent for the VistA Service Enablement Workbench (Bedrock-backed).",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "smoke": "node smoke.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

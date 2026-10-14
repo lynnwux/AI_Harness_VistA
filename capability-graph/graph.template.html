@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Legacy Capability Graph — New Inventory Entry</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#141b24; --panel2:#1b2430; --edge:#26303d;
+    --ink:#e6edf3; --dim:#8b98a5; --faint:#5b6672;
+    --verified:#2fae5f; --observed:#3d9cf5; --derived:#bc8cff; --inferred:#f0a020; --group:#64748b;
+    --question:#ff6b5e;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px;overflow:hidden}
+  header{
+    display:flex;align-items:center;gap:14px;height:50px;padding:0 16px;
+    background:linear-gradient(180deg,#182029,#10161d);border-bottom:1px solid var(--edge);
+  }
+  header .logo{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,#3d9cf5,#1f6feb);
+    display:grid;place-items:center;font-weight:800;color:#fff;font-size:12px}
+  header h1{font-size:14px;margin:0;font-weight:650}
+  header .sub{color:var(--dim);font-size:11.5px}
+  header .sp{flex:1}
+  .btn{background:var(--panel2);color:var(--ink);border:1px solid var(--edge);border-radius:7px;
+    padding:6px 11px;font-size:12.5px;cursor:pointer;font-family:var(--sans)}
+  .btn:hover{border-color:#3d9cf5}
+  .legend{display:flex;gap:12px;align-items:center;font-size:11px;color:var(--dim)}
+  .legend span{display:flex;align-items:center;gap:5px}
+  .legend .d{width:9px;height:9px;border-radius:50%}
+
+  .stage{display:flex;height:calc(100% - 50px)}
+  #svgWrap{flex:1;min-width:0;position:relative;overflow:hidden;cursor:grab}
+  #svgWrap.drag{cursor:grabbing}
+  svg{width:100%;height:100%;display:block}
+  .hint{position:absolute;left:12px;bottom:10px;font-size:11px;color:var(--faint);
+    background:rgba(13,17,23,.7);padding:4px 9px;border-radius:6px;pointer-events:none}
+
+  /* nodes */
+  .edge{fill:none;stroke:#33404e;stroke-width:1.3}
+  .edge.dim{stroke:#222b36}
+  .node{cursor:pointer}
+  .node rect.box{fill:var(--panel);stroke:var(--edge);stroke-width:1;rx:6}
+  .node:hover rect.box{stroke:#3d9cf5}
+  .node.sel rect.box{stroke:#3d9cf5;stroke-width:2}
+  .node rect.stripe{rx:2}
+  .node text.lbl{fill:var(--ink);font-family:var(--sans);font-size:11.5px;dominant-baseline:middle}
+  .node text.sub{fill:var(--faint);font-family:var(--mono);font-size:9px;dominant-baseline:middle}
+  .node text.tw{fill:var(--dim);font-size:10px;dominant-baseline:middle} /* +/- toggle */
+  .node.group rect.box{fill:#111823;stroke-dasharray:none}
+  .node.group text.lbl{fill:var(--dim);font-weight:700;text-transform:uppercase;letter-spacing:.5px;font-size:10px}
+  .node.question rect.box{fill:#2a1713;stroke:var(--question)}
+  .node.question text.lbl{fill:#ffb3aa}
+
+  /* detail panel */
+  #detail{width:320px;flex:0 0 auto;border-left:1px solid var(--edge);background:var(--panel);
+    overflow-y:auto;padding:16px 16px 40px}
+  #detail h2{font-size:14px;margin:0 0 2px}
+  #detail .kind{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--faint);font-weight:700}
+  #detail .row{margin:12px 0 0}
+  #detail .lab{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);margin-bottom:3px}
+  #detail .val{font-size:12.5px;line-height:1.55}
+  #detail .k{font-family:var(--mono);font-size:11.5px;color:#9ecbff;word-break:break-all}
+  #detail ul{margin:4px 0 0;padding-left:16px}
+  #detail li{font-size:11.5px;color:var(--dim);margin-bottom:4px;font-style:italic}
+  .pv{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;
+    border-radius:3px;padding:2px 7px;color:#04121f}
+  .conf{font-family:var(--mono);font-size:12px;color:var(--dim);margin-left:6px}
+  .cond{color:var(--inferred);font-size:11.5px}
+  .empty{color:var(--faint);font-style:italic;margin-top:40px;text-align:center}
+
+  /* ---- print / PDF: light theme, whole graph fit to page ---- */
+  @media print{
+    @page{ size:landscape; margin:8mm }
+    header,#detail,.hint{ display:none !important }
+    body{ background:#fff; overflow:visible }
+    .stage{ display:block; height:auto }
+    #svgWrap{ overflow:visible; height:auto; cursor:default }
+    svg{ height:auto }
+    .edge{ stroke:#9aa7b4 }
+    .node rect.box{ fill:#fff; stroke:#c3ccd6 }
+    .node.group rect.box{ fill:#eef2f6 }
+    .node text.lbl{ fill:#0f172a }
+    .node.group text.lbl{ fill:#475569 }
+    .node text.sub{ fill:#64748b }
+    .node text.tw{ fill:#475569 }
+    .node rect.stripe{ -webkit-print-color-adjust:exact; print-color-adjust:exact }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">SE</div>
+  <div><h1>Legacy Capability Graph</h1><div class="sub" id="hdrSub">—</div></div>
+  <div class="sp"></div>
+  <div class="legend">
+    <span><i class="d" style="background:var(--verified)"></i>verified</span>
+    <span><i class="d" style="background:var(--observed)"></i>observed</span>
+    <span><i class="d" style="background:var(--derived)"></i>derived</span>
+    <span><i class="d" style="background:var(--inferred)"></i>AI-inferred</span>
+    <span><i class="d" style="background:var(--question)"></i>needs confirmation</span>
+  </div>
+  <button class="btn" id="expandBtn">Expand all</button>
+  <button class="btn" id="collapseBtn">Collapse hubs</button>
+  <button class="btn" id="fitBtn">Fit</button>
+  <button class="btn" id="pdfBtn" title="Print the whole graph to PDF">🖨 PDF</button>
+  <button class="btn" title="Open the Decide stage (graph → dev spec)" onclick="window.open('decide.html','_blank')">⚖ Decide</button>
+  <button class="btn" title="Open the Layer Map (legacy ↔ target)" onclick="window.open('map.html','_blank')">🔗 Layer Map</button>
+</header>
+
+<div class="stage">
+  <div id="svgWrap">
+    <svg id="svg"><g id="view"></g></svg>
+    <div class="hint">drag to pan · scroll to zoom · click a node to inspect / collapse</div>
+  </div>
+  <div id="detail"><div class="empty">Click any node to see its evidence, provenance and confidence.</div></div>
+</div>
+
+<script>
+const EMBED = %%GRAPH%%;
+
+const PCOLOR = {verified:"var(--verified)",observed:"var(--observed)",derived:"var(--derived)","AI-inferred":"var(--inferred)"};
+const PHEX   = {verified:"#2fae5f",observed:"#3d9cf5",derived:"#bc8cff","AI-inferred":"#f0a020"};
+const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const trunc = (s,n)=> s && s.length>n ? s.slice(0,n-1)+"…" : (s||"");
+
+/* ---------- build tree from graph ---------- */
+let NODES = {};   // id -> node
+function N(id,label,kind,meta,extra){ const n={id,label,kind,meta:meta||null,extra:extra||{},children:[],collapsed:false}; NODES[id]=n; return n; }
+
+function dataLabel(d){ return d.name || d.global || (d.index?("xref "+d.index):"") || (d.indexes?"secondary xrefs":"") || d.id; }
+function dataSub(d){ return d.field?("fld "+d.field):(d.global?d.global:(d.purpose?trunc(d.purpose,40):"")); }
+
+function buildTree(g){
+  NODES = {};
+  const root = N(g.workflow.id, g.workflow.name, "workflow", g.workflow.meta, {sub:g.workflow.package, detail:g.workflow});
+  // interactions branch
+  if(g.interactions && g.interactions.length){
+    const ixg = N("grp.ix","Interactions",  "group");
+    ixg.extra.count = g.interactions.length;
+    g.interactions.forEach(i=> ixg.children.push(N(i.id, i.name, "interaction", i.meta, {sub:(i.exercises||[]).join(", "), detail:i}) ));
+    root.children.push(ixg);
+  }
+  (g.capabilities||[]).forEach(cap=>{
+    const c = N(cap.id, cap.name, "capability", cap.meta, {sub:trunc(cap.summary,50), detail:cap});
+    root.children.push(c);
+    const hub=(id,label,items,mk)=>{ if(!items||!items.length) return; const h=N(id,label,"group"); h.extra.count=items.length; items.forEach(it=>h.children.push(mk(it))); c.children.push(h); };
+    if(cap.entryPoint){ const h=N("hub.entry","Entry point","group"); h.extra.count=1;
+      const ep=cap.entryPoint; h.children.push(N(ep.id, ep.name, "option", ep.meta, {sub:ep.dispatch, detail:ep})); c.children.push(h); }
+    hub("hub.rtn","Routines", cap.routines,  r=>N(r.id, r.entryPoint, "routine",  r.meta, {sub:trunc(r.role,42), detail:r}));
+    hub("hub.data","Data",     cap.data,      d=>N(d.id, dataLabel(d), "data",     d.meta, {sub:dataSub(d), access:d.access, detail:d}));
+    hub("hub.rule","Business rules", cap.businessRules, r=>N(r.id, r.name, "rule", r.meta, {sub:trunc(r.condition,42), detail:r}));
+    hub("hub.sec","Security",  cap.security,  s=>N(s.id, s.key, "security", s.meta, {sub:trunc(s.gates,42), detail:s}));
+    hub("hub.side","Side effects", cap.sideEffects, s=>N(s.id, s.name, "side", s.meta, {sub:s.call, fired:s.firedInThisRun, detail:s}));
+    hub("hub.dep","Dependencies", cap.dependencies, d=>N(d.id, d.target, "dep", d.meta, {sub:trunc(d.why,42), detail:d}));
+    hub("hub.oq","Open questions", cap.openQuestions, q=>N(q.id, "❓ "+q.decisionPoint, "question", q.meta, {sub:trunc(q.promptText,28), detail:q}));
+    if(cap.modernizationCandidates){
+      const mc=cap.modernizationCandidates, h=N("hub.mod","Modernization","group"); let cnt=0;
+      (mc.rest||[]).forEach(r=>{ h.children.push(N("mod:"+r.endpoint, r.endpoint, "mod", mc.meta, {sub:r.capability, detail:r})); cnt++; });
+      if(mc.interopProduction){ h.children.push(N("mod:prod", mc.interopProduction.service, "mod", mc.meta, {sub:"interop production", detail:mc.interopProduction})); cnt++; }
+      h.extra.count=cnt; c.children.push(h);
+    }
+  });
+  return root;
+}
+
+/* ---------- layout (left-to-right tidy tree) ---------- */
+const COLW=215, ROWH=30, NW=185, NH=23;
+let ROOT, order=0;
+function layout(){
+  order=0;
+  (function walk(n,depth){
+    n.x = depth*COLW;
+    const kids = n.collapsed ? [] : n.children;
+    if(!kids.length){ n.y = order*ROWH; order++; }
+    else { kids.forEach(k=>walk(k,depth+1)); n.y=(kids[0].y + kids[kids.length-1].y)/2; }
+  })(ROOT,0);
+}
+
+function provColor(n){
+  if(n.kind==="question") return "var(--question)";
+  if(n.kind==="group"||n.kind==="workflow"||n.kind==="capability") {
+    if(n.kind==="workflow") return "#e6edf3";
+    if(n.kind==="capability") return "#7ee787";
+    return "var(--group)";
+  }
+  return n.meta ? (PCOLOR[n.meta.provenance]||"var(--group)") : "var(--group)";
+}
+
+/* ---------- render ---------- */
+const view=document.getElementById("view");
+function render(){
+  layout();
+  // gather visible nodes + edges
+  const vis=[], edges=[];
+  (function walk(n){
+    vis.push(n);
+    if(!n.collapsed) n.children.forEach(k=>{ edges.push([n,k]); walk(k); });
+  })(ROOT);
+  let s="";
+  edges.forEach(([p,c])=>{
+    const x1=p.x+NW, y1=p.y+NH/2, x2=c.x, y2=c.y+NH/2, mx=(x1+x2)/2;
+    s+=`<path class="edge" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"/>`;
+  });
+  vis.forEach(n=>{
+    const col=provColor(n);
+    const hasK=n.children.length>0;
+    const toggle = hasK ? `<text class="tw" x="${NW-12}" y="${NH/2}">${n.collapsed?"+":"–"}</text>` : "";
+    const cnt = n.extra.count!=null ? ` (${n.extra.count})` : "";
+    const sub = n.extra.sub ? `<text class="sub" x="12" y="${NH-6}">${esc(trunc(n.extra.sub,30))}</text>` : "";
+    const lblY = n.extra.sub ? 8 : NH/2;
+    s+=`<g class="node ${n.kind}" data-id="${esc(n.id)}" transform="translate(${n.x},${n.y})">
+        <rect class="box" width="${NW}" height="${NH}" rx="6"></rect>
+        <rect class="stripe" x="0" y="0" width="4" height="${NH}" rx="2" fill="${col}"></rect>
+        <text class="lbl" x="12" y="${lblY}">${esc(trunc(n.label,26))}${n.kind==='group'?cnt:''}</text>
+        ${sub}${toggle}
+      </g>`;
+  });
+  view.innerHTML=s;
+}
+
+/* ---------- interaction: click = collapse (if hub) + select ---------- */
+let selId=null;
+view.addEventListener("click", e=>{
+  const g=e.target.closest(".node"); if(!g) return;
+  const n=NODES[g.dataset.id]; if(!n) return;
+  if(n.children.length){ n.collapsed=!n.collapsed; render(); markSel(); }
+  select(n);
+});
+function markSel(){ document.querySelectorAll(".node.sel").forEach(el=>el.classList.remove("sel"));
+  if(selId){ const el=view.querySelector(`.node[data-id="${CSS.escape(selId)}"]`); if(el) el.classList.add("sel"); } }
+
+function select(n){
+  selId=n.id; markSel();
+  const d=document.getElementById("detail"); const m=n.meta; const x=n.extra;
+  let h=`<div class="kind">${esc(n.kind)}</div><h2>${esc(n.label)}</h2>`;
+  if(m){ h+=`<div class="row"><span class="pv" style="background:${PHEX[m.provenance]||'#64748b'}">${esc(m.provenance)}</span><span class="conf">${(m.confidence*100|0)}% confidence</span></div>`; }
+  if(x.sub){ h+=`<div class="row"><div class="lab">${n.kind==='routine'?'role':n.kind==='rule'?'condition':n.kind==='data'?'detail':'summary'}</div><div class="val">${esc(x.sub)}</div></div>`; }
+  if(x.access){ h+=`<div class="row"><div class="lab">access</div><div class="val">${esc(x.access)}</div></div>`; }
+  if(x.fired!=null){ h+=`<div class="row"><div class="lab">fired in this run</div><div class="val">${x.fired?"yes":"no"}</div></div>`; }
+  // pull richer fields from the raw detail object
+  const dt=x.detail||{};
+  if(n.kind==="question"){
+    h+=`<div class="row" style="background:#2a1713;border:1px solid var(--question);border-radius:7px;padding:9px 11px;color:#ffb3aa"><b>⚠ Confirm with SME</b> — the legacy system does not decide this; it is left to the user / site policy.</div>`;
+    if(dt.promptText){ h+=`<div class="row"><div class="lab">runtime prompt</div><div class="val k">${esc(dt.promptText)}</div></div>`; }
+    if(dt.default){ h+=`<div class="row"><div class="lab">default</div><div class="val">${esc(dt.default)}</div></div>`; }
+    if(dt.codedBehavior){ h+=`<div class="row"><div class="lab">what IS coded</div><div class="val">${esc(dt.codedBehavior)}</div></div>`; }
+    if(dt.whatIsNotCoded){ h+=`<div class="row"><div class="lab" style="color:var(--question)">not coded — needs confirmation</div><div class="val" style="color:#ffb3aa">${esc(dt.whatIsNotCoded)}</div></div>`; }
+    if(dt.candidateInterpretations){ h+=`<div class="row"><div class="lab">candidate interpretations</div><ul>${dt.candidateInterpretations.map(c=>`<li>${esc(c)}</li>`).join("")}</ul></div>`; }
+  }
+  if(dt.determinacy){ h+=`<div class="row"><div class="lab">determinacy</div><div class="val">${esc(dt.determinacy)}</div></div>`; }
+  if(dt.openQuestion){ h+=`<div class="row"><div class="lab">open question</div><div class="val" style="color:var(--question)">${esc(dt.openQuestion)} — decision not coded</div></div>`; }
+  if(dt.global){ h+=`<div class="row"><div class="lab">global</div><div class="val k">${esc(dt.global)}</div></div>`; }
+  if(dt.dispatch){ h+=`<div class="row"><div class="lab">dispatch</div><div class="val k">${esc(dt.dispatch)}</div></div>`; }
+  if(dt.call){ h+=`<div class="row"><div class="lab">call</div><div class="val k">${esc(dt.call)}</div></div>`; }
+  if(dt.calls){ h+=`<div class="row"><div class="lab">calls</div><div class="val k">${dt.calls.map(esc).join(", ")}</div></div>`; }
+  if(dt.purpose && dt.purpose!==x.sub){ h+=`<div class="row"><div class="lab">purpose</div><div class="val">${esc(dt.purpose)}</div></div>`; }
+  if(dt.effect){ h+=`<div class="row"><div class="lab">effect</div><div class="val">${esc(dt.effect)}</div></div>`; }
+  if(dt.indexes){ h+=`<div class="row"><div class="lab">indexes</div><div class="val">${Object.entries(dt.indexes).map(([k,v])=>`<b>${k}</b>=${esc(v)}`).join("<br>")}</div></div>`; }
+  if(m && m.conditions && m.conditions.length){ h+=`<div class="row"><div class="lab">gates / conditions</div><div class="val cond">${m.conditions.map(esc).join("; ")}</div></div>`; }
+  if(m && m.evidence && m.evidence.length){ h+=`<div class="row"><div class="lab">evidence</div><ul>${m.evidence.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`; }
+  if(m && m.workflows){ h+=`<div class="row"><div class="lab">observed in</div><div class="val">${m.workflows.map(esc).join(", ")}</div></div>`; }
+  d.innerHTML=h;
+}
+
+/* ---------- pan / zoom ---------- */
+const svg=document.getElementById("svg"), wrap=document.getElementById("svgWrap");
+let tx=40,ty=20,sc=1,drag=false,sx=0,sy=0;
+function apply(){ view.setAttribute("transform",`translate(${tx},${ty}) scale(${sc})`); }
+wrap.addEventListener("mousedown",e=>{ if(e.target.closest(".node"))return; drag=true;wrap.classList.add("drag");sx=e.clientX;sy=e.clientY; });
+window.addEventListener("mousemove",e=>{ if(!drag)return; tx+=e.clientX-sx; ty+=e.clientY-sy; sx=e.clientX; sy=e.clientY; apply(); });
+window.addEventListener("mouseup",()=>{ drag=false;wrap.classList.remove("drag"); });
+wrap.addEventListener("wheel",e=>{ e.preventDefault(); const f=e.deltaY<0?1.12:0.89; const r=wrap.getBoundingClientRect();
+  const mx=e.clientX-r.left,my=e.clientY-r.top; tx=mx-(mx-tx)*f; ty=my-(my-ty)*f; sc*=f; apply(); },{passive:false});
+function fit(){
+  let maxX=0,maxY=0; Object.values(NODES).forEach(n=>{ if(n.x+NW>maxX)maxX=n.x+NW; if(n.y+NH>maxY)maxY=n.y+NH; });
+  const r=wrap.getBoundingClientRect(); const pad=30;
+  sc=Math.min((r.width-2*pad)/maxX,(r.height-2*pad)/maxY,1.2); sc=Math.max(sc,0.2);
+  tx=pad; ty=Math.max(pad,(r.height-maxY*sc)/2); apply();
+}
+document.getElementById("fitBtn").onclick=()=>{ layout(); fit(); };
+document.getElementById("expandBtn").onclick=()=>{ Object.values(NODES).forEach(n=>n.collapsed=false); render(); markSel(); fit(); };
+document.getElementById("collapseBtn").onclick=()=>{ Object.values(NODES).forEach(n=>{ if(n.id.indexOf("hub.")===0||n.id==="grp.ix") n.collapsed=true; }); render(); markSel(); fit(); };
+
+/* ---------- print to PDF: expand all, fit whole graph to page ---------- */
+let printState=null;
+function prepPrint(){
+  printState={ collapsed:{}, vb:svg.getAttribute("viewBox"), tr:view.getAttribute("transform") };
+  Object.values(NODES).forEach(n=>{ printState.collapsed[n.id]=n.collapsed; n.collapsed=false; });
+  render(); markSel();
+  let maxX=0,maxY=0; Object.values(NODES).forEach(n=>{ maxX=Math.max(maxX,n.x+NW); maxY=Math.max(maxY,n.y+NH); });
+  const pad=16;
+  view.setAttribute("transform",`translate(${pad},${pad})`);
+  svg.setAttribute("viewBox",`0 0 ${maxX+2*pad} ${maxY+2*pad}`);
+  svg.setAttribute("preserveAspectRatio","xMidYMin meet");
+}
+function restorePrint(){
+  if(!printState) return;
+  Object.entries(printState.collapsed).forEach(([id,c])=>{ if(NODES[id]) NODES[id].collapsed=c; });
+  render(); markSel();
+  if(printState.vb) svg.setAttribute("viewBox",printState.vb); else svg.removeAttribute("viewBox");
+  svg.removeAttribute("preserveAspectRatio");
+  apply();
+  printState=null;
+}
+window.addEventListener("beforeprint",prepPrint);
+window.addEventListener("afterprint",restorePrint);
+document.getElementById("pdfBtn").onclick=()=>window.print();
+
+/* ---------- boot ---------- */
+(async function(){
+  let g=EMBED;
+  try{ const r=await fetch("new-inventory-entry.json",{cache:"no-store"}); if(r.ok) g=await r.json(); }catch(e){}
+  document.getElementById("hdrSub").textContent = g.workflow.name + "  ·  " + (g.sandbox? (g.sandbox.node+" / "+g.sandbox.namespace):"");
+  ROOT=buildTree(g); render(); fit();
+})();
+</script>
+</body>
+</html>

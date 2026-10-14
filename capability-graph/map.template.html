@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Layer Map — Legacy ↔ Target</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#141b24; --panel2:#1b2430; --edge:#26303d;
+    --ink:#e6edf3; --dim:#8b98a5; --faint:#5b6672;
+    --accent:#3d9cf5; --accent2:#7ee787; --warn:#f0a020; --question:#ff6b5e; --purple:#bc8cff;
+    --aih:#bc8cff; --rest:#3d9cf5; --prod:#7ee787; --fm:#f0a020;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px;overflow:hidden}
+  header{display:flex;align-items:center;gap:14px;height:50px;padding:0 16px;
+    background:linear-gradient(180deg,#182029,#10161d);border-bottom:1px solid var(--edge)}
+  header .logo{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,#3d9cf5,#1f6feb);
+    display:grid;place-items:center;font-weight:800;color:#fff;font-size:12px}
+  header h1{font-size:14px;margin:0;font-weight:650}
+  header .sub{color:var(--dim);font-size:11.5px}
+  header .sp{flex:1}
+  header .hint{font-size:11px;color:var(--faint)}
+
+  .stage{display:grid;grid-template-columns:340px 1fr;height:calc(100% - 50px)}
+  .col{min-height:0;overflow-y:auto;padding:14px 16px 50px}
+  .col.left{border-right:1px solid var(--edge)}
+  .col-title{font-size:11px;letter-spacing:1.3px;text-transform:uppercase;color:var(--faint);font-weight:700;margin:0 0 10px}
+
+  /* legacy left */
+  .grp{margin-bottom:12px}
+  .grp-h{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);font-weight:700;margin:8px 0 5px}
+  .lrow{background:var(--panel);border:1px solid var(--edge);border-radius:7px;padding:6px 9px;margin-bottom:5px;cursor:pointer;transition:.12s}
+  .lrow:hover{border-color:var(--accent)}
+  .lrow .l{font-size:12px;font-weight:600}
+  .lrow .s{font-size:10px;color:var(--dim);font-family:var(--mono);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lrow.oq{border-left:3px solid var(--question)}
+
+  /* target layers right */
+  .layer{border:1px solid var(--edge);border-radius:10px;margin-bottom:8px;overflow:hidden;background:#10161d}
+  .layer-h{display:flex;align-items:baseline;gap:10px;padding:7px 12px;border-bottom:1px solid var(--edge);background:#131b24}
+  .layer-h .nm{font-size:12px;font-weight:800;letter-spacing:.6px}
+  .layer-h .tag{font-size:10px;color:var(--faint)}
+  .layer-h .orch{margin-left:auto;font-size:9px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;
+    border:1px solid var(--edge);border-radius:10px;padding:1px 8px;color:var(--accent2)}
+  .layer.aih .nm{color:var(--aih)} .layer.rest .nm{color:var(--rest)}
+  .layer.prod .nm{color:var(--prod)} .layer.fm .nm{color:var(--fm)}
+  .layer.aih .orch{color:var(--aih);border-color:var(--aih)}
+  .layer.prod .orch{color:var(--prod);border-color:var(--prod)}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;padding:10px 12px}
+  .chip{border:1px solid var(--edge);border-radius:8px;padding:6px 10px;background:var(--panel);cursor:pointer;
+    transition:.12s;position:relative;max-width:260px}
+  .chip .cl{font-size:11.5px;font-weight:600;font-family:var(--mono)}
+  .chip .cs{font-size:10px;color:var(--dim);margin-top:1px}
+  .chip:hover{border-color:var(--accent)}
+  .chip .oqb{position:absolute;top:-7px;right:-7px;background:var(--question);color:#1a0d0b;font-size:8px;font-weight:800;
+    border-radius:9px;padding:1px 5px;letter-spacing:.3px}
+  .conn{text-align:center;color:var(--faint);font-size:10px;margin:-2px 0 6px;letter-spacing:.5px}
+
+  /* highlight states */
+  .dim{opacity:.22;filter:saturate(.4)}
+  .hi{border-color:var(--accent2) !important;box-shadow:0 0 0 1px var(--accent2)}
+  .lrow.hi{border-color:var(--accent2) !important;box-shadow:0 0 0 1px var(--accent2)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">SE</div>
+  <div><h1>Layer Map — Legacy ↔ Target</h1><div class="sub" id="hdrSub">—</div></div>
+  <div class="sp"></div>
+  <div class="hint">hover a legacy element or a target chip — the mapping highlights both ways</div>
+</header>
+
+<div class="stage">
+  <div class="col left">
+    <div class="col-title">Legacy capability</div>
+    <div id="legacy"></div>
+  </div>
+  <div class="col right">
+    <div class="col-title">Target — layered stack (top → bottom)</div>
+    <div id="layers"></div>
+  </div>
+</div>
+
+<script>
+const EMBED = %%GRAPH%%;
+const cap = g => g.capabilities[0];
+const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const TARGET = "RegisterEquipment";
+const clean = s => (s||"").replace(/[^A-Za-z0-9]/g,"");
+
+let G, decisions={};
+function loadDecisions(){ try{ const s=JSON.parse(localStorage.getItem("decide:"+G.workflow.id)||"{}"); if(s.dec) decisions=s.dec; }catch(e){} }
+
+/* ---------- legacy (left) ---------- */
+function legacyGroups(){
+  const c=cap(G);
+  return [
+    {t:"Entry point", items:[{id:c.entryPoint.id,label:c.entryPoint.name,sub:c.entryPoint.dispatch}]},
+    {t:"Routines", items:(c.routines||[]).map(r=>({id:r.id,label:r.entryPoint,sub:r.role}))},
+    {t:"Data", items:(c.data||[]).filter(d=>["file","field","crossReference"].includes(d.kind))
+        .map(d=>({id:d.id,label:d.name||d.global||("xref "+d.index)||d.id,sub:d.field?("fld "+d.field):(d.purpose||d.access||d.global||"")}))},
+    {t:"Rules", items:(c.businessRules||[]).map(r=>({id:r.id,label:r.name,sub:r.condition}))},
+    {t:"Side effects", items:(c.sideEffects||[]).map(s=>({id:s.id,label:s.name,sub:s.call}))},
+    {t:"Security", items:(c.security||[]).map(s=>({id:s.id,label:s.key,sub:s.gates}))},
+    {t:"Open questions", items:(c.openQuestions||[]).map(q=>({id:q.id,label:q.decisionPoint,sub:q.promptText,oq:true}))},
+  ];
+}
+function renderLegacy(){
+  let h="";
+  legacyGroups().forEach(gr=>{ if(!gr.items.length)return;
+    h+=`<div class="grp"><div class="grp-h">${esc(gr.t)}</div>`;
+    gr.items.forEach(it=> h+=`<div class="lrow ${it.oq?'oq':''}" data-lid="${esc(it.id)}"><div class="l">${esc(it.label)}</div><div class="s">${esc(it.sub||"")}</div></div>`);
+    h+=`</div>`;
+  });
+  document.getElementById("legacy").innerHTML=h;
+}
+
+/* ---------- target (right) ---------- */
+let LAYERS=[], chipFrom={}, chipFlow={}, chipRev={};
+function buildTarget(){
+  const c=cap(G), beh=c.sideEffects||[];
+  const disp = b => decisions[b.id] || (b.id==="SIDE.Bulletin"?"Event":"Business Operation");
+  const bos=[{id:"op.save",label:"Op.SaveEquipment",sub:"create 6914 record + file serial",from:["RTN.ENR","DATA.6914","FLD.serial"],flowTo:["rest.post"]}];
+  const events=[]; const inlines=[]; let hasWO=false;
+  beh.forEach(b=>{ const d=disp(b);
+    if(d==="Drop") return;
+    if(d==="Event") events.push({id:"evt."+b.id,label:"Event "+clean(b.name),sub:b.call,from:[b.id],flowTo:[]});
+    else if(d==="Inline") inlines.push(clean(b.name));
+    else { const ch={id:"op."+b.id,label:"Op."+clean(b.name),sub:b.call,from:[b.id],flowTo:[]};
+      if(b.writes){ ch.flowTo=["rest.wo"]; hasWO=true; }
+      if(b.openQuestion){ ch.oq=b.openQuestion; ch.from.push(b.openQuestion); } bos.push(ch); }
+  });
+  const bp={id:"prod.bp",label:"BP Orchestrator",sub:"EquipmentEntry.Process.Orchestrator (BS ingress from AI Hub)"+(inlines.length?(" · inline: "+inlines.join(", ")):""),
+            from:["RTN.ADDEQ",c.entryPoint.id],flowTo:bos.map(b=>b.id).concat(events.map(e=>e.id))};
+  const restChips=[
+    {id:"rest.post",label:"POST /equipment",sub:"create data service (SaveEquipment6914)",from:["RTN.ENR","DATA.6914"],flowTo:["fm.class","fm.fields","fm.xref"]},
+    {id:"rest.get",label:"GET /equipment/{ien}",sub:"lookup by IEN",from:["XREF.B"],flowTo:["fm.xref"]},
+    {id:"rest.serial",label:"GET /equipment?serial=",sub:"dedup lookup (FC canonical)",from:["XREF.FC","RTN.ASKSER"],flowTo:["fm.xref"]},
+  ];
+  if(hasWO) restChips.push({id:"rest.wo",label:"POST /work-orders",sub:"work-order data service (6920)",from:["SIDE.WorkOrder"],flowTo:["fm.6920"]});
+  LAYERS=[
+    {key:"aih",title:"AI HUB",tag:"agent tool surface",orch:"agentic orchestration",chips:[
+      {id:"aih.tool",label:TARGET,sub:"IRIS AI Hub agent tool",from:["CAP.CreateEquipment",c.entryPoint.id],flowTo:["prod.bp"]}]},
+    {key:"prod",title:"IRIS PRODUCTION",tag:"interop: BS → BP → operations",orch:"deterministic orchestration",chips:[bp].concat(bos).concat(events)},
+    {key:"rest",title:"REST API DATA SERVICES",tag:"service contract over FileMan",orch:"",chips:restChips},
+    {key:"fm",title:"FILEMAN → CLASS",tag:"persistence",orch:"",chips:[
+      {id:"fm.class",label:"VISTA.EQUIPMENTINV6914",sub:"→ ^ENG(6914)",from:["DATA.6914"],flowTo:[]},
+      {id:"fm.fields",label:"fields .01 / 5 SERIAL …",sub:"FileMan-mapped fields",from:["FLD.entryNumber","FLD.serial"],flowTo:[]},
+      {id:"fm.xref",label:"xrefs B / F / FC",sub:"indexes · FC canonicalized",from:["XREF.B","XREF.F","XREF.FC"],flowTo:[]},
+      {id:"fm.6920",label:"WorkOrder → ^ENG(6920)",sub:"side-effect file",from:["SIDE.WorkOrder"],flowTo:[]}]},
+  ];
+  chipFrom={}; chipFlow={}; chipRev={};
+  LAYERS.forEach(l=>l.chips.forEach(ch=>{ chipFrom[ch.id]=ch.from||[]; chipFlow[ch.id]=ch.flowTo||[]; }));
+  Object.entries(chipFlow).forEach(([a,tos])=>tos.forEach(b=>{ (chipRev[b]=chipRev[b]||[]).push(a); }));
+}
+const CONN={prod:"↓ invokes",rest:"↓ calls data service",fm:"↓ reads / writes"};
+function renderLayers(){
+  let h="";
+  LAYERS.forEach(l=>{
+    if(CONN[l.key]) h+=`<div class="conn">${CONN[l.key]}</div>`;
+    h+=`<div class="layer ${l.key}"><div class="layer-h"><span class="nm">${esc(l.title)}</span><span class="tag">${esc(l.tag)}</span>${l.orch?`<span class="orch">${esc(l.orch)}</span>`:""}</div><div class="chips">`;
+    l.chips.forEach(ch=> h+=`<div class="chip" data-cid="${esc(ch.id)}"><div class="cl">${esc(ch.label)}</div><div class="cs">${esc(ch.sub||"")}</div>${ch.oq?`<span class="oqb" title="policy unresolved: ${esc(ch.oq)}">⚠ ${esc(ch.oq)}</span>`:""}</div>`);
+    h+=`</div></div>`;
+  });
+  document.getElementById("layers").innerHTML=h;
+}
+
+/* ---------- bidirectional highlight ---------- */
+const $all = sel => Array.from(document.querySelectorAll(sel));
+function clearHi(){ $all(".hi,.dim").forEach(e=>e.classList.remove("hi","dim")); }
+function chipEl(id){ return document.querySelector(`.chip[data-cid="${CSS.escape(id)}"]`); }
+function lrowEl(id){ return document.querySelector(`.lrow[data-lid="${CSS.escape(id)}"]`); }
+
+function fromLegacy(lid){
+  clearHi();
+  const matched=[];
+  Object.entries(chipFrom).forEach(([cid,froms])=>{ if(froms.includes(lid)) matched.push(cid); });
+  $all(".chip").forEach(e=> e.classList.add(matched.includes(e.dataset.cid)?"hi":"dim"));
+  $all(".lrow").forEach(e=> e.classList.add(e.dataset.lid===lid?"hi":"dim"));
+}
+function walk(start,map){ const seen=new Set(),stack=[start]; while(stack.length){const n=stack.pop(); (map[n]||[]).forEach(m=>{ if(!seen.has(m)){seen.add(m);stack.push(m);} }); } return seen; }
+function fromChip(cid){
+  clearHi();
+  const chain=new Set([cid]); walk(cid,chipFlow).forEach(x=>chain.add(x)); walk(cid,chipRev).forEach(x=>chain.add(x));
+  $all(".chip").forEach(e=> e.classList.add(chain.has(e.dataset.cid)?"hi":"dim"));
+  const legacyIds=new Set(); chain.forEach(c=>(chipFrom[c]||[]).forEach(l=>legacyIds.add(l)));
+  $all(".lrow").forEach(e=> e.classList.add(legacyIds.has(e.dataset.lid)?"hi":"dim"));
+}
+document.getElementById("legacy").addEventListener("mouseover",e=>{ const r=e.target.closest(".lrow"); if(r) fromLegacy(r.dataset.lid); });
+document.getElementById("layers").addEventListener("mouseover",e=>{ const c=e.target.closest(".chip"); if(c) fromChip(c.dataset.cid); });
+document.querySelector(".stage").addEventListener("mouseleave",clearHi);
+
+/* ---------- boot ---------- */
+(async function(){
+  G=EMBED;
+  try{ const r=await fetch("new-inventory-entry.json",{cache:"no-store"}); if(r.ok) G=await r.json(); }catch(e){}
+  loadDecisions();
+  document.getElementById("hdrSub").textContent = G.workflow.name + " → " + TARGET + " · reflects Decide dispositions";
+  renderLegacy(); buildTarget(); renderLayers();
+})();
+</script>
+</body>
+</html>

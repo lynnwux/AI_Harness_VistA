@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Register Equipment — lookup UX A/B</title>
+<!--
+  NAIVE BUILD FROM spec.md + lookup-UX experiment.
+  Toggle: "Inline combobox" vs "Left-rail lookup panel".
+  Pointer/lookup fields = flexible combobox (browse + fuzzy). Small lists preload
+  client-side (embedded options); large lists query GET /lookup/{file}?q=.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* VA.gov / U.S. Web Design System theme (per spec.md Look & feel) */
+  :root{ --bg:#f1f1f1; --card:#fff; --ink:#1b1b1b; --dim:#5b616b; --line:#d6d7d9;
+    --navy:#112e51; --band:#2a5599; --accent:#0071bc; --accent-dark:#205493;
+    --accent2:#2e8540; --warn:#b25000; --err:#e31c3d;
+    --serif:"Bitter",Georgia,"Times New Roman",serif;
+    --sans:"Source Sans 3","Source Sans Pro","Helvetica Neue",Arial,sans-serif; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 var(--sans)}
+  /* app shell */
+  header{background:var(--navy);color:#fff;padding:16px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  header .brand{display:flex;align-items:center;gap:12px}
+  header .valogo{font-weight:800;letter-spacing:1px;border:2px solid #fff;border-radius:4px;padding:2px 8px;font-size:15px}
+  header h1{margin:0;font-family:var(--serif);font-size:20px;font-weight:700}
+  header .sub{opacity:.85;font-size:12px;font-family:var(--sans)}
+  .toggle{margin-left:auto;display:flex;background:rgba(255,255,255,.12);border-radius:6px;padding:3px}
+  .toggle button{background:none;border:none;color:#fff;padding:7px 14px;border-radius:4px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;opacity:.85}
+  .toggle button.on{background:#fff;color:var(--navy);opacity:1}
+  .layout{display:flex;gap:16px;max-width:1080px;margin:20px auto;padding:0 16px;align-items:flex-start}
+  #rail{width:290px;flex:none;position:sticky;top:20px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+  #rail.hidden{display:none}
+  #rail h3{margin:0 0 3px;font-size:13px}
+  #rail .file{font-size:11px;color:var(--dim);font-family:ui-monospace,Consolas,monospace;margin-bottom:10px}
+  #rail input.search{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;margin-bottom:8px}
+  #rail .rlist{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:7px}
+  #rail .rlist div{padding:7px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid #eef1f5}
+  #rail .rlist div:hover{background:#eef1f5}
+  #rail .rlist .muted{color:var(--dim);cursor:default}
+  #rail .rlist .ien{color:#8a95a1;font-size:11px}
+  .main{flex:1;min-width:0}
+  .steps{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+  .step{flex:1;min-width:110px;padding:8px 10px;border-radius:8px;background:#e7ecf2;color:var(--dim);font-size:12px;font-weight:600;text-align:center;border:1px solid transparent}
+  .step.active{background:var(--accent);color:#fff}
+  .step.done{background:#dff3e6;color:var(--accent2);border-color:#bfe6cd}
+  .card{background:var(--card);border:1px solid var(--line);border-top:6px solid var(--navy);border-radius:4px;padding:22px 24px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .card h2{margin:0 0 4px;font-family:var(--serif);font-size:22px;font-weight:700;color:var(--navy)}
+  .card .legacy{color:var(--dim);font-size:11.5px;margin-bottom:16px;font-family:ui-monospace,Consolas,monospace}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px}
+  .fld{display:flex;flex-direction:column;gap:4px}
+  .fld.full{grid-column:1/-1}
+  .fld label{font-size:12px;font-weight:600}
+  .fld label .fno{color:var(--dim);font-weight:400;font-family:ui-monospace,monospace;font-size:10.5px}
+  .fld label .req{color:var(--err)}
+  input,select{font:inherit;font-size:15px;padding:8px 10px;border:2px solid #565c65;border-radius:0;background:#fff;color:var(--ink);width:100%}
+  input[type="checkbox"],input[type="radio"]{width:auto;flex:none;padding:0;margin:0}
+  input:focus,select:focus{outline:4px solid #ffbe2e;outline-offset:0}
+  input[readonly]{background:#f0f0f0;color:var(--dim);border-color:#a9aeb1}
+  .hint{font-size:10.5px;color:var(--dim)}
+  .badge{display:inline-block;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:10px;background:#eef1f5;color:var(--dim);margin-left:6px;vertical-align:middle}
+  /* inline combobox */
+  .cb{position:relative}
+  .cb .caret{position:absolute;right:9px;top:8px;color:var(--dim);pointer-events:none}
+  .cb-pop{position:absolute;top:100%;left:0;right:0;z-index:8;background:#fff;border:1px solid var(--line);border-top:none;border-radius:0 0 7px 7px;max-height:220px;overflow:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+  .cb-pop div{padding:7px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid #f2f4f7}
+  .cb-pop div:hover,.cb-pop div.hl{background:#eef1f5}
+  .cb-pop .muted{color:var(--dim);cursor:default}
+  .cb-pop .ien{color:#8a95a1;font-size:11px}
+  /* left-rail field */
+  .lk{display:flex;gap:6px}
+  .lk input{flex:1;cursor:pointer;background:#fff}
+  .lk button{flex:none;border:1px solid var(--line);background:#fff;border-radius:7px;padding:0 11px;cursor:pointer}
+  .lk.active input{border-color:var(--accent);box-shadow:0 0 0 2px rgba(31,111,235,.15)}
+  .nav{display:flex;justify-content:space-between;margin-top:20px}
+  button.act{font:inherit;font-size:15px;font-weight:700;padding:11px 22px;border-radius:5px;border:2px solid var(--accent);background:#fff;color:var(--accent);cursor:pointer}
+  button.act:hover{background:#e1f0f8}
+  button.act.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.act.primary:hover{background:var(--accent-dark);border-color:var(--accent-dark)}
+  button.act:disabled{opacity:.4;cursor:not-allowed}
+  .summary{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .sumgroup h3{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);margin:0 0 8px;border-bottom:1px solid var(--line);padding-bottom:4px}
+  .sumrow{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:2px 0}
+  .sumrow .k{color:var(--dim)} .sumrow .v{font-weight:600;text-align:right;word-break:break-word}
+  .oq{background:#fff7ec;border:1px solid #f0d9b5;border-radius:8px;padding:12px 14px;margin-top:16px}
+  .oq h3{margin:0 0 4px;font-size:13px;color:var(--warn)}
+  .oq .oqsub{font-size:11.5px;color:var(--dim);margin:0 0 8px}
+  .notbuilt{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--warn);background:#fff3e0;border:1px solid #f0c98a;border-radius:10px;padding:1px 8px;margin-left:8px;vertical-align:middle}
+  .oq label{display:flex;align-items:center;gap:8px;font-size:12.5px;margin:5px 0}
+  .oq .sfxbox{margin-top:10px;padding-top:8px;border-top:1px dashed #b9d9df;display:flex;flex-direction:column;gap:5px}
+  .oq .sfx{font-size:12px}
+  .oq .sfx.muted{color:var(--dim)}
+  .oq .autonote{margin-top:10px;padding-top:8px;border-top:1px dashed #b9d9df;font-size:11.5px;color:var(--dim)}
+  .devhandoff{margin-top:12px;padding:12px 14px;border-radius:8px;background:#eef4fb;border:1px solid #c6dbf7;border-left:4px solid var(--accent);font-size:12.5px;line-height:1.5}
+  .devhandoff a{color:var(--accent);font-weight:700}
+  .banner{margin-top:14px;padding:11px 14px;border-radius:8px;font-size:13px;font-weight:600}
+  .banner.ok{background:#dff3e6;color:var(--accent2);border:1px solid #bfe6cd}
+  .banner.err{background:#fdeaee;color:var(--err);border:1px solid #f3c2cd}
+  .banner.info{background:#eaf1fc;color:var(--accent);border:1px solid #c6dbf7}
+  .oq{background:#e7f6f8;border:1px solid #99deea;border-left:6px solid #00a6d2}
+  .oq h3{color:var(--navy)}
+  #rail h3{font-family:var(--serif);color:var(--navy)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="valogo">VA</span>
+    <div><h1>Register Equipment</h1><div class="sub">RegisterEquipment · POST /equipment · file 6914 (New Inventory Entry)</div></div>
+  </div>
+  <div class="toggle" id="modeToggle">
+    <button data-mode="inline" class="on">Inline combobox</button>
+    <button data-mode="rail">Left-rail lookup panel</button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside id="rail" class="hidden"></aside>
+  <div class="main">
+    <div class="steps" id="steps"></div>
+    <div class="card" id="page"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+let MODE = "inline";          // "inline" | "rail"
+let activeLookup = null;      // field key currently bound to the rail
+
+// ── Embedded small option sets — from spec.md "Lookup option sets" ──
+const OPT = {
+  service:[["1046","ACCOUNTS RECEIVABLE"],["1000","AMBULATORY CARE"],["1001","ANESTHESIOLOGY"],["1002","AUDIOLOGY AND SPEECH PATHOLOGY"],["11","BLIND REHAB"],["1003","BLIND REHABILITATION"],["1004","BUILDING MANAGEMENT"],["1005","CANTEEN"],["1006","CENTRAL DENTAL LABORATORY"],["1007","CHAPLAIN"],["1008","DENTAL"],["1009","DIETETICS"],["16","DOMICILIARY"],["1011","ENGINEERING"],["1012","EXTENDED CARE"],["1013","FISCAL"],["1014","INFORMATION RESOURCE MGMT"],["1043","INFORMATION SYSTEMS CENTER"],["6","INTERMEDIATE MEDICINE"],["1016","LABORATORY"],["1017","LIBRARY"],["1018","MEDICAL"],["1019","MEDICAL ADMINISTRATION"],["1020","MEDICAL DISTRICT"],["1021","MEDICAL MEDIA PRODUCTION"],["2","MEDICINE"],["9","NEUROLOGY"],["14","NHCU"],["1047","NHCU"],["1023","NUCLEAR MEDICINE"],["1024","NURSING"],["1025","NURSING HOME"],["1026","OFFICE OF THE DIRECTOR"],["1027","OUTREACH"],["1044","PERSONAL PROPERTY MANAGEMENT"],["1028","PERSONNEL"],["1048","PHARMACY"],["1030","PROSTHETICS AND SENSORY AIDS"],["13","PSYCHIATRY"],["1032","PSYCHOLOGY"],["1045","PURCHASING & CONTRACTING"],["1033","RADIOLOGY"],["1034","RECREATION"],["10","REHAB MEDICINE"],["1035","REHABILITATION MEDICINE"],["1036","RESEARCH"],["15","RESPITE CARE"],["1037","SECURITY"],["1038","SOCIAL WORK"],["12","SPINAL CORD INJURY"],["1040","SUPPLY"],["3","SURGERY"],["1041","SURGICAL"],["1042","VOLUNTARY"]],
+  fund:[["4014","Canteen Service"],["4018","Pershing Hall"],["4048","Compensated Work Therapy"],["4538","Parking Facilities"],["4539","Franchise Fund"],["4537B","Field Supply Fund"],["4537B2","VACO Supply Fund"],["8129S","National Cemetery Gift Fund"],["8180S","General Post Fund"],["AMAFGE","General Operating Expense 0151"],["AMAFIG","Inspector General"],["AMAFIT","AMAF Info Tech Fund 0167"],["AMAFMA","Medical Administrative 0152"],["AMAFMC","Medical Care 0160"],["AMAFMF","Medical Facilities"],["AMAFNC","National Cemetery System 0129"],["AMAFRE","Medical Research"]],
+  boc:[["2335","SOFTWARE"],["3105","TRUST EQUIPMENT"],["3110","TRANSPORTATION EQUIPMENT, PASSENGER VEHICLES"],["3112","TRANSPORTATION EQUIP, NONPASSENGER VEHICLES"],["3120","NONEXPENDIBLE FURNITURE & FIXTURES"],["3121","OFFICE EQUIPMENT"],["3122","OFFICE AUTOMATION/WORD PROCESSING, PURCHASED"],["3123","ADP EQUIPMENT"],["3124","ADP SOFTWARE"],["3125","TELECOMMUNICATIONS EQUIPMENT"],["3130","MEDICAL, DENTAL & SCIENTIFIC EQUIPMENT"],["3138","IT HARDWARE-CAPITALIZED"],["3150","UTILITY & OPERATING EQUIPMENT"],["3160","EQUIPMENT UNDER CAPITAL LEASE"]],
+  sgl:[["1524","PROPERTY PENDING DISPOSAL"],["1750","NONEXPENDABLE EQUIPMENT"],["1751","ADP NONEXPENDABLE PROPERTY"],["1811","EQUIPMENT UNDER CAPITAL LEASE"],["1830","ADP SOFTWARE"],["6100","EXPENSED NX EQUIPMENT (ALL TYPES)"]],
+};
+const enumOpts = a => a.map(v=>[v,v]);
+
+// field types: display | text | number | date | select(enum) | lookup(pointer)
+const PAGES = [
+  { title:"Equipment Identity & Acquisition", legacy:"← ScreenMan screen 1 of 3", fields:[
+    {k:"entryNumber",label:"ENTRY NUMBER",fno:".01",type:"display"},
+    {k:"manufacturer",label:"MANUFACTURER",fno:"1",type:"lookup",file:"MANUFACTURER_LIST_FILE6912",count:5175},
+    {k:"mfgrEquipmentName",label:"MFGR. EQUIPMENT NAME",fno:"3",type:"text"},
+    {k:"model",label:"MODEL",fno:"4",type:"text"},
+    {k:"serial",label:"SERIAL",fno:"5",type:"text"},
+    {k:"equipmentCategory",label:"EQUIPMENT CATEGORY",fno:"6",type:"lookup",file:"EQUIPMENT_CATEGORY6911",count:600},
+    {k:"categoryStockNumber",label:"CATEGORY STOCK NUMBER",fno:"18",type:"lookup",file:"CATEGORY_STOCK_NUMBER6917",count:4013},
+    {k:"typeOfEntry",label:"TYPE OF ENTRY",fno:"7",type:"select",options:[["NX","NON-EXPENDABLE EQPT"],["BSE","BUILDING SERVICE EQPT"],["EXP","EXPENDABLE EQPT"]]},
+    {k:"acquisitionMethod",label:"ACQUISITION METHOD",fno:"20.1",type:"select",options:[["C","CONSTRUCTED"],["G","GIFT/BEQUEST/DONATION"],["L","LEASED"],["M","CAPITAL LEASE"],["O","OTHER"],["P","PURCHASED"],["R","TRANSFERRED"],["T","TRADED"],["X","EXCESS"],["1","ON LOAN TO VAMC"]]},
+    {k:"acquisitionDate",label:"ACQUISITION DATE",fno:"13",type:"date"},
+    {k:"vendorPointer",label:"VENDOR POINTER",fno:"10",type:"lookup",file:"VENDOR440",count:2627},
+    {k:"originalAssetValue",label:"ORIGINAL ASSET VALUE",fno:"31.5",type:"number"},
+    {k:"warrantyExpDate",label:"WARRANTY EXP. DATE",fno:"14",type:"date"},
+    {k:"replacingEntryNumber",label:"REPLACING (ENTRY NUMBER)",fno:"51",type:"lookup",file:"EQUIPMENT_INV_6914",count:289},
+  ]},
+  { title:"Ownership & Location", legacy:"← ScreenMan screen 2 of 3", fields:[
+    {k:"servicePointer",label:"SERVICE POINTER",fno:"21",type:"lookup",file:"SERVICESECTION49",count:54,options:OPT.service},
+    {k:"useStatus",label:"USE STATUS",fno:"20",type:"select",options:[["1","IN USE"],["2","OUT OF SERVICE"],["3","LOANED OUT"],["4","TURNED IN"],["5","LOST OR STOLEN"]]},
+    {k:"parentSystem",label:"PARENT SYSTEM",fno:"2",type:"lookup",file:"EQUIPMENT_INV_6914",count:289},
+    {k:"location",label:"LOCATION",fno:"24",type:"lookup",file:"ENG_SPACE6928",count:234},
+    {k:"lockoutRequired",label:"LOCKOUT REQUIRED?",fno:"9",type:"select",options:enumOpts(["YES","NO"])},
+    {k:"conditionCode",label:"CONDITION CODE",fno:"53",type:"select",options:[["1","LIKE NEW"],["2","GOOD"],["3","POOR"]]},
+    {k:"stationNumber",label:"STATION NUMBER",fno:"60",type:"text",minlen:3,maxlen:5},
+    {k:"vaPmNumber",label:"VA PM NUMBER",fno:"25",type:"text",minlen:9,maxlen:10},
+    {k:"serviceContract",label:"SERVICE CONTRACT",fno:"19.5",type:"select",options:enumOpts(["YES","NO"])},
+    {k:"serviceContractCost",label:"SERVICE CONTRACT COST",fno:"19.6",type:"number",showIf:{k:"serviceContract",eq:"YES"}},
+    {k:"localIdentifier",label:"LOCAL IDENTIFIER",fno:"26",type:"text",minlen:3,maxlen:15},
+    {k:"physicalInventoryDate",label:"PHYSICAL INVENTORY DATE",fno:"23",type:"date"},
+    {k:"jcaho",label:"JCAHO",fno:"27",type:"select",options:enumOpts(["YES","NO"])},
+  ]},
+  { title:"Financial", legacy:"← ScreenMan screen 3 of 3", fields:[
+    {k:"controlledItem",label:"CONTROLLED ITEM?",fno:"33",type:"select",options:enumOpts(["YES","NO"])},
+    {k:"investmentCategory",label:"INVESTMENT CATEGORY",fno:"34",type:"select",options:[["1","CAPITALIZED/ACCOUNTABLE"],["A","NOT CAPITALIZED/ACCOUNTABLE"],["0","EXPENSED/OPTIONALLY ACCOUNTABLE"]]},
+    {k:"fundControlPoint",label:"FUND CONTROL POINT",fno:"35",type:"text",minlen:3,maxlen:30},
+    {k:"fund",label:"FUND",fno:"62",type:"lookup",file:"NX_FUND6914_6",count:22,options:OPT.fund},
+    {k:"budgetObjectCode",label:"BUDGET OBJECT CODE",fno:"61",type:"lookup",file:"NX_BOC6914_4",count:15,options:OPT.boc},
+    {k:"standardGeneralLedger",label:"STANDARD GENERAL LEDGER",fno:"38",type:"lookup",file:"NX_SGL6914_3",count:9,options:OPT.sgl},
+    {k:"equityAccount",label:"EQUITY ACCOUNT",fno:"64",type:"select",options:[["3299","MEDICAL"],["3210","NON-MEDICAL"],["3402","DONATED"]]},
+    {k:"subaccount",label:"SUBACCOUNT (A/O)",fno:"37",type:"lookup",file:"BUDGET_OBJECT_CODE420_2",count:325},
+  ]},
+];
+// Default per-item questions; overridden by the build config (Decide → Build).
+let OQ = [
+  {k:"createInspectionWorkOrder",label:"Create an incoming inspection work order?"},
+  {k:"enrollPMProgram",label:"Enroll the item in the PM program?"},
+  {k:"sendFADocument",label:"Send the FA document to Austin once eligible?"},
+];
+// BUILD_CONFIG: written by POST /api/build from the Decide session's decisions.
+let BUILD = null;
+
+const model = {};
+let step = 0;
+const fieldByKey = k => { for(const p of PAGES) for(const f of p.fields) if(f.k===k) return f; return null; };
+
+// Load the build config (if this prototype was regenerated from a Decide session),
+// then fetch the next IEN and render.
+fetch("build-config.json",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(cfg=>{
+  if(cfg){ BUILD=cfg; if(Array.isArray(cfg.requiredInputOQs)) OQ=cfg.requiredInputOQs; }
+}).catch(()=>{}).finally(()=>{
+  fetch("/equipment/next-ien").then(r=>r.ok?r.json():Promise.reject()).then(d=>{model.entryNumber=d.ien;render();})
+    .catch(()=>{model.entryNumber="(unavailable)";render();});
+});
+
+// ── fuzzy search over items [{value,label,ien?}] ──
+function score(label,q){ const h=String(label).toUpperCase(),Q=q.toUpperCase(); if(!Q)return 1;
+  if(h.startsWith(Q))return 3; if(h.includes(Q))return 2;
+  let i=0; for(const c of h){ if(c===Q[i])i++; if(i===Q.length)return 1; } return -1; }
+function rankLocal(items,q){ return items.map(it=>({it,s:score(it.label,q)})).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,60).map(x=>x.it); }
+function getItems(f,q,cb){
+  if(f.options){ cb(rankLocal(f.options.map(o=>({value:o[0],label:o[1]})),q), false); return; }
+  fetch(`/lookup/${f.file}?q=${encodeURIComponent(q)}&limit=25`).then(r=>r.ok?r.json():Promise.reject())
+    .then(rows=>cb(rows.map(r=>({value:r.display,label:r.display,ien:r.ien})),true))
+    .catch(()=>cb(null,true));
+}
+
+function visibleFields(pg){
+  const omit = (BUILD&&BUILD.omittedFields)||[];
+  return pg.fields.filter(f=>(!f.showIf||model[f.showIf.k]===f.showIf.eq) && !omit.includes(f.k));
+}
+
+function render(){
+  document.getElementById("rail").className = (MODE==="rail" && step<3) ? "" : "hidden";
+  if(MODE==="rail" && step<3) renderRail();
+  renderSteps();
+  document.getElementById("page").innerHTML = step<3 ? renderFormPage(PAGES[step]) : renderConfirm();
+  wire();
+}
+function renderSteps(){
+  const labels=[...PAGES.map(p=>p.title),"Confirmation & Submit"];
+  document.getElementById("steps").innerHTML=labels.map((l,i)=>`<div class="step ${i===step?'active':(i<step?'done':'')}">${i+1}. ${l}</div>`).join("");
+}
+function badge(f){ const small=!!f.options; return `<span class="badge">${small?f.count+" · dropdown":f.count+" · search"}</span>`; }
+function fieldControl(f){
+  const val=model[f.k]==null?"":model[f.k];
+  if(f.type==="display") return `<input readonly value="${esc(val)}">`;
+  if(f.type==="select"){
+    const opts=[`<option value="">— select —</option>`].concat(f.options.map(o=>`<option value="${esc(o[0])}" ${val==o[0]?"selected":""}>${esc(o[1])}${o[1]!==o[0]?" ("+esc(o[0])+")":""}</option>`));
+    return `<select data-k="${f.k}">${opts.join("")}</select>`;
+  }
+  if(f.type==="lookup"){
+    if(MODE==="inline"){
+      return `<div class="cb"><input class="cb-in" data-cb="${f.k}" value="${esc(val)}" placeholder="browse or search…" autocomplete="off"><span class="caret">▾</span><div class="cb-pop" hidden></div></div>`;
+    } else {
+      return `<div class="lk ${activeLookup===f.k?'active':''}"><input data-lk="${f.k}" readonly value="${esc(val)}" placeholder="click, then search in the panel →"><button data-lkbtn="${f.k}">🔍</button></div>`;
+    }
+  }
+  if(f.type==="date") return `<input type="date" data-k="${f.k}" value="${esc(val)}">`;
+  if(f.type==="number") return `<input type="number" data-k="${f.k}" value="${esc(val)}">`;
+  const attrs=(f.minlen?` minlength="${f.minlen}"`:"")+(f.maxlen?` maxlength="${f.maxlen}"`:"");
+  return `<input type="text" data-k="${f.k}"${attrs} value="${esc(val)}">`;
+}
+function renderFormPage(pg){
+  const rows=visibleFields(pg).map(f=>{
+    const isLk=f.type==="lookup";
+    return `<div class="fld ${isLk?'full':''}">
+      <label>${esc(f.label)} <span class="fno">[fld ${f.fno}]</span>${f.required?' <span class="req">*</span>':''}${isLk?badge(f):''}</label>
+      ${fieldControl(f)}</div>`;
+  }).join("");
+  return `<h2>${esc(pg.title)}</h2><div class="legacy">${esc(pg.legacy)}</div>
+    <div class="grid">${rows}</div>
+    <div class="nav"><button class="act" id="back" ${step===0?"disabled":""}>◀ Back</button><button class="act primary" id="next">Next ▶</button></div>`;
+}
+function renderConfirm(){
+  const groups=PAGES.map(pg=>{
+    const rows=pg.fields.map(f=>{ let v=model[f.k]; if(v==null||v==="")v="—";
+      if(f.options){const hit=f.options.find(o=>o[0]==v); if(hit)v=hit[1];}
+      return `<div class="sumrow"><span class="k">${esc(f.label)}</span><span class="v">${esc(String(v))}</span></div>`;}).join("");
+    return `<div class="sumgroup"><h3>${esc(pg.title)}</h3>${rows}</div>`;}).join("");
+  const oqRows=OQ.length
+    ? OQ.map(q=>`<label><input type="checkbox" data-oq="${q.k}" ${model[q.k]?"checked":""}> ${esc(q.label)}</label>`).join("")
+    : `<div class="oqsub">No per-item decisions — all downstream actions are coded or resolved as rules.</div>`;
+  // side-effect scope, from the build config (Decide → Build); fallback to a generic note
+  let scopeRows="";
+  if(BUILD && Array.isArray(BUILD.sideEffects)){
+    scopeRows = BUILD.sideEffects.filter(s=>!s.dropped).map(s=>{
+      if(s.integration){ const t=s.integration; return `<div class="sfx"><b>${esc(s.name)}</b> → external <b>${esc(t.system||"integration")}</b>${t.endpoint?` (${esc(t.endpoint)})`:""} <span class="notbuilt">not wired</span></div>`; }
+      if(s.deferred) return `<div class="sfx muted">⏸ ${esc(s.name)} — deferred to a later phase (not in this build)</div>`;
+      return `<div class="sfx"><b>${esc(s.name)}</b> — ${esc(s.disposition||"—")} <span class="notbuilt">not wired</span></div>`;
+    }).join("");
+  }
+  return `<h2>Confirmation &amp; Submit</h2><div class="legacy">Review before committing · POST /equipment</div>
+    <div class="summary">${groups}</div>
+    <div class="oq"><h3>Phase 2 · IRIS production layer <span class="notbuilt">next — not in this build</span></h3>
+      <div class="oqsub">This is <b>Phase 1</b> — the Angular form that writes the record to VistA (that part is real). The downstream orchestration below is <b>Phase 2</b>: it doesn't affect this front-end and gets stood up in the IRIS production layer after this UI is validated. Shown here as a preview of what's coming.</div>
+      ${oqRows}
+      ${scopeRows?`<div class="sfxbox">${scopeRows}</div>`:""}
+      <div class="autonote">⚙ Would run automatically on save — a new-equipment bulletin (if a mail group is configured).</div>
+    </div>
+    <div id="result"></div>
+    <div class="nav"><button class="act" id="back">◀ Back</button><button class="act primary" id="submit">Submit ▶</button></div>`;
+}
+
+// ── left rail: the COMPLETE code set, browsable, with client-side fuzzy filter ──
+const completeCache={};   // file → [{value,label,ien}]
+function getComplete(f,cb){
+  if(f.options){ cb(f.options.map(o=>({value:o[0],label:o[1]}))); return; }
+  if(completeCache[f.file]){ cb(completeCache[f.file]); return; }
+  fetch(`/lookup/${f.file}?all=1`).then(r=>r.ok?r.json():Promise.reject()).then(rows=>{
+    const list=rows.map(r=>({value:r.display,label:r.display,ien:r.ien}));
+    completeCache[f.file]=list; cb(list);
+  }).catch(()=>cb(null));
+}
+function renderRail(){
+  const rail=document.getElementById("rail");
+  const f=activeLookup?fieldByKey(activeLookup):null;
+  if(!f){ rail.innerHTML=`<h3>Lookup panel</h3><div class="file">Click a lookup field in the form → the full code set loads here to browse & filter.</div>`; return; }
+  rail.innerHTML=`<h3>${esc(f.label)}</h3><div class="file" id="railMeta">${f.options?"loading…":"file "+f.file+" · loading full list…"}</div>
+    <input class="search" id="railSearch" placeholder="fuzzy filter within the complete list…" value=""><div class="rlist" id="railList"><div class="muted" style="padding:8px 10px">loading complete list…</div></div>`;
+  const s=document.getElementById("railSearch");
+  getComplete(f,(all)=>{
+    if(activeLookup!==f.k)return;
+    const meta=document.getElementById("railMeta");
+    if(all===null){ if(meta)meta.innerHTML=`file ${f.file} · <span style="color:var(--err)">unavailable</span>`; document.getElementById("railList").innerHTML=`<div class="muted" style="padding:8px 10px;color:var(--err)">lookup endpoint unavailable</div>`; return; }
+    if(meta) meta.textContent=`${all.length} values ${f.options?"(preloaded)":"· "+f.file}`;
+    railRender(f,all,"");
+    s.addEventListener("input",()=>railRender(f,all,s.value));
+  });
+  s.focus();
+}
+const RAIL_CAP=500;   // DOM cap; the full set is loaded, we just render at most this many rows
+function railRender(f,all,q){
+  const list=document.getElementById("railList"); if(!list||activeLookup!==f.k)return;
+  let items = q ? all.map(it=>({it,s:score(it.label,q)})).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).map(x=>x.it) : all;
+  const total=items.length;
+  if(!total){ list.innerHTML=`<div class="muted" style="padding:8px 10px">no matches in ${all.length} values</div>`; return; }
+  const shown=items.slice(0,RAIL_CAP);
+  const head = `<div class="muted" style="padding:5px 10px;font-size:11px">`+
+    (q?`${total} match${total===1?"":"es"} of ${all.length}`:`all ${all.length} values`)+
+    (total>RAIL_CAP?` · showing first ${RAIL_CAP}, type to narrow`:``)+`</div>`;
+  list.innerHTML=head+shown.map(it=>`<div data-v="${esc(it.value)}">${esc(it.label)} ${it.ien!=null?`<span class="ien">#${esc(String(it.ien))}</span>`:""}</div>`).join("");
+  list.querySelectorAll("[data-v]").forEach(d=>d.onclick=()=>{ model[f.k]=d.dataset.v; render(); });
+}
+
+function wire(){
+  document.querySelectorAll("[data-k]").forEach(inp=>inp.addEventListener("input",e=>{
+    model[e.target.dataset.k]=e.target.value;
+    if(PAGES[step]&&PAGES[step].fields.some(f=>f.showIf&&f.showIf.k===e.target.dataset.k)) render();
+  }));
+  document.querySelectorAll("[data-oq]").forEach(cb=>cb.addEventListener("change",e=>model[e.target.dataset.oq]=e.target.checked));
+  document.querySelectorAll("[data-cb]").forEach(inp=>wireCombobox(inp));
+  document.querySelectorAll("[data-lk]").forEach(inp=>inp.addEventListener("focus",()=>setActive(inp.dataset.lk)));
+  document.querySelectorAll("[data-lk]").forEach(inp=>inp.addEventListener("click",()=>setActive(inp.dataset.lk)));
+  document.querySelectorAll("[data-lkbtn]").forEach(b=>b.addEventListener("click",()=>setActive(b.dataset.lkbtn)));
+  const back=document.getElementById("back"),next=document.getElementById("next"),submit=document.getElementById("submit");
+  if(back) back.onclick=()=>{step--;activeLookup=null;render();};
+  if(next) next.onclick=()=>{ if(validate(PAGES[step])){step++;activeLookup=null;render();} };
+  if(submit) submit.onclick=doSubmit;
+}
+function setActive(k){ activeLookup=k; renderRail(); document.querySelectorAll(".lk").forEach(el=>el.classList.remove("active")); const inp=document.querySelector(`[data-lk="${k}"]`); if(inp)inp.parentElement.classList.add("active"); }
+
+function wireCombobox(inp){
+  const pop=inp.parentElement.querySelector(".cb-pop"); const f=fieldByKey(inp.dataset.cb); let t;
+  const open=q=>{ pop.hidden=false; pop.innerHTML=`<div class="muted">searching…</div>`;
+    getItems(f,q,(items)=>{ if(items===null){pop.innerHTML=`<div class="muted" style="color:var(--err)">lookup endpoint unavailable</div>`;return;}
+      if(!items.length){pop.innerHTML=`<div class="muted">no matches</div>`;return;}
+      pop.innerHTML=items.map(it=>`<div data-v="${esc(it.value)}">${esc(it.label)} ${it.ien!=null?`<span class="ien">#${esc(String(it.ien))}</span>`:""}</div>`).join("");
+      pop.querySelectorAll("[data-v]").forEach(d=>d.onclick=()=>{ inp.value=d.dataset.v; model[f.k]=d.dataset.v; pop.hidden=true; });
+    }); };
+  inp.addEventListener("focus",()=>open(inp.value.trim()));
+  inp.addEventListener("input",()=>{ model[f.k]=inp.value; clearTimeout(t); t=setTimeout(()=>open(inp.value.trim()),180); });
+  inp.addEventListener("blur",()=>setTimeout(()=>pop.hidden=true,180));
+}
+
+function validate(pg){ for(const f of visibleFields(pg)){ const v=model[f.k];
+  if(f.required&&!v){alert(`${f.label} is required.`);return false;}
+  if(v&&f.minlen&&String(v).length<f.minlen){alert(`${f.label} must be at least ${f.minlen} chars.`);return false;} } return true; }
+function doSubmit(){
+  const res=document.getElementById("result");
+  res.innerHTML=`<div class="banner info">Saving…</div>`;
+  fetch("/equipment",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(model)})
+    .then(async r=>{ let d={}; try{ d=await r.json(); }catch(e){} return {ok:r.ok,d}; })
+    .then(({ok,d})=>{
+      const status=String(d.status||"").toUpperCase();
+      if(ok && status==="OK" && d.equipmentIEN!=null){
+        res.innerHTML=`<div class="banner ok">✓ Saved. IEN: ${esc(String(d.equipmentIEN))} · status ${esc(String(d.status))} · lifecycle ${esc(String(d.lifecycleStatus||"—"))}`
+          +(d.workOrderIEN?` · WO ${esc(String(d.workOrderIEN))}`:"")
+          +(d.financialAssetId?` · FA ${esc(String(d.financialAssetId))}`:"")+`</div>`
+          +`<div class="devhandoff"><b>Runtime verification complete.</b> This front end confirms the discovered capability behaves end-to-end against live file 6914.<br>Developer next step → return to <a href="../capability-graph/decide.html">Decide</a> to build the <b>IRIS production layer</b> (bulletin event · work-order / PM / FA operations) and the <b>AI Hub</b> tool decisions.</div>`;
+      } else {
+        res.innerHTML=`<div class="banner err">Submit failed — ${esc(String(d.error||d.message||"backend error"))}</div>`;
+      }
+    })
+    .catch(e=>res.innerHTML=`<div class="banner err">Submit failed — ${esc(String(e.message||e))}</div>`);
+}
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+document.getElementById("modeToggle").addEventListener("click",e=>{
+  const b=e.target.closest("[data-mode]"); if(!b)return;
+  MODE=b.dataset.mode; activeLookup=null;
+  document.querySelectorAll("#modeToggle button").forEach(x=>x.classList.toggle("on",x.dataset.mode===MODE));
+  render();
+});
+render();
+</script>
+</body>
+</html>
