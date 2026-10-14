@@ -1,11 +1,15 @@
 "use strict";
-// Grounded tools for the Decide agent. Pure functions over (graph, decisions).
+// Grounded tools for the Decide agent. Pure functions over (graph, decisions record).
 // No Bedrock dependency here — unit-testable on their own.
+const { normalize } = require("./record");
+const { cap: C, isBlocking, isMandatory, allowedTargetKeys, VIA } = require("./rules");
+const { generate, stage } = require("./specs");
+const { requestContract } = require("./specs/api");
 
 const CAT_OPTS = {
   oq:   ["Business rule", "Required input", "Defer"],
   rule: ["Preserve", "Inline", "Drop"],
-  beh:  ["Business Operation", "Event", "Inline", "Drop"],
+  beh:  ["Business Operation", "Event", "Integration", "Inline", "Drop"],
   data: ["Include", "Omit"],
   sec:  ["Require (auth)", "Note", "Drop"],
   dep:  ["Platform (reuse)", "Reimplement", "Integration"],
@@ -26,10 +30,8 @@ const OPTION_SEMANTICS = {
   "Integration":        { artifact: "an external integration/operation", when: "it calls another package or system", risk: "" },
   "Business rule":      { artifact: "a coded Ens.Rule.Definition", when: "the resolved policy is deterministic", risk: "" },
   "Required input":     { artifact: "a required REST request parameter", when: "the decision should be made per-request by the caller", risk: "" },
-  "Defer":              { artifact: "unresolved — blocks the build", when: "the policy is not yet known", risk: "⚠ blocking; must be resolved before build" },
+  "Defer":              { artifact: "a stub Business Operation for the gated side effect — registered in the production, not wired", when: "the policy is not yet known; the recorded reason is the decision", risk: "the gated side effect does not run until it is revisited; it never blocks the build" },
 };
-
-function C(graph) { return graph.capabilities[0]; }
 
 function categoryOf(graph, id) {
   const c = C(graph);
@@ -53,14 +55,14 @@ function findNode(graph, id) {
 }
 
 function defaultDecisions(graph) {
-  const c = C(graph), dec = {}, oqPolicy = {};
+  const c = C(graph), dec = {};
   (c.openQuestions || []).forEach(q => dec[q.id] = "Defer");
   (c.businessRules || []).forEach(r => dec[r.id] = "Preserve");
   (c.sideEffects || []).forEach(s => dec[s.id] = s.id === "SIDE.Bulletin" ? "Event" : "Business Operation");
   (c.data || []).filter(d => d.kind === "field" || d.kind === "crossReference").forEach(d => dec[d.id] = "Include");
   (c.security || []).forEach(s => dec[s.id] = "Require (auth)");
   (c.dependencies || []).forEach(d => dec[d.id] = /FileMan|DIC|DIE|DIQ|DIR|XLFSTR|ENUTL|ENJ/.test(d.target || d.id) ? "Platform (reuse)" : "Integration");
-  return { dec, oqPolicy };
+  return { dec, oqPolicy: {}, scope: {}, targets: {}, ruleBindings: {} };
 }
 
 function label(node) {
@@ -69,16 +71,27 @@ function label(node) {
 
 // ---- tool handlers ----
 
-function getState(graph, decisions) {
+function getState(graph, decisions, extra = {}) {
   const c = C(graph);
+  const record = normalize(decisions);
+  const implemented = extra.implemented || { api: [], orchestrator: { built: false, verified: false } };
   const cats = { oq: c.openQuestions, rule: c.businessRules, beh: c.sideEffects, sec: c.security, dep: c.dependencies };
   const summary = {};
   for (const [k, arr] of Object.entries(cats)) {
-    summary[k] = (arr || []).map(n => ({ id: n.id, label: label(n), decision: decisions.dec[n.id] || "(unset)" }));
+    summary[k] = (arr || []).map(n => ({ id: n.id, label: label(n), decision: record.dec[n.id] || "(unset)" }));
   }
-  // blocking = no recorded resolution; a Defer chosen in the chat records its reason, so it never blocks
-  const blocking = (c.openQuestions || []).filter(q => !((decisions.oqPolicy || {})[q.id] || "").trim()).map(q => q.id);
-  return { capability: c.name, summary, blocking };
+  const specs = generate({ graph, record, implemented });
+  const o = specs.orchestrator;
+  return {
+    capability: c.name, summary,
+    blocking: (c.openQuestions || []).filter(q => isBlocking(record, q.id)).map(q => q.id),
+    resolutions: Object.fromEntries((c.openQuestions || []).map(q => [q.id, { mode: record.dec[q.id], policy: record.oqPolicy[q.id] || null, bindings: record.ruleBindings[q.id] === undefined ? null : record.ruleBindings[q.id] }])),
+    sideEffects: [...o.detail.built.map(e => ({ ...e, built: true })), ...o.detail.deferred.map(e => ({ ...e, built: false })), ...o.detail.notBuilt.map(e => ({ ...e, built: false }))],
+    missing: o.missing, needs: o.needs,
+    requestContract: specs.api.request,
+    mandatory: (c.sideEffects || []).filter(isMandatory).map(s => s.id),
+    stage: stage(specs, implemented),
+  };
 }
 
 function explainOption(graph, id, option) {
@@ -125,66 +138,91 @@ function explainMapping(graph, id) {
   };
 }
 
+const MANDATORY_MSG = id => `${id} is mandatory in the production — the legacy calls it unconditionally (discovery). Only how it is implemented is decided here.`;
+
 function setDisposition(graph, decisions, id, option) {
   const cat = categoryOf(graph, id);
   if (!cat) return { ok: false, message: `unknown node ${id}` };
   if (cat === "oq") return { ok: false, message: `${id} is an open question — use resolveOpenQuestion instead` };
   if (!CAT_OPTS[cat].includes(option)) return { ok: false, message: `option "${option}" invalid for ${id}; valid: ${CAT_OPTS[cat].join(", ")}` };
+  if (option === "Drop" && cat === "beh" && isMandatory(findNode(graph, id))) return { ok: false, message: `refused: ${MANDATORY_MSG(id)}` };
   decisions.dec[id] = option;
-  return { ok: true, message: `${id} → ${option}`, decisions };
+  return { ok: true, message: `${id} → ${option}` };
 }
 
 function resolveOpenQuestion(graph, decisions, id, mode, policy) {
   if (categoryOf(graph, id) !== "oq") return { ok: false, message: `${id} is not an open question` };
   if (!CAT_OPTS.oq.includes(mode)) return { ok: false, message: `mode must be one of ${CAT_OPTS.oq.join(", ")}` };
   const text = String(policy || "").trim() || (mode === "Defer" ? "Deferred — not built in this phase; revisit later." : "");
-  decisions.oqPolicy = decisions.oqPolicy || {};
+  // bindings were made for the old wording — a changed resolution must be re-bound
+  if (decisions.dec[id] !== mode || decisions.oqPolicy[id] !== text) delete decisions.ruleBindings[id];
   decisions.dec[id] = mode;
   decisions.oqPolicy[id] = text;
-  // the side effect this question gates follows the decision into (or out of) the build
-  decisions.scope = decisions.scope || {};
   (C(graph).sideEffects || []).filter(s => s.openQuestion === id).forEach(s => { decisions.scope[s.id] = mode === "Defer" ? "Defer" : "Build now"; });
-  return { ok: true, message: `${id} → ${mode}${text ? " (resolved)" : " (still blocking — needs policy text)"}`, decisions };
+  return { ok: true, message: `${id} → ${mode}${text ? " (resolved)" : " (still blocking — needs policy text)"}` };
 }
 
 function setBuildScope(graph, decisions, id, phase) {
   if (categoryOf(graph, id) !== "beh") return { ok: false, message: `${id} is not a side effect; build scope applies to behaviors/side effects` };
   if (!["Build now", "Defer"].includes(phase)) return { ok: false, message: `phase must be "Build now" or "Defer"` };
-  decisions.scope = decisions.scope || {};
+  if (phase === "Defer" && isMandatory(findNode(graph, id))) return { ok: false, message: `refused: ${MANDATORY_MSG(id)}` };
   decisions.scope[id] = phase;
-  return { ok: true, message: `${id} build scope → ${phase}`, decisions };
+  return { ok: true, message: `${id} build scope → ${phase}` };
 }
 
-function setIntegration(graph, decisions, id, target) {
-  if (categoryOf(graph, id) !== "beh") return { ok: false, message: `${id} is not a side effect` };
-  decisions.dec[id] = "Integration";
-  decisions.integration = decisions.integration || {};
-  const t = decisions.integration[id] || {};
-  ["system", "endpoint", "trigger", "mapping"].forEach(k => { if (target && target[k] != null) t[k] = target[k]; });
-  decisions.integration[id] = t;
-  return { ok: true, message: `${id} → Integration (${t.system || "target TBD"})`, decisions };
+const SECRET = /(password|passwd|secret|token|api[_-]?key|bearer|authorization)\s*[:=]/i;
+
+function setTarget(graph, decisions, id, details) {
+  const se = (C(graph).sideEffects || []).find(s => s.id === id);
+  if (!se) return { ok: false, message: `${id} is not a side effect` };
+  const allowed = allowedTargetKeys(se, decisions);
+  const given = Object.entries(details || {}).filter(([, v]) => v != null && String(v).trim() !== "");
+  const bad = given.map(([k]) => k).filter(k => !allowed.includes(k));
+  if (bad.length) return { ok: false, message: `not a target detail for ${id}: ${bad.join(", ")}. Allowed: ${allowed.join(", ")}. Credentials are never recorded.` };
+  const leaked = given.filter(([, v]) => SECRET.test(String(v)));
+  if (leaked.length) return { ok: false, message: `refused: ${leaked.map(([k]) => k).join(", ")} looks like it contains a credential. Credentials are never recorded — they are Management Portal settings.` };
+  const via = given.find(([k]) => k === "via");
+  if (via && !VIA.includes(String(via[1]).trim())) return { ok: false, message: `via must be one of ${VIA.join(", ")}` };
+  decisions.targets[id] = Object.assign({}, decisions.targets[id] || {}, Object.fromEntries(given.map(([k, v]) => [k, String(v).trim()])));
+  return { ok: true, message: `${id} target details recorded (${given.map(([k]) => k).join(", ")}); disposition unchanged: ${decisions.dec[id]}` };
 }
+
+function bindRuleTerms(graph, decisions, id, bindings) {
+  if (categoryOf(graph, id) !== "oq") return { ok: false, message: `${id} is not an open question` };
+  if (isBlocking(decisions, id) || decisions.dec[id] === "Defer") return { ok: false, message: `${id} has no resolved rule to bind — decide it first` };
+  const fields = new Map(requestContract(graph, decisions).map(f => [f.field, f.name]));
+  const entries = Object.entries(bindings || {}).map(([w, f]) => [w, String(f).trim()]);
+  const bad = entries.filter(([, f]) => !fields.has(f));
+  if (bad.length) return { ok: false, message: `not in the API request contract: ${bad.map(([w, f]) => `${w} → ${f}`).join(", ")}. A word with no field in the contract is an unmet need — report it, don't bind it.` };
+  decisions.ruleBindings[id] = Object.fromEntries(entries);
+  return { ok: true, message: entries.length ? `${id} bindings: ${entries.map(([w, f]) => `${w} → fld ${f} ${fields.get(f)}`).join("; ")}` : `${id}: recorded that the policy uses no data words` };
+}
+
+const TARGET_PROPS = { via: { type: "string", description: "where the work is performed: vista | iris | external" } };
+for (const k of ["writePath", "fields", "operatorValues", "channel", "recipients", "content", "system", "endpoint", "trigger", "mapping", "settings"]) TARGET_PROPS[k] = { type: "string" };
 
 const TOOL_SPECS = [
-  { toolSpec: { name: "getState", description: "List all decision elements, their current disposition, and which open questions are still blocking.", inputSchema: { json: { type: "object", properties: {} } } } },
+  { toolSpec: { name: "getState", description: "The RECORDED state — the only source of truth for summaries and status. Returns every disposition, which open questions block, each question's recorded resolution (mode, policy, field bindings), every side effect (built or not, mandatory, gating question, legacy evidence, recorded target details, reason if not built), the missing list, needs from lower layers, the API request contract, mandatory items, and the current stage.", inputSchema: { json: { type: "object", properties: {} } } } },
   { toolSpec: { name: "explainOption", description: "Explain what a disposition option means for a specific element: the IRIS artifact it produces, when to use it, and its risk.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, option: { type: "string" } }, required: ["nodeId", "option"] } } } },
   { toolSpec: { name: "explainMapping", description: "Explain how a legacy element maps through the target layers (AI Hub / IRIS Production / REST / FileMan).", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" } }, required: ["nodeId"] } } } },
-  { toolSpec: { name: "setDisposition", description: "Apply a disposition to an element (rule/behavior/data/security/dependency). Not for open questions.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, option: { type: "string" } }, required: ["nodeId", "option"] } } } },
-  { toolSpec: { name: "resolveOpenQuestion", description: "Resolve an open question: mode is 'Business rule', 'Required input', or 'Defer'; policy is the developer's statement in their own words — for Defer, their reason. A Defer is a decision: it never blocks Phase 2, and the side effect it gates moves out of this build.", inputSchema: { json: { type: "object", properties: { id: { type: "string" }, mode: { type: "string" }, policy: { type: "string" } }, required: ["id", "mode"] } } } },
-  { toolSpec: { name: "setBuildScope", description: "Set whether a side effect is built in this phase. phase is 'Build now' or 'Defer' (defer = out of this build, revisit later).", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, phase: { type: "string" } }, required: ["nodeId", "phase"] } } } },
-  { toolSpec: { name: "setIntegration", description: "Mark a side effect as an external integration and capture its target so the coding agent can build the call. Provide system (e.g. Jira), endpoint, trigger, and field mapping.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, system: { type: "string" }, endpoint: { type: "string" }, trigger: { type: "string" }, mapping: { type: "string" } }, required: ["nodeId", "system"] } } } },
+  { toolSpec: { name: "setDisposition", description: "Apply a disposition to an element (rule/behavior/data/security/dependency). Not for open questions. Drop is refused for mandatory items.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, option: { type: "string" } }, required: ["nodeId", "option"] } } } },
+  { toolSpec: { name: "resolveOpenQuestion", description: "Resolve an open question: mode is 'Business rule', 'Required input', or 'Defer'; policy is the developer's statement in their own words (for Defer, their reason). The side effect the question gates moves into this build (Business rule / Required input) or out of it (Defer). Changing a resolution clears its field bindings.", inputSchema: { json: { type: "object", properties: { id: { type: "string" }, mode: { type: "string" }, policy: { type: "string" } }, required: ["id", "mode"] } } } },
+  { toolSpec: { name: "setBuildScope", description: "Set whether a side effect is built in this phase: 'Build now' or 'Defer'. Defer is refused for mandatory items.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, phase: { type: "string" } }, required: ["nodeId", "phase"] } } } },
+  { toolSpec: { name: "setTarget", description: "Record target details for a built side effect so the production can be built. Never changes the disposition. Accepts via plus only the keys for that side effect's kind (vistaWrite: writePath, fields, operatorValues; notification: channel, recipients, content; Integration disposition: system, endpoint, trigger, mapping, settings). Never pass credentials or tokens.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, ...TARGET_PROPS }, required: ["nodeId"] } } } },
+  { toolSpec: { name: "bindRuleTerms", description: "Bind the data words in a resolved open question's policy to DD field numbers from the API request contract (getState.requestContract). Pass {} if the policy uses no data. A word with no field in the contract is an unmet need — report it instead of binding.", inputSchema: { json: { type: "object", properties: { id: { type: "string" }, bindings: { type: "object", description: "map of policy word → DD field number, e.g. {\"TYPE OF ENTRY\": \"7\"}" } }, required: ["id", "bindings"] } } } },
 ];
 
 function runTool(name, input, ctx) {
   const { graph, decisions } = ctx;
   switch (name) {
-    case "getState": return getState(graph, decisions);
+    case "getState": return getState(graph, decisions, ctx);
     case "explainOption": return explainOption(graph, input.nodeId, input.option);
     case "explainMapping": return explainMapping(graph, input.nodeId);
     case "setDisposition": return setDisposition(graph, decisions, input.nodeId, input.option);
     case "resolveOpenQuestion": return resolveOpenQuestion(graph, decisions, input.id, input.mode, input.policy);
     case "setBuildScope": return setBuildScope(graph, decisions, input.nodeId, input.phase);
-    case "setIntegration": return setIntegration(graph, decisions, input.nodeId, { system: input.system, endpoint: input.endpoint, trigger: input.trigger, mapping: input.mapping });
+    case "setTarget": { const { nodeId, ...details } = input || {}; return setTarget(graph, decisions, nodeId, details); }
+    case "bindRuleTerms": return bindRuleTerms(graph, decisions, input.id, input.bindings);
     default: return { error: `unknown tool ${name}` };
   }
 }
