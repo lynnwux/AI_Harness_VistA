@@ -1,0 +1,481 @@
+{
+  "capability": "Create Equipment Record",
+  "command": "RegisterEquipment",
+  "pages": [
+    {
+      "title": "Equipment Identity & Acquisition",
+      "fields": [
+        {
+          "k": "entryNumber",
+          "label": "ENTRY NUMBER",
+          "fno": ".01",
+          "type": "readonly"
+        },
+        {
+          "k": "manufacturer",
+          "label": "MANUFACTURER",
+          "fno": "1",
+          "type": "lookupType",
+          "table": "MANUFACTURER_LIST_FILE6912",
+          "sample": {
+            "value": "1",
+            "label": "Sargent & Greenleaf, Inc."
+          }
+        },
+        {
+          "k": "mfgrEquipmentName",
+          "label": "MFGR. EQUIPMENT NAME",
+          "fno": "3",
+          "type": "text",
+          "maxlen": null
+        },
+        {
+          "k": "model",
+          "label": "MODEL",
+          "fno": "4",
+          "type": "text",
+          "maxlen": null
+        },
+        {
+          "k": "serial",
+          "label": "SERIAL",
+          "fno": "5",
+          "type": "text",
+          "maxlen": null
+        },
+        {
+          "k": "equipmentCategory",
+          "label": "EQUIPMENT CATEGORY",
+          "fno": "6",
+          "type": "lookupType",
+          "table": "EQUIPMENT_CATEGORY6911",
+          "sample": {
+            "value": "1",
+            "label": "X-RAY GENERATOR #A201"
+          }
+        },
+        {
+          "k": "categoryStockNumber",
+          "label": "CATEGORY STOCK NUMBER",
+          "fno": "18",
+          "type": "lookupType",
+          "table": "CATEGORY_STOCK_NUMBER6917",
+          "sample": {
+            "value": "1",
+            "label": "1005-000667"
+          }
+        },
+        {
+          "k": "typeOfEntry",
+          "label": "TYPE OF ENTRY",
+          "fno": "7",
+          "type": "select",
+          "options": [
+            [
+              "NX",
+              "NON-EXPENDABLE EQPT"
+            ],
+            [
+              "BSE",
+              "BUILDING SERVICE EQPT"
+            ],
+            [
+              "EXP",
+              "EXPENDABLE EQPT"
+            ]
+          ]
+        },
+        {
+          "k": "acquisitionMethod",
+          "label": "ACQUISITION METHOD",
+          "fno": "20.1",
+          "type": "select",
+          "options": [
+            [
+              "C",
+              "CONSTRUCTED"
+            ],
+            [
+              "G",
+              "GIFT/BEQUEST/DONATION"
+            ],
+            [
+              "L",
+              "LEASED"
+            ],
+            [
+              "M",
+              "CAPITAL LEASE"
+            ],
+            [
+              "O",
+              "OTHER"
+            ],
+            [
+              "P",
+              "PURCHASED"
+            ],
+            [
+              "R",
+              "TRANSFERRED"
+            ],
+            [
+              "T",
+              "TRADED"
+            ],
+            [
+              "X",
+              "EXCESS"
+            ],
+            [
+              "1",
+              "ON LOAN TO VAMC"
+            ]
+          ]
+        },
+        {
+          "k": "acquisitionDate",
+          "label": "ACQUISITION DATE",
+          "fno": "13",
+          "type": "date"
+        },
+        {
+          "k": "vendorPointer",
+          "label": "VENDOR POINTER",
+          "fno": "10",
+          "type": "lookupType",
+          "table": "VENDOR440",
+          "sample": {
+            "value": "1",
+            "label": "OMNIS COMPUTER SUPPLIES"
+          }
+        },
+        {
+          "k": "originalAssetValue",
+          "label": "ORIGINAL ASSET VALUE",
+          "fno": "31.5",
+          "type": "number"
+        },
+        {
+          "k": "warrantyExpDate",
+          "label": "WARRANTY EXP. DATE",
+          "fno": "14",
+          "type": "date"
+        },
+        {
+          "k": "replacingEntryNumber",
+          "label": "REPLACING (ENTRY NUMBER)",
+          "fno": "51",
+          "type": "lookupType",
+          "table": "EQUIPMENT_INV_6914",
+          "sample": {
+            "value": "6",
+            "label": "AUTOMATIC DOOR"
+          }
+        }
+      ]
+    },
+    {
+      "title": "Ownership & Location",
+      "fields": [
+        {
+          "k": "servicePointer",
+          "label": "SERVICE POINTER",
+          "fno": "21",
+          "type": "lookupSelect",
+          "table": "SERVICESECTION49",
+          "sample": {
+            "value": "1046",
+            "label": "ACCOUNTS RECEIVABLE"
+          }
+        },
+        {
+          "k": "useStatus",
+          "label": "USE STATUS",
+          "fno": "20",
+          "type": "select",
+          "options": [
+            [
+              "1",
+              "IN USE"
+            ],
+            [
+              "2",
+              "OUT OF SERVICE"
+            ],
+            [
+              "3",
+              "LOANED OUT"
+            ],
+            [
+              "4",
+              "TURNED IN"
+            ],
+            [
+              "5",
+              "LOST OR STOLEN"
+            ]
+          ]
+        },
+        {
+          "k": "parentSystem",
+          "label": "PARENT SYSTEM",
+          "fno": "2",
+          "type": "lookupType",
+          "table": "EQUIPMENT_INV_6914",
+          "sample": {
+            "value": "6",
+            "label": "AUTOMATIC DOOR"
+          }
+        },
+        {
+          "k": "location",
+          "label": "LOCATION",
+          "fno": "24",
+          "type": "lookupType",
+          "table": "ENG_SPACE6928",
+          "sample": {
+            "value": "33",
+            "label": "201 — OFFICE, PHYSICIAN"
+          }
+        },
+        {
+          "k": "lockoutRequired",
+          "label": "LOCKOUT REQUIRED?",
+          "fno": "9",
+          "type": "select",
+          "options": [
+            [
+              "YES",
+              "YES"
+            ],
+            [
+              "NO",
+              "NO"
+            ]
+          ]
+        },
+        {
+          "k": "conditionCode",
+          "label": "CONDITION CODE",
+          "fno": "53",
+          "type": "select",
+          "options": [
+            [
+              "1",
+              "LIKE NEW"
+            ],
+            [
+              "2",
+              "GOOD"
+            ],
+            [
+              "3",
+              "POOR"
+            ]
+          ]
+        },
+        {
+          "k": "stationNumber",
+          "label": "STATION NUMBER",
+          "fno": "60",
+          "type": "text",
+          "maxlen": 5
+        },
+        {
+          "k": "vaPmNumber",
+          "label": "VA PM NUMBER",
+          "fno": "25",
+          "type": "text",
+          "maxlen": 10
+        },
+        {
+          "k": "serviceContract",
+          "label": "SERVICE CONTRACT",
+          "fno": "19.5",
+          "type": "select",
+          "options": [
+            [
+              "YES",
+              "YES"
+            ],
+            [
+              "NO",
+              "NO"
+            ]
+          ]
+        },
+        {
+          "k": "serviceContractCost",
+          "label": "SERVICE CONTRACT COST",
+          "fno": "19.6",
+          "type": "number"
+        },
+        {
+          "k": "localIdentifier",
+          "label": "LOCAL IDENTIFIER",
+          "fno": "26",
+          "type": "text",
+          "maxlen": 15
+        },
+        {
+          "k": "physicalInventoryDate",
+          "label": "PHYSICAL INVENTORY DATE",
+          "fno": "23",
+          "type": "date"
+        },
+        {
+          "k": "jcaho",
+          "label": "JCAHO",
+          "fno": "27",
+          "type": "select",
+          "options": [
+            [
+              "YES",
+              "YES"
+            ],
+            [
+              "NO",
+              "NO"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Financial",
+      "fields": [
+        {
+          "k": "controlledItem",
+          "label": "CONTROLLED ITEM?",
+          "fno": "33",
+          "type": "select",
+          "options": [
+            [
+              "YES",
+              "YES"
+            ],
+            [
+              "NO",
+              "NO"
+            ]
+          ]
+        },
+        {
+          "k": "investmentCategory",
+          "label": "INVESTMENT CATEGORY",
+          "fno": "34",
+          "type": "select",
+          "options": [
+            [
+              "1",
+              "CAPITALIZED/ACCOUNTABLE"
+            ],
+            [
+              "A",
+              "NOT CAPITALIZED/ACCOUNTABLE"
+            ],
+            [
+              "0",
+              "EXPENSED/OPTIONALLY ACCOUNTABLE"
+            ]
+          ]
+        },
+        {
+          "k": "fundControlPoint",
+          "label": "FUND CONTROL POINT",
+          "fno": "35",
+          "type": "text",
+          "maxlen": 30
+        },
+        {
+          "k": "fund",
+          "label": "FUND",
+          "fno": "62",
+          "type": "lookupSelect",
+          "table": "NX_FUND6914_6",
+          "sample": {
+            "value": "2",
+            "label": "4014 — Canteen Service"
+          }
+        },
+        {
+          "k": "budgetObjectCode",
+          "label": "BUDGET OBJECT CODE",
+          "fno": "61",
+          "type": "lookupSelect",
+          "table": "NX_BOC6914_4",
+          "sample": {
+            "value": "16",
+            "label": "2335 — SOFTWARE"
+          }
+        },
+        {
+          "k": "standardGeneralLedger",
+          "label": "STANDARD GENERAL LEDGER",
+          "fno": "38",
+          "type": "lookupSelect",
+          "table": "NX_SGL6914_3",
+          "sample": {
+            "value": "9",
+            "label": "1524 — PROPERTY PENDING DISPOSAL"
+          }
+        },
+        {
+          "k": "equityAccount",
+          "label": "EQUITY ACCOUNT",
+          "fno": "64",
+          "type": "select",
+          "options": [
+            [
+              "3299",
+              "MEDICAL"
+            ],
+            [
+              "3210",
+              "NON-MEDICAL"
+            ],
+            [
+              "3402",
+              "DONATED"
+            ]
+          ]
+        },
+        {
+          "k": "subaccount",
+          "label": "SUBACCOUNT (A/O)",
+          "fno": "37",
+          "type": "lookupType",
+          "table": "BUDGET_OBJECT_CODE420_2",
+          "sample": {
+            "value": "1001",
+            "label": "1001 Administrative Personnel not Otherwise Classified"
+          }
+        }
+      ]
+    }
+  ],
+  "oq": [],
+  "sideEffects": [
+    {
+      "name": "Incoming inspection work order",
+      "disp": "Business Operation",
+      "deferred": false
+    },
+    {
+      "name": "PM-schedule enrollment",
+      "disp": "Business Operation",
+      "deferred": false
+    },
+    {
+      "name": "FA document to Austin",
+      "disp": "Business Operation",
+      "deferred": false
+    },
+    {
+      "name": "New-equipment MailMan bulletin",
+      "disp": "Event",
+      "deferred": false
+    }
+  ]
+}
