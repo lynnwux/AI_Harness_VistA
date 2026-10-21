@@ -161,6 +161,10 @@ test("the guard checks comments, statements, SELECT, forbidden words and every F
   // only built-in functions; no quoted names
   assert.match(g, /Parameter FUNCTIONS = "COUNT,SUM,AVG,MIN,MAX,CAST,[^"]*\$PIECE,[^"]*%SQLUPPER/);
   assert.match(g, /If t = """" \{/);
+  // numbers are whole literals; % mid-name starts a new token
+  assert.match(g, /ClassMethod IsNumber\(t As %String\) As %Boolean \[ CodeMode = expression \]\n\{\n\$match\(t, "\(\\d\+\\\.\?\\d\*\|\\\.\\d\+\)\(E\[\+-\]\?\\d\+\)\?"\)\n\}/);
+  assert.match(g, /ClassMethod IsNamePart\(c As %String\) As %Boolean \[ CodeMode = expression \]\n\{\n\(c '= ""\) && \(\(c\?1AN\) \|\| \("_\.\$#@" \[ c\)\)\n\}/);
+  assert.match(g, /a number may not run into a name or a second dot/);
 });
 
 test("the agent: bedrock, the given model, the toolset, rules and a schema guide naming every pointer's name column", () => {
@@ -225,9 +229,9 @@ test("the REST dispatch: POST /chat, /quick/:id, /guard and the exact token-expi
 test("GUARD_CASES is a regression suite covering every bypass class, with allowed and rejected cases", () => {
   assert.ok(GUARD_CASES.every(c => typeof c.sql === "string" && typeof c.allowed === "boolean" && typeof c.kind === "string"));
   assert.equal(new Set(GUARD_CASES.map(c => c.sql)).size, GUARD_CASES.length, "no duplicate cases");
-  const kinds = ["plain", "case", "statement", "forbidden-word", "into", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "schema-less", "quoted", "dots", "implicit-join", "function", "cte"];
+  const kinds = ["number-run", "name-boundary", "plain", "case", "statement", "forbidden-word", "into", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "schema-less", "quoted", "dots", "implicit-join", "function", "cte"];
   for (const k of kinds) assert.ok(GUARD_CASES.some(c => c.kind === k), `kind ${k}`);
-  for (const k of ["plain", "case", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "function"]) {
+  for (const k of ["number-run", "name-boundary", "plain", "case", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "function"]) {
     assert.ok(GUARD_CASES.some(c => c.kind === k && c.allowed) && GUARD_CASES.some(c => c.kind === k && !c.allowed), `kind ${k} has both allowed and rejected cases`);
   }
   const has = (re, allowed = false) => assert.ok(GUARD_CASES.some(c => re.test(c.sql) && c.allowed === allowed), String(re));
@@ -253,6 +257,31 @@ test("GUARD_CASES is a regression suite covering every bypass class, with allowe
   has(/ INTO /);
   has(/->/);
   has(/^select ien from vista\.equipment_inv_6914/, true);   // lower case
+  has(/, 1FROM VISTA\.NEW_PERSON200/);                       // re-review: a number running into FROM
+  has(/, 5\.FROM VISTA\.NEW_PERSON200/);
+  has(/, 1E1FROM VISTA\.NEW_PERSON200/);
+  has(/ON 1=1JOIN VISTA\.NEW_PERSON200/);
+  has(/> 1\.5E3$/, true);                                    // a valid numeric literal still passes
+  has(/FROM%Dictionary/);                                    // IRIS splits FROM%X into FROM %X
+  has(/JOIN%Dictionary/);
+});
+
+test("every postcondition is one expression (a space ends it in ObjectScript)", () => {
+  for (const c of classes()) {
+    for (const lineText of c.text.split("\n")) {
+      for (const m of lineText.matchAll(/\b(?:Set|Quit|Do|Kill):/g)) {
+        let i = m.index + m[0].length, depth = 0, quoted = false;
+        for (; i < lineText.length; i++) {
+          const ch = lineText[i];
+          if (ch === '"') quoted = !quoted;
+          else if (!quoted && ch === "(") depth++;
+          else if (!quoted && ch === ")") depth--;
+          else if (!quoted && depth === 0 && ch === " ") break;
+        }
+        assert.doesNotMatch(lineText.slice(i + 1), /^(&&|\|\||[=<>'\]\[])/, `${c.name}: ${lineText.trim()}`);
+      }
+    }
+  }
 });
 
 test("nothing generated holds a host, an account or a credential", () => {

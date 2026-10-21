@@ -175,8 +175,24 @@ ClassMethod Check(sql As %String) As %String
     Quit:tN=0 "the query is empty"
     Quit:tTok(1)'="SELECT" "only a SELECT is allowed (the query starts with "_tTok(1)_")"
     Set tAllow = $listfromstring($zconvert(..#ALLOWLIST, "U")), tCalls = $listfromstring(..#FUNCTIONS_","_..#BEFOREPAREN)
+    Set tStops = $listfromstring("SELECT,FROM,JOIN,ON,"_..#ENDCLAUSE)
     For i=1:1:tN {
-        Set t = tTok(i), tNext = $get(tTok(i + 1)), tNumber = ($translate(t, "0123456789.") = "") && (t?.E1N.E)
+        Set t = tTok(i), tNext = $get(tTok(i + 1)), tNumber = ..IsNumber(t)
+        If 'tNumber && (($extract(t)?1N) || ($extract(t, 1, 2)?1"."1N)) {
+            Set tWhy = "a number may not run into a name or a second dot ("_t_")"
+            Quit
+        }
+        If ($extract(t) = "_") || (($extract(t) = "$") && '$listfind(tCalls, t)) {
+            Set tWhy = "a name may not start with "_$extract(t)_" ("_t_")"
+            Quit
+        }
+        If 'tNumber && (t [ ".") {
+            For k=1:1:$length(t, ".") {
+                Set tPart = $piece(t, ".", k)
+                If ($extract(tPart)?1N) || $listfind(tStops, tPart) { Set tWhy = "a dotted name may not hold "_tPart_" ("_t_")" Quit }
+            }
+            Quit:tWhy'=""
+        }
         If t = """" {
             Set tWhy = "quoted names (""..."") are not allowed: use the plain names from the schema guide"
             Quit
@@ -275,8 +291,10 @@ ClassMethod Forbidden(pText As %String) As %String
     Quit tWhy
 }
 
-/// Splits the comment-free text into tokens: names (upper case, dots kept), ' for a string, "" for a quoted name,
-/// and single characters. Returns the count.
+/// Splits the comment-free text into tokens: names (upper case, dots kept), numbers, a single ' for a string, a
+/// single " for a quoted name, and single characters. Returns the count. Like IRIS, a % mid-name starts a new
+/// token (FROM%X is FROM then %X). A number takes digits, an optional fraction and exponent; letters, dots or
+/// $ # @ running straight on stay in the same token (1FROM, 5.FROM, 1E1FROM), which Check rejects.
 ClassMethod Tokens(pText As %String, Output pTok) As %Integer
 {
     Kill pTok
@@ -290,9 +308,28 @@ ClassMethod Tokens(pText As %String, Output pTok) As %Integer
             Set n = n + 1, pTok(n) = c, i = j + 1
             Continue
         }
+        If (c?1N) || ((c = ".") && ($extract(pText, i + 1)?1N)) {
+            Set j = i
+            While $extract(pText, j)?1N { Set j = j + 1 }
+            If $extract(pText, j) = "." {
+                Set j = j + 1
+                While $extract(pText, j)?1N { Set j = j + 1 }
+            }
+            If $extract(pText, j)?1(1"E",1"e") {
+                Set k = j + 1
+                Set:(("+-" [ $extract(pText, k)) && ($extract(pText, k) '= "")) k = k + 1
+                If $extract(pText, k)?1N {
+                    Set j = k
+                    While $extract(pText, j)?1N { Set j = j + 1 }
+                }
+            }
+            While ..IsNamePart($extract(pText, j)) { Set j = j + 1 }
+            Set n = n + 1, pTok(n) = $zconvert($extract(pText, i, j - 1), "U"), i = j
+            Continue
+        }
         If ..IsName(c) {
             Set j = i + 1
-            While (j <= tLen) && ..IsName($extract(pText, j)) { Set j = j + 1 }
+            While ..IsNamePart($extract(pText, j)) { Set j = j + 1 }
             Set n = n + 1, pTok(n) = $zconvert($extract(pText, i, j - 1), "U"), i = j
             Continue
         }
@@ -301,9 +338,22 @@ ClassMethod Tokens(pText As %String, Output pTok) As %Integer
     Quit n
 }
 
+/// Whether c can start a name: a letter, _, % or $.
 ClassMethod IsName(c As %String) As %Boolean [ CodeMode = expression ]
 {
-(c '= "") && ((c?1AN) || ("_%$.#@" [ c))
+(c '= "") && ((c?1A) || ("_%$" [ c))
+}
+
+/// Whether c can continue a name: a letter, digit, _, ., $, # or @ (not %: IRIS starts a new token there).
+ClassMethod IsNamePart(c As %String) As %Boolean [ CodeMode = expression ]
+{
+(c '= "") && ((c?1AN) || ("_.$#@" [ c))
+}
+
+/// Whether t is a whole numeric literal: digits with an optional fraction (or .digits), and an optional exponent.
+ClassMethod IsNumber(t As %String) As %Boolean [ CodeMode = expression ]
+{
+$match(t, "(\\d+\\.?\\d*|\\.\\d+)(E[+-]?\\d+)?")
 }
 
 /// Walks one FROM clause from token p, at its own parenthesis depth, until WHERE, GROUP, ORDER, HAVING, UNION,
@@ -942,6 +992,25 @@ const GUARD_CASES = [
   { kind: "function", allowed: false, sql: `SELECT VISTA.Proc(1) FROM ${E}` },
   { kind: "function", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN = %SYSTEM_SQL.Foo()` },
   { kind: "function", allowed: false, sql: `SELECT $SYSTEM(1) FROM ${E}` },
+  // numbers running into keywords (a lexer may read 1FROM as 1 FROM) and numeric literals
+  { kind: "number-run", allowed: false, sql: "SELECT SSN, 1FROM VISTA.NEW_PERSON200" },
+  { kind: "number-run", allowed: false, sql: "SELECT SSN, 5.FROM VISTA.NEW_PERSON200" },
+  { kind: "number-run", allowed: false, sql: "SELECT SSN, 1E1FROM VISTA.NEW_PERSON200" },
+  { kind: "number-run", allowed: false, sql: `SELECT * FROM ${E} e JOIN ${S} s ON 1=1JOIN VISTA.NEW_PERSON200 n ON 1=1` },
+  { kind: "number-run", allowed: false, sql: `SELECT IEN FROM ${E} WHERE 1=1UNION SELECT IEN FROM VISTA.NEW_PERSON200` },
+  { kind: "number-run", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN = 1.5.3` },
+  { kind: "number-run", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN = 1ENAME` },
+  { kind: "number-run", allowed: false, sql: "SELECT e.1FROM VISTA.NEW_PERSON200" },
+  { kind: "number-run", allowed: true, sql: `SELECT IEN FROM ${E} WHERE TOTAL_ASSET_VALUE > 1.5E3` },
+  { kind: "number-run", allowed: true, sql: `SELECT IEN FROM ${E} WHERE TOTAL_ASSET_VALUE > 1e+3 AND TOTAL_ASSET_VALUE < .5E7 AND IEN <> 0` },
+  // name boundaries: IRIS starts a new token at a mid-name %; odd name starts
+  { kind: "name-boundary", allowed: false, sql: "SELECT * FROM%Dictionary.ClassDefinition" },
+  { kind: "name-boundary", allowed: false, sql: `SELECT IEN FROM ${E} e JOIN%Dictionary.ClassDefinition c ON 1=1` },
+  { kind: "name-boundary", allowed: false, sql: "SELECT e.FROM VISTA.NEW_PERSON200" },
+  { kind: "name-boundary", allowed: false, sql: "SELECT IEN @FROM VISTA.NEW_PERSON200" },
+  { kind: "name-boundary", allowed: false, sql: "SELECT $FROM VISTA.NEW_PERSON200" },
+  { kind: "name-boundary", allowed: false, sql: `SELECT _X FROM ${E}` },
+  { kind: "name-boundary", allowed: true, sql: `SELECT IEN FROM ${E} WHERE MFGR__EQUIPMENT_NAME%STARTSWITH'BED'` },
   // CTEs
   { kind: "cte", allowed: false, sql: `WITH x AS (SELECT 1 FROM ${E}) SELECT * FROM x` },
   { kind: "cte", allowed: false, sql: `WITH x AS (SELECT IEN FROM ${E}) SELECT IEN FROM ${E}` },
