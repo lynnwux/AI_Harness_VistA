@@ -130,21 +130,30 @@ function countFrom(result) {
   return typeof result.rowCount === "number" ? result.rowCount : null;
 }
 
-// Does reply contain n (integer) with or without thousands-separator commas, as a whole number?
-// "We have 1,295 items" matches 1295; "12950" does not match 1295; "295.7" does not match 295.
+// Does the reply contain n as a standalone whole number?
+// Uses tokenization: extract every number token (digit groups with optional thousands-separator commas).
+// A token with a decimal part (digit(s) after ".") is skipped — it is not a whole number.
+// A trailing sentence period (e.g. "holds 295." → 295) is NOT a decimal: the regex only captures
+// "." when followed by digits, so a bare trailing "." is not consumed by the decimal group.
+// Pass iff the reference n equals one of the extracted tokens.
 // Guards against NaN and negative n (returns false).
+// Examples: "1,295" → 1295 (matches 1295, not 295); "295,000" → 295000 (not 295);
+//           "ratio 3.295" → decimal, skip (not 295); "holds 295." → 295 (matches 295).
 function countInReply(reply, n) {
   const num = Number(n);
   if (!isFinite(num) || num < 0) return false;
-  const s = String(Math.round(num));
-  if (!/^\d+$/.test(s)) return false; // extra safety
-  let pat = "";
-  for (let i = 0; i < s.length; i++) {
-    if (i > 0 && (s.length - i) % 3 === 0) pat += ",?";
-    pat += s[i];
+  const target = Math.round(num);
+  // Find all number-like tokens: digit groups with optional thousands-separator commas,
+  // optionally followed by a decimal part "." + one or more digits.
+  const re = /(\d[\d,]*)(?:\.(\d+))?/g;
+  let m;
+  while ((m = re.exec(reply)) !== null) {
+    if (m[2] !== undefined) continue;        // has decimal digits after "." → skip
+    const normalized = m[1].replace(/,/g, "");
+    if (!/^\d+$/.test(normalized)) continue; // safety: reject tokens with stray chars
+    if (parseInt(normalized, 10) === target) return true;
   }
-  // (?!\.) prevents matching "295.7" as 295; (?!\d) prevents "12950" matching 1295.
-  return new RegExp("(?<!\\d)" + pat + "(?!\\d|\\.)").test(reply);
+  return false;
 }
 
 // Evaluate all three verification axes. Returns { ok, problems, items }.
@@ -165,10 +174,12 @@ function judgeAi({ quick = [], count = null, guard = [], rowCap = 200 }) {
   const items = [];
 
   for (const q of quick) {
-    const chatErr = q.chatbot && q.chatbot.error;
-    if (chatErr) {
-      problems.push(`question ${q.id}: chatbot error — ${chatErr}`);
-      items.push({ question: q.id, chatbot: `error: ${String(chatErr).slice(0, 60)}`, vista: `${(q.direct || []).length} rows`, ok: false });
+    // N3: any present, non-null error value (including "" and 0) is a real error.
+    const chatHasError = q.chatbot != null && q.chatbot.error != null;
+    if (chatHasError) {
+      const chatErrMsg = String(q.chatbot.error || "(empty)").slice(0, 60);
+      problems.push(`question ${q.id}: chatbot error — ${chatErrMsg}`);
+      items.push({ question: q.id, chatbot: `error: ${chatErrMsg}`, vista: `${(q.direct || []).length} rows`, ok: false });
       continue;
     }
     if (!Array.isArray(q.chatbot && q.chatbot.rows)) {
@@ -206,11 +217,13 @@ function judgeAi({ quick = [], count = null, guard = [], rowCap = 200 }) {
   }
 
   if (count) {
-    const n       = count.reference;
-    const chatErr = count.result && count.result.error;
-    if (chatErr) {
-      problems.push(`count: chatbot error — ${chatErr}`);
-      items.push({ question: "count", chatbot: `error: ${String(chatErr).slice(0, 60)}`, vista: `${n}`, ok: false });
+    const n = count.reference;
+    // N3: any present, non-null error value on the count result is a real error.
+    const chatHasError = count.result != null && count.result.error != null;
+    if (chatHasError) {
+      const chatErrMsg = String(count.result.error || "(empty)").slice(0, 60);
+      problems.push(`count: chatbot error — ${chatErrMsg}`);
+      items.push({ question: "count", chatbot: `error: ${chatErrMsg}`, vista: `${n}`, ok: false });
     } else {
       // Require BOTH: countFrom(result) matches reference AND countInReply(reply, reference).
       const chatCount  = countFrom(count.result);
@@ -224,8 +237,9 @@ function judgeAi({ quick = [], count = null, guard = [], rowCap = 200 }) {
   }
 
   for (const g of guard) {
-    if (g.error) {
-      problems.push(`guard case "${String(g.sql).slice(0, 60)}": HTTP error — ${g.error}`);
+    // N3: any present, non-null error value is a real error (including "").
+    if (g.error != null) {
+      problems.push(`guard case "${String(g.sql).slice(0, 60)}": HTTP error — ${g.error || "(empty)"}`);
     } else if (g.got !== g.allowed) {
       problems.push(`guard case "${String(g.sql).slice(0, 60)}": expected allowed=${g.allowed}, got ${g.got}`);
     }
@@ -420,8 +434,9 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     const countRef = countRefNum;
 
     // Helper: is a count result OK? Requires BOTH: countFrom matches AND countInReply matches.
+    // N3: use == null check (not truthy) so a falsy error like "" still fails.
     const countResultOk = chat =>
-      !chat.error &&
+      chat.error == null &&
       String(countFrom(chat)).trim() === String(countRef).trim() &&
       countInReply(chat.reply || "", countRef);
 
@@ -454,7 +469,9 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
           }
         }
       } catch (e) {
-        guardEntry = { sql: gc.sql, allowed: gc.allowed, got: false, error: redact(e.message, secrets) };
+        // N3: never store an empty error string — use a fixed fallback so judgeAi sees a non-null error.
+        const errMsg = redact(e.message, secrets) || "request failed";
+        guardEntry = { sql: gc.sql, allowed: gc.allowed, got: false, error: errMsg };
       }
       guardInput.push(guardEntry);
     }

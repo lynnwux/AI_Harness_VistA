@@ -360,6 +360,32 @@ test("countInReply: matches a million with separators", () => {
   assert.ok(countInReply("Total: 1000000 records", 1000000));
 });
 
+// ── tokenization-specific countInReply tests (C2/N1 — round 2) ───────────────
+
+test("countInReply: sentence-ending period is not a decimal ('holds 295.' matches 295)", () => {
+  // N1 breakage: current regex (?!\d|\.) prevents matching "295." because "." follows.
+  assert.ok(countInReply("The inventory holds 295.", 295), "'295.' must match 295");
+});
+
+test("countInReply: comma-number followed by sentence period ('1,295.' matches 1295)", () => {
+  assert.ok(countInReply("We have 1,295.", 1295), "'1,295.' must match 1295");
+});
+
+test("countInReply: '1,295' does NOT match 295 (tokenizes to 1295)", () => {
+  // C2: current regex matches the '295' substring inside '1,295' — tokenization must reject this.
+  assert.ok(!countInReply("We have 1,295 items", 295), "'1,295' tokenizes to 1295, must not match 295");
+});
+
+test("countInReply: '295,000' does NOT match 295", () => {
+  // C2: current regex matches '295' inside '295,000' — tokenization must reject this.
+  assert.ok(!countInReply("We have 295,000 items", 295), "'295,000' tokenizes to 295000, must not match 295");
+});
+
+test("countInReply: 'ratio 3.295' does NOT match 295 (decimal token)", () => {
+  // C2: current regex matches '295' after '.' in '3.295' because lookbehind only guards digits.
+  assert.ok(!countInReply("ratio 3.295", 295), "'3.295' is a decimal, must not match 295");
+});
+
 // ── judgeAi ───────────────────────────────────────────────────────────────────
 
 test("judgeAi: all correct → ok=true, no problems", () => {
@@ -561,6 +587,49 @@ test("judgeAi: guard entry with error field → problem (fails the run)", () => 
   assert.ok(result.problems.some(p => /HTTP 400/.test(p)), `expected HTTP 400 in problems; got: ${result.problems}`);
 });
 
+// ── N1: reply ending with sentence period must pass through judgeAi ───────────
+
+test("judgeAi: count reply ending with sentence period ('The inventory holds 295.') → ok", () => {
+  // N1 breakage: round-1 (?!\.) lookahead breaks "295." — judgeAi must accept it.
+  const result = judgeAi({
+    quick: [],
+    count: { result: { rows: [{ n: 295 }], columns: ["n"], rowCount: 1 }, reply: "The inventory holds 295.", reference: 295 },
+    guard: [],
+  });
+  assert.ok(result.ok, "reply ending with sentence period must pass; got problems: " + result.problems);
+});
+
+// ── N3: falsy errors (empty string, 0) must be treated as errors ──────────────
+
+test("judgeAi: chatbot.error='' (empty string) → problem", () => {
+  // Probe: current code uses `&& q.chatbot.error` (truthy), so "" silently passes.
+  const result = judgeAi({
+    quick: [{ id: "AIQ.Test", chatbot: { error: "", rows: [], rowCount: 0, truncated: false }, direct: [] }],
+    count: null, guard: [],
+  });
+  assert.ok(!result.ok, "empty-string error must fail the question");
+});
+
+test("judgeAi: count result.error='' (empty string) → problem", () => {
+  // count reference=0, rows=[], error="" — must fail (not treated as no-error).
+  const result = judgeAi({
+    quick: [],
+    count: { result: { error: "", rows: [], rowCount: 0, columns: [] }, reply: "0 pieces.", reference: 0 },
+    guard: [],
+  });
+  assert.ok(!result.ok, "empty-string error on count result must fail");
+});
+
+test("judgeAi: guard entry error='' (empty string) → problem", () => {
+  // Probe: current code uses `if (g.error)` which is falsy for "".
+  const result = judgeAi({
+    quick: [],
+    count: null,
+    guard: [{ sql: "SELECT 1", allowed: false, got: false, error: "" }],
+  });
+  assert.ok(!result.ok, "empty-string error on guard entry must fail");
+});
+
 // ── Finding 7: additional main() failure tests ────────────────────────────────
 
 // main() verification step ────────────────────────────────────────────────────
@@ -738,6 +807,44 @@ test("main() verification: count reply mismatch → error state", async () => {
 test("main() verification: guard mismatch → error state", async () => {
   const { status } = await runMain(setupCompleteAiSpecs(), makeVerifyFetch({ guardMismatch: true }));
   assert.equal(status.state, "error", `expected error for guard mismatch; got: ${status.state}`);
+});
+
+// ── I7a: count retry — first call fails, second passes → overall success ───────
+
+test("main() verification: count retry — first try fails, second passes → ok=true", async () => {
+  let chatCallCount = 0;
+  const successFetch = makeVerifyFetch();
+  const retryFetch = async (url, opts) => {
+    if (/\/equipmentai\/chat/.test(url)) {
+      chatCallCount++;
+      if (chatCallCount === 1) {
+        // First try: wrong count (n=0, reply has no number) — triggers retry
+        return { ok: true, json: () => Promise.resolve({ reply: "I don't know.", tool: "RunQuery", sql: "", columns: ["n"], rows: [{ n: 0 }], rowCount: 1, truncated: false }) };
+      }
+      // Retry: correct answer
+      return { ok: true, json: () => Promise.resolve({ reply: "We have 295 pieces of equipment.", tool: "RunQuery", sql: "", columns: ["n"], rows: [{ n: 295 }], rowCount: 1, truncated: false }) };
+    }
+    return successFetch(url, opts);
+  };
+  const { status } = await runMain(setupCompleteAiSpecs(), retryFetch);
+  assert.equal(status.state, "done", `expected done after retry; error: ${status && status.error}`);
+  assert.equal(chatCallCount, 2, "should have made exactly 2 chat calls (first fail + retry)");
+});
+
+// ── I7b: hub (IRIS) HTTP error through main() → run fails with error named ────
+
+test("main() verification: hub HTTP error on /equipmentai/quick → error state", async () => {
+  const successFetch = makeVerifyFetch();
+  const hubErrorFetch = async (url, opts) => {
+    if (/\/equipmentai\/quick\//.test(url)) {
+      // Simulate IRIS returning 503
+      return { ok: false, status: 503, json: () => Promise.resolve({}) };
+    }
+    return successFetch(url, opts);
+  };
+  const { status } = await runMain(setupCompleteAiSpecs(), hubErrorFetch);
+  assert.equal(status.state, "error", `expected error for hub HTTP 503; got: ${status && status.state}`);
+  assert.ok(status.error, "must have an error message");
 });
 
 // ── Guard: untouched-files assertion — must run AFTER all main() tests ─────────────────────────
