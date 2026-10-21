@@ -42,7 +42,7 @@ test("writeSpecs writes json and markdown for all three layers", () => {
   assert.match(md.ai, /^# AI layer spec/);
 });
 
-test("stage walks decide → the bulletin's recipients → ready → ai", () => {
+test("stage walks decide → the bulletin's recipients → ready → ai (discovery, no inventory in inputs helper)", () => {
   assert.equal(stage(generate(inputs(rec())), IM).step, "decide");
   const d = { dec: { "OQ.WorkOrderPolicy": "Business rule" }, oqPolicy: { "OQ.WorkOrderPolicy": "a rule", "OQ.PMEnrollmentPolicy": "later", "OQ.FAConfirmation": "later" } };
   const st = stage(generate(inputs(rec(d))), IM);
@@ -50,5 +50,8 @@ test("stage walks decide → the bulletin's recipients → ready → ai", () => 
   const t = { ...d, targets: { "SIDE.Bulletin": { recipients: "x" } } };
   assert.equal(stage(generate(inputs(rec(t))), IM).step, "ready");
   const done = { ...IM, orchestrator: { built: true, verified: true } };
-  assert.equal(stage(generate(inputs(rec(t), done)), done).layer, "ai");
+  // inputs() has no inventory → AI spec reports "discovery" missing → stage step is "discovery"
+  const aiStage = stage(generate(inputs(rec(t), done)), done);
+  assert.equal(aiStage.layer, "ai");
+  assert.equal(aiStage.step, "discovery");
 });

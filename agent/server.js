@@ -23,7 +23,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   state.notice = notice;
   // the file is the single truth builds read: write it when missing, or when it was unreadable (now backed up)
   if (!fs.existsSync(paths.decisions) || state.notice) saveRecord(paths.decisions, state.record);
-  const implemented = () => readJson(paths.implemented, { api: [], orchestrator: { built: false, verified: false } });
+  const implemented = () => readJson(paths.implemented, { api: [], orchestrator: { built: false, verified: false }, ai: { built: false, verified: false } });
   const labelOf = id => { const n = findNode(graph, id); return n ? label(n) : id; };
   const restore = snap => { for (const k of Object.keys(state.record)) delete state.record[k]; Object.assign(state.record, JSON.parse(JSON.stringify(snap))); };
   // one chat turn or build at a time, so each turn's diff, prompt and history see only its own changes
@@ -34,7 +34,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   function regenerate() {
     try {
       graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
-      const inputs = { graph, record: state.record, implemented: implemented() };
+      const inputs = { graph, record: state.record, implemented: implemented(), inventory };
       const specs = generate(inputs);
       state.md = writeSpecs(paths.specsDir, specs, inputs);
       state.specs = specs;

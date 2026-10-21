@@ -149,7 +149,7 @@ function getState(graph, decisions, extra = {}) {
   for (const [k, arr] of Object.entries(cats)) {
     summary[k] = (arr || []).map(n => ({ id: n.id, label: label(n), decision: record.dec[n.id] || "(unset)" }));
   }
-  const specs = generate({ graph, record, implemented });
+  const specs = generate({ graph, record, implemented, inventory: extra.inventory || null });
   const o = specs.orchestrator;
   return {
     capability: c.name, summary,
