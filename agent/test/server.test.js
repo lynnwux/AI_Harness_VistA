@@ -271,7 +271,12 @@ async function buildSetup({ orchestratorVerified = true, aiQuestions = undefined
   const t = await new Promise(resolve => {
     const srv = made.app.listen(0, "127.0.0.1", () => resolve({ ...made, srv, paths, dir, base: `http://127.0.0.1:${srv.address().port}` }));
   });
-  const done = () => { for (const p of procs) p.emit("exit", 0); t.srv.close(); };
+  const done = async () => {
+    for (const p of procs) p.emit("exit", 0);
+    await new Promise(res => setTimeout(res, 30));     // let the exit handlers' regenerate run first
+    t.srv.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  };
   return { ...t, procs, statusFiles, done };
 }
 const post = (t, p) => fetch(t.base + p, { method: "POST" });
@@ -285,7 +290,7 @@ test("POST /api/build/ai is refused (409) until the orchestrator is built and ve
     assert.equal(body.started, false);
     assert.match(body.error, /orchestrator/i);
     assert.equal(t.procs.length, 0, "nothing was started");
-  } finally { t.done(); }
+  } finally { await t.done(); }
 });
 
 test("POST /api/build/ai on an incomplete AI spec (orchestrator verified) returns 409 with the missing items", async () => {
@@ -296,7 +301,7 @@ test("POST /api/build/ai on an incomplete AI spec (orchestrator verified) return
     const body = await r.json();
     assert.ok(Array.isArray(body.missing) && body.missing.length > 0);
     assert.equal(t.procs.length, 0);
-  } finally { t.done(); }
+  } finally { await t.done(); }
 });
 
 test("the AI build and the production build never run at the same time", async () => {
@@ -316,7 +321,7 @@ test("the AI build and the production build never run at the same time", async (
     assert.equal(r2.status, 409);
     assert.match((await r2.json()).error, /AI build is running/);
     assert.ok(fs.existsSync(t.statusFiles.ai) && fs.existsSync(t.statusFiles.production), "the status files are the temp ones");
-  } finally { t.done(); }
+  } finally { await t.done(); }
 });
 
 async function withHub(handler, fn) {
@@ -357,7 +362,7 @@ test("the server reads the inventory from paths.inventory and /api/state carries
     const use = q.params.find(p => p.key === "useStatuses");
     assert.ok(use.codes.length > 0, "codes come from the inventory");
     assert.equal(s.state.stage.layer, "ai");
-  } finally { t.done(); }
+  } finally { await t.done(); }
   // a missing inventory file at paths.inventory means no inventory — never a fixed path
   const t2 = await setup(null, paths => { paths.inventory = path.join(path.dirname(paths.decisions), "no-such-inventory.json"); });
   try {
