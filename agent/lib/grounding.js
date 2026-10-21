@@ -5,6 +5,9 @@
 //   · thresholds stated in neither that item's evidence nor the developer's own words.
 // Items: each open question with the side effects it gates and the rules they reference, plus each
 // side effect that has no question (e.g. the bulletin). Vocabulary is built from the graph itself.
+// AI template groups are added when inventory is supplied (one group per TEMPLATES entry).
+
+const { TEMPLATES } = require("./ai-templates");
 
 const STOP = new Set(["YES", "NO", "NOT", "AND", "OR", "OF", "THE", "IF", "IS", "IT", "IN", "ON", "BY", "TO", "FOR", "ALL", "ANY",
   "ASK", "DD", "IEN", "DUZ", "FLD", "ENG", "XUSEC", "POLICY", "NOTE", "BP", "API", "REST", "IRIS", "UI", "OK", "ID", "AT", "AS",
@@ -44,7 +47,7 @@ function evidenceLines(n) {
   ].filter(Boolean);
 }
 
-function buildIndex(graph) {
+function buildIndex(graph, inventory) {
   const c = cap(graph);
   const lexicon = [...new Set((c.businessRules || []).flatMap(r => ((r.meta && r.meta.conditions) || []).flatMap(s => s.match(/\b[a-z]{5,}\b/g) || [])))]
     .filter(w => !LEX_STOP.has(w));
@@ -67,6 +70,34 @@ function buildIndex(graph) {
   for (const d of c.data || []) { tokens(d.name).forEach(t => common.add(t)); if (d.file) common.add(String(d.file)); }
   if (c.entryPoint) tokens(`${c.entryPoint.dispatch || ""} ${c.entryPoint.name || ""}`).forEach(t => common.add(t));
   tokens((graph.workflow && graph.workflow.name) || "").forEach(t => common.add(t));
+  // AI template groups — one per template, evidence from inventory columns
+  if (inventory) {
+    for (const t of TEMPLATES) {
+      const evLines = t.tables.flatMap(tbl =>
+        Object.entries(inventory.evidence || {})
+          .filter(([k]) => k.split(".")[0] === tbl)
+          .flatMap(([, lines]) => lines)
+      );
+      const text = [t.defaultWording, ...evLines].join("\n");
+      const aliasWords = [...new Set(
+        [t.defaultWording].flatMap(n => String(n).toLowerCase().split(/[\s\-/]+/))
+          .filter(w => w.length >= 2 && !NAME_STOP.has(w))
+      )];
+      // AI template wordings are full sentences with common words; require 3 matches to
+      // avoid false positives when capability-graph replies contain coincidental words.
+      groups.push({
+        id: t.id,
+        names: [t.defaultWording],
+        members: [],
+        aliasWords,
+        need: Math.max(3, aliasWords.length >= 3 ? 2 : 1),
+        vocab: tokens(text),
+        lex: new Set(lexicon.filter(w => lexRe(w).test(text))),
+        evidence: evLines,
+        text,
+      });
+    }
+  }
   return { groups, common, lexicon };
 }
 
@@ -90,8 +121,18 @@ function checkReply({ graph, reply, userMessage = "", record = {}, currentId = n
     const from = others.filter(g => g.lex.has(w)).map(g => g.id);
     if (from.length) borrowed.push({ term: w, from });
   }
-  // a threshold is supported by the focused item's evidence, the developer's words now, or that item's own recorded policy
-  const allowed = norm([focus.map(g => g.text).join("\n"), userMessage, ...focus.map(g => (record.oqPolicy || {})[g.id] || "")].join("\n"));
+  // a threshold is supported by the focused item's evidence, the developer's words now, that item's recorded
+  // policy, or the recorded params of the focused AI question (number params as "$value" to match threshold patterns)
+  const allowed = norm([
+    focus.map(g => g.text).join("\n"),
+    userMessage,
+    ...focus.map(g => (record.oqPolicy || {})[g.id] || ""),
+    ...focus.flatMap(g => {
+      const entry = (record.aiQuestions || {})[g.id];
+      if (!entry || !entry.params) return [];
+      return Object.values(entry.params).map(v => typeof v === "number" && v >= 0 ? "$" + v : String(v));
+    }),
+  ].join("\n"));
   const thresholds = [...new Set((text.match(THRESH) || []).map(s => s.trim()))].filter(s => !allowed.includes(norm(s)));
   return { ok: borrowed.length === 0 && thresholds.length === 0, focus: focus.map(g => g.id), borrowed, thresholds };
 }
@@ -129,8 +170,9 @@ function warningNote(r, ix) {
 
 // One chat turn with the guardrail: run, check, and on a failed check retry once with the item's
 // evidence. `run(userText, history)` is the agent call, injected so the loop is testable without a model.
-async function groundedTurn({ run, message, history = [], graph, record, currentId }) {
-  const index = buildIndex(graph);
+// `inventory` is optional; when supplied it is passed to buildIndex so AI template groups are included.
+async function groundedTurn({ run, message, history = [], graph, record, currentId, inventory }) {
+  const index = buildIndex(graph, inventory);
   const ground = reply => checkReply({ graph, index, reply, userMessage: message, record, currentId });
   // the evidence card: the graph's own evidence for the item(s) the final reply is about
   const evidence = r => r.focus.map(id => ix(id)).filter(Boolean).map(g => ({ id: g.id, names: g.names, lines: g.evidence }));

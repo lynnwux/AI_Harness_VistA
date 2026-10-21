@@ -183,3 +183,37 @@ test("the production build refuses an orchestrator spec that is not complete, an
     assert.ok(body.missing.length > 0);
   } finally { t.srv.close(); }
 });
+
+test("when the orchestrator is verified, the system prompt guides the AI layer and drops the no-AI ban", async () => {
+  // Minimal decisions: all OQs deferred with policy text, mandatory SIDE.Bulletin has recipients.
+  const minDec = {
+    dec: {
+      "OQ.WorkOrderPolicy": "Defer", "OQ.PMEnrollmentPolicy": "Defer", "OQ.FAConfirmation": "Defer",
+      "SIDE.WorkOrder": "Business Operation", "SIDE.PMSchedule": "Business Operation",
+      "SIDE.FinancialAsset": "Business Operation", "SIDE.Bulletin": "Event",
+    },
+    oqPolicy: {
+      "OQ.WorkOrderPolicy": "Deferred — will decide later",
+      "OQ.PMEnrollmentPolicy": "Deferred — will decide later",
+      "OQ.FAConfirmation": "Deferred — will decide later",
+    },
+    scope: {}, targets: { "SIDE.Bulletin": { recipients: "equipment@va.gov" } }, ruleBindings: {},
+  };
+  // Write a temp implemented.json with orchestrator verified — redirect paths.implemented
+  // so the real agent/implemented.json is never touched.
+  const t = await setup(null, paths => {
+    fs.writeFileSync(paths.decisions, JSON.stringify(minDec));
+    const tempImpl = path.join(path.dirname(paths.decisions), "implemented.json");
+    fs.writeFileSync(tempImpl, JSON.stringify({
+      api: [{ id: "read:lookup", endpoint: "GET /lookup/{file}" }],
+      orchestrator: { built: true, verified: true },
+    }));
+    paths.implemented = tempImpl;
+  });
+  try {
+    const p = t.systemPrompt();
+    assert.match(p, /AI layer/i);
+    assert.match(p, /setQuickQuestion/);
+    assert.doesNotMatch(p, /Never start or offer the AI layer/);
+  } finally { t.srv.close(); }
+});

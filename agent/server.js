@@ -48,7 +48,8 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   }
 
   function systemPrompt() {
-    const st = getState(graph, state.record, { implemented: implemented() });
+    const st = getState(graph, state.record, { implemented: implemented(), inventory });
+    const isAiStage = st.stage && st.stage.layer === "ai";
     return [
       "You are the Decide-stage GUIDE for the VistA Service Enablement Workbench.",
       "You lead a human, one decision at a time, through turning a legacy VistA capability into three layer specs that drive the builds: API (Phase 1 — REST service on VistA + Angular app), Orchestrator (Phase 2 — IRIS Interoperability production), AI (Phase 3 — AI Hub). The specs render live on the right, one tab per layer.",
@@ -57,7 +58,9 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
       "",
       "THIS PRODUCTION IS BUILT STUB-FIRST. The mandatory side effects are real operations; every other decided side effect is a stub — a Business Operation registered in the production, not wired — that carries the decision and its legacy evidence. Wiring a stub (field bindings, target details, Phase 1 services) is LATER work, listed under each stub in the spec: do not ask for it now unless the developer raises it.",
       "",
-      "WORK FROM THE MISSING LIST, one item at a time. The current stage and the next item are below. Order: decide the open questions → confirm the details of each real operation → when nothing is missing, say the orchestrator spec is complete and ready for the production build. Never start or offer the AI layer until the production has been built and verified.",
+      isAiStage
+        ? "AI LAYER — quick-access question design. The production is built and verified; now walk the AI missing list one question at a time. For each question in order: (1) ASK keep/drop — should this question appear on the AI quick-access page? Record immediately with setQuickQuestion(id, keep). (2) If keeping: show the template's defaultWording and ASK whether to confirm it or supply a custom wording — record with setQuickQuestion(id, wording). (3) For each param in sequence: show its evidence lines and its options/codes from getState().ai.questions[].params, then ASK the developer to supply the value — never propose a value yourself, including never citing values from any earlier prototype — record with setQuickQuestion(id, params). Move to the next item only after the current one is fully recorded. When getState().ai shows all questions configured (configured === total), say the AI spec is complete and ready for 🔨 Build AI on the AI tab (the button is on the AI tab)."
+        : "WORK FROM THE MISSING LIST, one item at a time. The current stage and the next item are below. Order: decide the open questions → confirm the details of each real operation → when nothing is missing, say the orchestrator spec is complete and ready for the production build. Never start or offer the AI layer until the production has been built and verified.",
       "",
       "For each open question explain the three resolution modes before asking, because they produce different architecture once its stub is wired:",
       "  · 'Business rule' = the orchestrator decides automatically from data, no prompt at entry time. Needs a stated rule — a condition on the item's data, in the developer's own words.",
@@ -94,7 +97,8 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
       "Needs from lower layers: " + JSON.stringify(st.needs),
       "Elements & current decisions: " + JSON.stringify(st.summary),
       "Currently blocking open questions: " + JSON.stringify(st.blocking),
-    ].join("\n");
+      isAiStage ? "AI questions: " + JSON.stringify(st.ai) : null,
+    ].filter(Boolean).join("\n");
   }
 
   const app = express();
@@ -127,7 +131,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
         return runAgentImpl(t + "\n" + UNDONE, h, ctx);
       };
       // the check judges against the record as it was before this turn, never against what the draft just wrote
-      out = await groundedTurn({ run, message: String(message), history: history || [], graph, record: before, currentId });
+      out = await groundedTurn({ run, message: String(message), history: history || [], graph, record: before, currentId, inventory });
     } catch (e) { err = String(e.message || e); }
     try { saveRecord(paths.decisions, state.record); }
     catch (e) {

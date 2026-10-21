@@ -108,3 +108,51 @@ test("each turn returns the evidence for the item the reply is about, for the ev
   assert.deepEqual(out.evidence.map(e => e.id), ["OQ.WorkOrderPolicy"]);
   assert.ok(out.evidence[0].lines.some(l => /no coded item-condition/.test(l)));
 });
+
+// ── AI template grounding ─────────────────────────────────────────────────────
+
+const inventory = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json"), "utf8"));
+
+test("buildIndex with inventory adds one group per AI template", () => {
+  const ix = buildIndex(graph, inventory);
+  const ids = ["AIQ.AgingOutFY", "AIQ.HighValueNoContract", "AIQ.JCAHOPendingInspection", "AIQ.CapitalPlanningTotals"];
+  for (const id of ids) {
+    const g = ix.groups.find(x => x.id === id);
+    assert.ok(g, `group ${id} should exist`);
+    assert.ok(g.aliasWords.length >= 1, `group ${id} should have alias words`);
+    assert.ok(g.evidence.length >= 1, `group ${id} should have evidence lines`);
+  }
+  // existing capability-graph groups are still present
+  assert.ok(ix.groups.some(g => g.id === "OQ.WorkOrderPolicy"), "orchestrator groups still present");
+});
+
+test("buildIndex without inventory does not add AI template groups", () => {
+  const ix = buildIndex(graph);
+  assert.ok(!ix.groups.some(g => g.id === "AIQ.HighValueNoContract"), "no AI groups without inventory");
+});
+
+test("checkReply flags $50,000 in a high-value reply when the user message never said it", () => {
+  const ix = buildIndex(graph, inventory);
+  const r = checkReply({
+    graph, index: ix,
+    reply: "For high-value assets without a service contract, $50,000 is a reasonable threshold.",
+    userMessage: "",
+    record: { oqPolicy: {} },
+    currentId: "AIQ.HighValueNoContract",
+  });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.thresholds, ["$50,000"]);
+});
+
+test("checkReply passes $50,000 in a high-value reply when the user said it", () => {
+  const ix = buildIndex(graph, inventory);
+  const r = checkReply({
+    graph, index: ix,
+    reply: "For high-value assets without a service contract, $50,000 is a reasonable threshold.",
+    userMessage: "set the threshold to $50,000",
+    record: { oqPolicy: {} },
+    currentId: "AIQ.HighValueNoContract",
+  });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.thresholds, []);
+});
