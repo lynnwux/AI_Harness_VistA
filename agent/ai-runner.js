@@ -71,7 +71,35 @@ function aiSettingsScript(env) {
   ].join("\n");
 }
 
-async function main(paths = DEFAULT_PATHS) {
+// Check that every expected marker line came back with its success value.
+// Returns an array of problem descriptions (empty when all is well).
+// This is the primary guard against a silent false-success when the container is missing,
+// IRIS is down, or auth is refused — marker lines will be absent or show error text.
+function checkSettingsMarkers(irisOut) {
+  const said = k => ((irisOut || "").match(new RegExp(`^${k}:(.*)$`, "m")) || [])[1];
+  const problems = [];
+  const webapp = said("WEBAPP");
+  if (webapp !== "created" && webapp !== "exists")
+    problems.push(`WEBAPP: expected "created" or "exists", got "${webapp || "(missing)"}"`);
+  const config = said("CONFIG");
+  if (config !== "set")
+    problems.push(`CONFIG: expected "set", got "${config || "(missing)"}"`);
+  const vademo = said("VADEMO");
+  if (vademo !== "stored")
+    problems.push(`VADEMO credential: expected "stored", got "${vademo || "(missing)"}"`);
+  const bedrock = said("BEDROCK");
+  if (bedrock !== "stored")
+    problems.push(`BEDROCK credential: expected "stored", got "${bedrock || "(missing)"}"`);
+  return problems;
+}
+
+// _deps allows test injection of irisSession and irisScript without running real docker/python.
+async function main(paths = DEFAULT_PATHS, _deps = {}) {
+  const {
+    _irisSession: sessionFn = irisSession,
+    _irisScript:  scriptFn  = irisScript,
+  } = _deps;
+
   const status = { state: "building", step: "", log: [], error: null, startedAt: new Date().toISOString() };
   const save  = () => fs.writeFileSync(STATUS_FILE, JSON.stringify(status, null, 2));
   const step  = s => { status.step = s; status.log.push("▶ " + s); save(); };
@@ -115,7 +143,7 @@ async function main(paths = DEFAULT_PATHS) {
     note(`${classes.length} classes written to ${path.relative(__dirname, dir)}`);
 
     const env  = { ...process.env, IRIS_USERNAME: user, IRIS_PASSWORD: pass };
-    const iris = irisScript(env, SERVER, CONFIG_FILE);
+    const iris = scriptFn(env, SERVER, CONFIG_FILE);
 
     step(`Pushing the AI classes to ${d.container}, namespace ${d.namespace}`);
     for (const c of classes) {
@@ -132,10 +160,19 @@ async function main(paths = DEFAULT_PATHS) {
 
     step(`Configuring IRIS settings and creating the ${WEB_APP} web app`);
     const script  = aiSettingsScript(process.env);
-    const irisOut = irisSession(d.container, script);
-    const said = k => ((irisOut || "").match(new RegExp(`^${k}:(.*)$`, "m")) || [])[1];
+    const irisOut = sessionFn(d.container, script);
+
+    // Primary guard: verify every marker line came back with its success value.
+    // A missing container, IRIS outage or auth failure leaves the output empty or garbled,
+    // so the absence of a marker is always caught here — independently of the exit code.
+    const settingsProblems = checkSettingsMarkers(irisOut);
+    if (settingsProblems.length) {
+      throw new Error("IRIS settings step failed — " + settingsProblems.join("; "));
+    }
+
     // Log only the non-secret summary lines; never log irisOut directly (it echoes the SetCredential calls).
-    safeNote(`web app: ${said("WEBAPP") || "?"} · config: ${said("CONFIG") || "?"} · vademo: ${said("VADEMO") || "?"} · bedrock: ${said("BEDROCK") || "?"}`);
+    const said = k => ((irisOut || "").match(new RegExp(`^${k}:(.*)$`, "m")) || [])[1];
+    safeNote(`web app: ${said("WEBAPP")} · config: ${said("CONFIG")} · vademo: ${said("VADEMO")} · bedrock: ${said("BEDROCK")}`);
 
     // ── Task 7: build chat app ── leave a clear place for the next task ──
     // step("Building the chat app") — Task 7 will add this step
@@ -159,4 +196,4 @@ async function main(paths = DEFAULT_PATHS) {
 
 if (require.main === module) main();
 
-module.exports = { readAiSpec, aiSettingsScript, main, STATUS_FILE };
+module.exports = { readAiSpec, aiSettingsScript, checkSettingsMarkers, main, STATUS_FILE };

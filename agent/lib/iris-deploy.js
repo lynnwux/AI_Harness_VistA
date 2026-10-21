@@ -31,9 +31,13 @@ function redact(text, secrets = []) {
 }
 
 // Run iris session IRIS in the container with the given script on stdin; return stdout.
+// Throws on OS error (docker binary missing) or non-zero exit (container missing, IRIS down, auth refused).
+// Live-confirmed 2026-10-20: successful halt → exit 0; missing container → exit 1, stderr "No such container".
+// Redaction of any secret in the thrown message is the caller's responsibility.
 function irisSession(container, script) {
   const r = spawnSync("docker", ["exec", "-i", container, "iris", "session", "IRIS"], { input: script, encoding: "utf8", timeout: 180000 });
   if (r.error) throw new Error(`could not run docker: ${r.error.message}`);
+  if (r.status !== 0) throw new Error(`iris session failed (exit ${r.status}): ${(r.stderr || r.stdout || "").trim().slice(0, 600)}`);
   return r.stdout || "";
 }
 

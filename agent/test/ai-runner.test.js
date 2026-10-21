@@ -7,7 +7,7 @@ const path = require("path");
 const { graph, rec } = require("./helpers");
 const { generate, writeSpecs } = require("../lib/specs");
 
-const { readAiSpec, aiSettingsScript } = require("../ai-runner");
+const { readAiSpec, aiSettingsScript, checkSettingsMarkers, main, STATUS_FILE } = require("../ai-runner");
 
 const INVENTORY_PATH = path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json");
 const inventory = JSON.parse(fs.readFileSync(INVENTORY_PATH, "utf8"));
@@ -137,4 +137,96 @@ test("aiSettingsScript creates the /equipmentai web app if missing", () => {
   assert.match(s, /Security\.Applications.*Exists.*\/equipmentai/);
   assert.match(s, /EquipmentAI\.REST\.Dispatch/);
   assert.match(s, /AutheEnabled.*32/);
+});
+
+// ── checkSettingsMarkers ──────────────────────────────────────────────────────
+test("checkSettingsMarkers returns [] when all markers are present with success values", () => {
+  const ok = "WEBAPP:exists\nCONFIG:set\nVADEMO:stored\nBEDROCK:stored\n";
+  assert.deepEqual(checkSettingsMarkers(ok), []);
+  const ok2 = "WEBAPP:created\nCONFIG:set\nVADEMO:stored\nBEDROCK:stored\n";
+  assert.deepEqual(checkSettingsMarkers(ok2), []);
+});
+
+test("checkSettingsMarkers names every missing or failed marker", () => {
+  // All markers absent (empty output — e.g. container missing or IRIS down)
+  const empty = "";
+  const problems = checkSettingsMarkers(empty);
+  assert.equal(problems.length, 4);
+  assert.ok(problems.some(p => /WEBAPP/.test(p)));
+  assert.ok(problems.some(p => /CONFIG/.test(p)));
+  assert.ok(problems.some(p => /VADEMO/.test(p)));
+  assert.ok(problems.some(p => /BEDROCK/.test(p)));
+
+  // Only VADEMO missing
+  const noVademo = "WEBAPP:exists\nCONFIG:set\nBEDROCK:stored\n";
+  const p2 = checkSettingsMarkers(noVademo);
+  assert.equal(p2.length, 1);
+  assert.match(p2[0], /VADEMO/);
+
+  // BEDROCK failed with an error text (not "stored")
+  const badBedrock = "WEBAPP:exists\nCONFIG:set\nVADEMO:stored\nBEDROCK:some IRIS error\n";
+  const p3 = checkSettingsMarkers(badBedrock);
+  assert.equal(p3.length, 1);
+  assert.match(p3[0], /BEDROCK/);
+});
+
+// ── main() integration with injected session ──────────────────────────────────
+// Complete aiQuestions configuration (all 4 questions kept with valid params).
+const allKept = {
+  "AIQ.AgingOutFY":           { keep: true, wording: "Ages out?",     params: { fiscalYear: 2031, capitalizedMeans: "INVESTMENT_CATEGORY = 1", useStatuses: ["ALL"] } },
+  "AIQ.HighValueNoContract":  { keep: true, wording: "High value?",   params: { threshold: 50000, valueColumn: "TOTAL_ASSET_VALUE", useStatuses: ["ALL"] } },
+  "AIQ.JCAHOPendingInspection": { keep: true, wording: "JCAHO?",      params: { workOrderStatusColumn: "STATUS", workOrderStatuses: ["ALL"], useStatuses: ["ALL"] } },
+  "AIQ.CapitalPlanningTotals":{ keep: true, wording: "Totals?",       params: { useStatuses: ["ALL"], valueColumns: ["TOTAL_ASSET_VALUE"], groupBy: "none" } },
+};
+
+function setupCompleteAiSpecs() {
+  const r = rec({});
+  r.aiQuestions = allKept;
+  return setupAiSpecs(r);
+}
+
+test("main() settings step fails and names a missing marker when irisSession output is incomplete", async () => {
+  const paths = setupCompleteAiSpecs();
+
+  // Create a minimal fake INTERCLAW_SCRIPTS directory with lib/iris.py present
+  const scriptsDir = fs.mkdtempSync(path.join(os.tmpdir(), "fake-scripts-"));
+  fs.mkdirSync(path.join(scriptsDir, "lib"), { recursive: true });
+  fs.writeFileSync(path.join(scriptsDir, "lib", "iris.py"), "# fake");
+
+  // Save and override the env vars main() reads
+  const envKeys = ["IRIS_AI_HUB_URL", "IRIS_AI_HUB_USER", "IRIS_AI_HUB_PASSWORD",
+                   "INTERCLAW_SCRIPTS", "VADEMO_URL", "VADEMO_USER", "VADEMO_PASSWORD",
+                   "AWS_BEARER_TOKEN_BEDROCK", "BEDROCK_MODEL_ID"];
+  const savedEnv = Object.fromEntries(envKeys.map(k => [k, process.env[k]]));
+  const savedExitCode = process.exitCode;
+  Object.assign(process.env, {
+    IRIS_AI_HUB_URL: "http://localhost:9999",
+    IRIS_AI_HUB_USER: "testuser",
+    IRIS_AI_HUB_PASSWORD: "testpass",
+    INTERCLAW_SCRIPTS: scriptsDir,
+    VADEMO_URL: "http://vademo:80",
+    VADEMO_USER: "u",
+    VADEMO_PASSWORD: "p",
+    AWS_BEARER_TOKEN_BEDROCK: "tok",
+    BEDROCK_MODEL_ID: "us.anthropic.example-v1:0",
+  });
+
+  try {
+    // Fake iris.py: push = ok, compile = no errors
+    const fakeIrisScript = () => (method) => method === "POST" ? { console: [] } : "ok";
+    // Fake session: output is missing VADEMO (simulates container issues)
+    const fakeSession = () => "WEBAPP:exists\nCONFIG:set\nBEDROCK:stored\n";
+
+    await main(paths, { _irisSession: fakeSession, _irisScript: fakeIrisScript });
+
+    const status = JSON.parse(fs.readFileSync(STATUS_FILE, "utf8"));
+    assert.equal(status.state, "error", "state must be error when a marker is missing");
+    assert.match(status.error, /VADEMO/, "error must name the missing VADEMO marker");
+  } finally {
+    process.exitCode = savedExitCode;
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
 });
