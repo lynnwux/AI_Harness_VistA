@@ -1,7 +1,7 @@
 "use strict";
 // AI layer spec: quick-access question page + general question path for the Equipment inventory chatbot.
 // Consumes: TEMPLATES, missingFor, sqlFor, validateOne (Task 2); inventory-fields.json (Task 1).
-const { TEMPLATES, sqlFor, validateOne } = require("../ai-templates");
+const { TEMPLATES, sqlFor, invalidParams } = require("../ai-templates");
 
 const CONTAINER = "iris-ai-hub", NAMESPACE = "INTEROP", PACKAGE = "EquipmentAI";
 const ALL_TABLES = [...new Set(TEMPLATES.flatMap(t => t.tables))];
@@ -34,17 +34,14 @@ function buildAiSpec(graph, record, implemented, inventory) {
         missing.push({ kind: "wording", id: t.id, what: `set a wording for "${t.id}" (or confirm the template default)` });
       }
 
-      // params: absent → "param"; present-but-invalid → "param" with validation error (ruling 1)
+      // params: absent → "param" with description; present-but-invalid → "param" with validation error (ruling 1)
       for (const p of t.params) {
-        const value = recParams[p.key];
-        if (value === undefined || value === null) {
+        if (recParams[p.key] === undefined || recParams[p.key] === null) {
           missing.push({ kind: "param", id: t.id, key: p.key, what: p.describe });
-        } else {
-          const errs = validateOne(p, value, recParams, inventory);
-          if (errs.length) {
-            missing.push({ kind: "param", id: t.id, key: p.key, what: errs[0] });
-          }
         }
+      }
+      for (const { key, what } of invalidParams(t, recParams, inventory)) {
+        missing.push({ kind: "param", id: t.id, key, what });
       }
     }
   }

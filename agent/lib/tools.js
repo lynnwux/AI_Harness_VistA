@@ -5,7 +5,7 @@ const { normalize } = require("./record");
 const { cap: C, isBlocking, isMandatory, allowedTargetKeys, VIA } = require("./rules");
 const { generate, stage } = require("./specs");
 const { requestContract } = require("./specs/api");
-const { TEMPLATES, validateParams, missingFor, sqlFor, validateOne } = require("./ai-templates");
+const { TEMPLATES, validateParams, missingFor, sqlFor, validateOne, invalidParams } = require("./ai-templates");
 
 const CAT_OPTS = {
   oq:   ["Business rule", "Required input", "Defer"],
@@ -92,12 +92,7 @@ function buildAiState(record, inventory) {
     // Start with absent params, then add recorded-but-invalid params so completeness
     // can never be true while sqlFor would throw.
     const absentMissing  = missingFor(t, recParams);
-    const invalidMissing = inventory ? t.params
-      .filter(p => recParams[p.key] !== undefined && recParams[p.key] !== null)
-      .flatMap(p => {
-        const errs = validateOne(p, recParams[p.key], recParams, inventory);
-        return errs.length ? [{ key: p.key, what: errs[0] }] : [];
-      }) : [];
+    const invalidMissing = invalidParams(t, recParams, inventory);
     const missing = [...absentMissing, ...invalidMissing];
 
     // Build param descriptors for the UI: key, describe, options|codes, evidence.

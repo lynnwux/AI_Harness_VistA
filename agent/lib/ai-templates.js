@@ -325,4 +325,18 @@ function sqlFor(template, params, inventory) {
   return template.sql(params, inventory);
 }
 
-module.exports = { TEMPLATES, validateParams, missingFor, sqlFor, validateOne };
+// Returns only params that are present (non-null/undefined) but fail validation.
+// Used by buildAiSpec and buildAiState to surface recorded-but-invalid params as missing items.
+// Absent params are NOT included — callers handle absence separately.
+function invalidParams(template, recordedParams, inventory) {
+  if (!inventory) return [];
+  const p = recordedParams || {};
+  return template.params
+    .filter(def => p[def.key] !== undefined && p[def.key] !== null)
+    .flatMap(def => {
+      const errs = validateOne(def, p[def.key], p, inventory);
+      return errs.length ? [{ key: def.key, what: errs[0] }] : [];
+    });
+}
+
+module.exports = { TEMPLATES, validateParams, missingFor, sqlFor, validateOne, invalidParams };

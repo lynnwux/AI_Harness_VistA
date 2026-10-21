@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs     = require("fs");
 const path   = require("path");
 
-const { TEMPLATES, validateParams, missingFor, sqlFor } = require("../lib/ai-templates");
+const { TEMPLATES, validateParams, missingFor, sqlFor, invalidParams } = require("../lib/ai-templates");
 
 const inv = JSON.parse(fs.readFileSync(
   path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json"), "utf8"
@@ -209,4 +209,34 @@ test("sqlFor throws if params fail validation", () => {
     () => sqlFor(tpl("AIQ.AgingOutFY"), { fiscalYear: 1800, capitalizedMeans: "INVESTMENT_CATEGORY = 1", useStatuses: ["1"] }, inv),
     /invalid params/i
   );
+});
+
+// ── invalidParams ──────────────────────────────────────────────────────────────
+
+test("invalidParams: present-and-valid params → empty array", () => {
+  const params = { fiscalYear: 2030, capitalizedMeans: "INVESTMENT_CATEGORY = 1", useStatuses: ["ALL"] };
+  const result = invalidParams(tpl("AIQ.AgingOutFY"), params, inv);
+  assert.deepEqual(result, []);
+});
+
+test("invalidParams: present-and-invalid param → one item with validation error in 'what'", () => {
+  // fiscalYear out of range — present but invalid
+  const params = { fiscalYear: 1800, capitalizedMeans: "INVESTMENT_CATEGORY = 1", useStatuses: ["ALL"] };
+  const result = invalidParams(tpl("AIQ.AgingOutFY"), params, inv);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].key, "fiscalYear");
+  assert.ok(typeof result[0].what === "string" && result[0].what.includes("fiscalYear"), "what must contain the error message");
+});
+
+test("invalidParams: absent param (undefined) → not included (absence is caller's concern)", () => {
+  // fiscalYear absent — invalidParams should not report it
+  const params = { capitalizedMeans: "INVESTMENT_CATEGORY = 1", useStatuses: ["ALL"] };
+  const result = invalidParams(tpl("AIQ.AgingOutFY"), params, inv);
+  assert.ok(!result.some(r => r.key === "fiscalYear"), "absent param must not appear in invalidParams output");
+});
+
+test("invalidParams: null inventory → empty array regardless of params", () => {
+  const params = { fiscalYear: 1800, capitalizedMeans: "INVESTMENT_CATEGORY = 1", useStatuses: ["ALL"] };
+  const result = invalidParams(tpl("AIQ.AgingOutFY"), params, null);
+  assert.deepEqual(result, []);
 });
