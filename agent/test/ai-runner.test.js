@@ -185,6 +185,15 @@ function setupCompleteAiSpecs() {
   return setupAiSpecs(r);
 }
 
+// Capture the real agent/ paths state before any main() test runs — used by the guard test below.
+const REAL_STATUS_FILE = STATUS_FILE;
+const REAL_PROD_DIR    = path.join(__dirname, "..", "_production");
+const beforeStatusExists  = fs.existsSync(REAL_STATUS_FILE);
+const beforeStatusContent = beforeStatusExists ? fs.readFileSync(REAL_STATUS_FILE, "utf8") : null;
+const beforeProdEntries   = fs.existsSync(REAL_PROD_DIR)
+  ? new Set(fs.readdirSync(REAL_PROD_DIR))
+  : new Set();
+
 test("main() settings step fails and names a missing marker when irisSession output is incomplete", async () => {
   const paths = setupCompleteAiSpecs();
 
@@ -193,40 +202,82 @@ test("main() settings step fails and names a missing marker when irisSession out
   fs.mkdirSync(path.join(scriptsDir, "lib"), { recursive: true });
   fs.writeFileSync(path.join(scriptsDir, "lib", "iris.py"), "# fake");
 
-  // Save and override the env vars main() reads
+  // Use a temp dir for every path main() writes to — avoids polluting agent/ paths.
+  const tmpDir       = fs.mkdtempSync(path.join(os.tmpdir(), "air-main-"));
+  const fakeStatus   = path.join(tmpDir, "ai-status.json");
+  const fakeConfig   = path.join(tmpDir, "interclaw-servers.json");
+  const fakeProdDir  = path.join(tmpDir, "_production");
+
+  // Use realistic multi-character fake secrets so redact() does not mangle the
+  // error message text we are about to assert.
   const envKeys = ["IRIS_AI_HUB_URL", "IRIS_AI_HUB_USER", "IRIS_AI_HUB_PASSWORD",
                    "INTERCLAW_SCRIPTS", "VADEMO_URL", "VADEMO_USER", "VADEMO_PASSWORD",
                    "AWS_BEARER_TOKEN_BEDROCK", "BEDROCK_MODEL_ID"];
-  const savedEnv = Object.fromEntries(envKeys.map(k => [k, process.env[k]]));
+  const savedEnv     = Object.fromEntries(envKeys.map(k => [k, process.env[k]]));
   const savedExitCode = process.exitCode;
   Object.assign(process.env, {
-    IRIS_AI_HUB_URL: "http://localhost:9999",
-    IRIS_AI_HUB_USER: "testuser",
-    IRIS_AI_HUB_PASSWORD: "testpass",
-    INTERCLAW_SCRIPTS: scriptsDir,
-    VADEMO_URL: "http://vademo:80",
-    VADEMO_USER: "u",
-    VADEMO_PASSWORD: "p",
-    AWS_BEARER_TOKEN_BEDROCK: "tok",
-    BEDROCK_MODEL_ID: "us.anthropic.example-v1:0",
+    IRIS_AI_HUB_URL:           "http://localhost:9999",
+    IRIS_AI_HUB_USER:          "testuser",
+    IRIS_AI_HUB_PASSWORD:      "fake-hub-pass-789",
+    INTERCLAW_SCRIPTS:         scriptsDir,
+    VADEMO_URL:                "http://vademo:80",
+    VADEMO_USER:               "vademo-reader",
+    VADEMO_PASSWORD:           "fake-vademo-pass-123",
+    AWS_BEARER_TOKEN_BEDROCK:  "fake-bedrock-tok-456",
+    BEDROCK_MODEL_ID:          "us.anthropic.example-v1:0",
   });
 
   try {
-    // Fake iris.py: push = ok, compile = no errors
+    // Fake iris.py: push succeeds (returns "ok"), compile returns no errors
     const fakeIrisScript = () => (method) => method === "POST" ? { console: [] } : "ok";
-    // Fake session: output is missing VADEMO (simulates container issues)
+    // Fake session: output is missing the VADEMO line (simulates a container outage)
     const fakeSession = () => "WEBAPP:exists\nCONFIG:set\nBEDROCK:stored\n";
 
-    await main(paths, { _irisSession: fakeSession, _irisScript: fakeIrisScript });
+    await main(paths, {
+      _irisSession:   fakeSession,
+      _irisScript:    fakeIrisScript,
+      _statusFile:    fakeStatus,
+      _configFile:    fakeConfig,
+      _productionDir: fakeProdDir,
+    });
 
-    const status = JSON.parse(fs.readFileSync(STATUS_FILE, "utf8"));
+    const status = JSON.parse(fs.readFileSync(fakeStatus, "utf8"));
     assert.equal(status.state, "error", "state must be error when a marker is missing");
-    assert.match(status.error, /VADEMO/, "error must name the missing VADEMO marker");
+    assert.match(
+      status.error,
+      /IRIS settings step failed — VADEMO credential: expected "stored", got "\(missing\)"/,
+      `error must carry the full IRIS settings failure message naming VADEMO; got: ${status.error}`
+    );
   } finally {
     process.exitCode = savedExitCode;
     for (const [k, v] of Object.entries(savedEnv)) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
+    fs.rmSync(tmpDir,      { recursive: true, force: true });
+    fs.rmSync(scriptsDir,  { recursive: true, force: true });
   }
+});
+
+test("guard: main() integration test does not write to agent/ai-status.json or agent/_production/", () => {
+  // Confirms the main() test above used injected temp paths and left the real agent/ paths untouched.
+  if (beforeStatusContent === null) {
+    assert.ok(
+      !fs.existsSync(REAL_STATUS_FILE),
+      "agent/ai-status.json must not exist after tests — main() must use the injected _statusFile path"
+    );
+  } else {
+    assert.equal(
+      fs.readFileSync(REAL_STATUS_FILE, "utf8"), beforeStatusContent,
+      "agent/ai-status.json must be unchanged after tests — main() must use the injected _statusFile path"
+    );
+  }
+  const afterProdEntries = fs.existsSync(REAL_PROD_DIR)
+    ? new Set(fs.readdirSync(REAL_PROD_DIR))
+    : new Set();
+  const newEntries = [...afterProdEntries].filter(e => !beforeProdEntries.has(e));
+  assert.deepEqual(
+    newEntries, [],
+    "no new entries must appear in agent/_production/ after tests — main() must use the injected _productionDir path"
+  );
 });

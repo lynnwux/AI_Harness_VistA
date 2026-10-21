@@ -93,15 +93,19 @@ function checkSettingsMarkers(irisOut) {
   return problems;
 }
 
-// _deps allows test injection of irisSession and irisScript without running real docker/python.
+// _deps allows test injection of irisSession, irisScript, and output paths so tests
+// never write to the real agent/ paths (ai-status.json, interclaw-servers.json, _production/).
 async function main(paths = DEFAULT_PATHS, _deps = {}) {
   const {
-    _irisSession: sessionFn = irisSession,
-    _irisScript:  scriptFn  = irisScript,
+    _irisSession:   sessionFn    = irisSession,
+    _irisScript:    scriptFn     = irisScript,
+    _statusFile:    statusFile   = STATUS_FILE,
+    _configFile:    configFile   = CONFIG_FILE,
+    _productionDir: productionDir = path.join(__dirname, "_production"),
   } = _deps;
 
   const status = { state: "building", step: "", log: [], error: null, startedAt: new Date().toISOString() };
-  const save  = () => fs.writeFileSync(STATUS_FILE, JSON.stringify(status, null, 2));
+  const save  = () => fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
   const step  = s => { status.step = s; status.log.push("▶ " + s); save(); };
   const note  = s => { status.log.push("  " + s); save(); };
 
@@ -132,18 +136,18 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     }
 
     const entry = serverEntry(url);
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(entry, null, 2) + "\n");
+    fs.writeFileSync(configFile, JSON.stringify(entry, null, 2) + "\n");
 
     step("Generating the AI classes from the spec");
     const model   = process.env.BEDROCK_MODEL_ID || DEFAULT_MODEL_ID;
     const classes = aiClasses({ ai, inventory, model });
-    const dir = path.join(__dirname, "_production", "ai-run-" + new Date().toISOString().replace(/[:.]/g, "-"));
+    const dir = path.join(productionDir, "ai-run-" + new Date().toISOString().replace(/[:.]/g, "-"));
     fs.mkdirSync(dir, { recursive: true });
     for (const c of classes) fs.writeFileSync(path.join(dir, c.name), c.text);
     note(`${classes.length} classes written to ${path.relative(__dirname, dir)}`);
 
     const env  = { ...process.env, IRIS_USERNAME: user, IRIS_PASSWORD: pass };
-    const iris = scriptFn(env, SERVER, CONFIG_FILE);
+    const iris = scriptFn(env, SERVER, configFile);
 
     step(`Pushing the AI classes to ${d.container}, namespace ${d.namespace}`);
     for (const c of classes) {
