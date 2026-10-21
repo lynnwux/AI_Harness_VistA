@@ -45,13 +45,21 @@ test("chatAppFiles: /ai/chat call appears", () => {
   assert.ok(app.includes("/ai/chat"), "/ai/chat must appear in app.ts");
 });
 
-test("chatAppFiles: truncation text (first 200 of N, refine) appears", () => {
+test("chatAppFiles: truncation text shows the row cap and 'refine' without implying a known total", () => {
   const files = chatAppFiles({ questions: QUESTIONS });
   const app = files["src/app/app.ts"];
+  // Row cap value (200) must appear as the component property value
   assert.ok(app.includes("200"),
-    "truncation row cap (200) must appear in app.ts");
+    "truncation row cap value (200) must appear in app.ts");
+  // Must say there are more rows without claiming a total
+  assert.ok(app.includes("there are more"),
+    "truncation message must say 'there are more' (not 'first 200 of N' which implies a known total)");
   assert.ok(app.includes("refine"),
-    "truncation message must include 'refine' (\"refine the question to see the rest\")");
+    "truncation message must include 'refine'");
+  // Must NOT use rowCount (the server's capped count = 200, would always read "first 200 of 200")
+  // The rowCap component property is used instead
+  assert.ok(!app.includes("ans.rowCount"),
+    "template must not use ans.rowCount in the truncation notice — it equals the cap, not the real total");
 });
 
 test("chatAppFiles: 'SQL used' collapsible section appears", () => {

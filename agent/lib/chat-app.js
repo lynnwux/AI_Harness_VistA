@@ -34,11 +34,13 @@ button.primary{background:var(--accent);color:#fff}button:disabled{opacity:.5;cu
 // The component TypeScript. Placeholders are replaced by chatAppFiles:
 //   /*__QUESTIONS__*/  → JSON array of { id, wording, quickUrl }
 //   /*__TITLE__*/      → title string (plain text, HTML-escaped before insertion)
+//   /*__ROW_CAP__*/    → numeric row cap (e.g. 200), used in the truncation notice
 const APP_TS = `import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 const QUESTIONS: any[] = /*__QUESTIONS__*/;
+const ROW_CAP: number = /*__ROW_CAP__*/;
 
 @Component({
   selector: 'app-root',
@@ -59,7 +61,7 @@ const QUESTIONS: any[] = /*__QUESTIONS__*/;
       <p class="reply-text" *ngIf="ans.reply">{{ans.reply}}</p>
       <div class="err-notice" *ngIf="ans.error">{{ans.error}}</div>
       <p class="trunc-note" *ngIf="ans.truncated">
-        first 200 of {{ans.rowCount}} — refine the question to see the rest
+        Showing the first {{rowCap}} rows — there are more; refine the question to see the rest.
       </p>
       <table class="result-table" *ngIf="ans.columns && ans.rows && ans.rows.length">
         <thead><tr><th *ngFor="let c of ans.columns">{{c}}</th></tr></thead>
@@ -74,6 +76,7 @@ const QUESTIONS: any[] = /*__QUESTIONS__*/;
 })
 export class App {
   questions: any[]  = QUESTIONS;
+  rowCap:    number = ROW_CAP;
   sessionId: string = crypto.randomUUID();
   chatMsg:   string = '';
   busy:      boolean = false;
@@ -114,9 +117,10 @@ export class App {
  * @param {object}   opts
  * @param {Array}    opts.questions  Array of { id, wording } objects from ai.json detail.questions
  * @param {string}   [opts.title]   Page title (default: "Equipment inventory assistant")
+ * @param {number}   [opts.rowCap]  Server row cap (default: 200 — matches global constraint)
  * @returns {{ "src/main.ts", "src/index.html", "src/styles.css", "src/app/app.ts" }}
  */
-function chatAppFiles({ questions, title = "Equipment inventory assistant" }) {
+function chatAppFiles({ questions, title = "Equipment inventory assistant", rowCap = 200 }) {
   // Embed only id, wording and the pre-built quickUrl — no SQL or params that could change
   const questionsJson = JSON.stringify(
     (questions || []).map(q => ({
@@ -147,7 +151,8 @@ bootstrapApplication(App).catch(e => console.error(e));
     "src/styles.css": VA_CSS,
     "src/app/app.ts": APP_TS
       .replace("/*__QUESTIONS__*/", questionsJson)
-      .replace("/*__TITLE__*/",    safeTitle),
+      .replace("/*__TITLE__*/",    safeTitle)
+      .replace("/*__ROW_CAP__*/",  String(rowCap)),
   };
 }
 
