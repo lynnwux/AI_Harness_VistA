@@ -3,7 +3,7 @@
 // drives the page's decision cards. The record is written only by the chat tools.
 const fs = require("fs");
 
-const SECTIONS = ["dec", "oqPolicy", "scope", "targets", "ruleBindings"];
+const SECTIONS = ["dec", "oqPolicy", "scope", "targets", "ruleBindings", "aiQuestions"];
 
 function normalize(raw) {
   const src = raw || {};
@@ -44,6 +44,14 @@ function flat(record) {
     const entries = Object.entries(obj || {});
     if (!entries.length) out[`${k}|${id}|(none)`] = "(none)";
     for (const [key, v] of entries) out[`${k}|${id}|${key}`] = v;
+  }
+  // aiQuestions: { "AIQ.X": { keep, wording, params: { key: value, … } } }
+  // Flat keys: aiQuestions|AIQ.X|keep, aiQuestions|AIQ.X|wording, aiQuestions|AIQ.X|params.<key>
+  for (const [id, obj] of Object.entries(record.aiQuestions || {})) {
+    const { keep, wording, params } = obj || {};
+    if (keep !== undefined) out[`aiQuestions|${id}|keep`] = keep;
+    if (wording !== undefined) out[`aiQuestions|${id}|wording`] = wording;
+    for (const [pk, pv] of Object.entries(params || {})) out[`aiQuestions|${id}|params.${pk}`] = pv;
   }
   return out;
 }

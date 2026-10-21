@@ -10,7 +10,7 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "rec-"));
 
 test("normalize moves the legacy integration map into targets and fills every section", () => {
   const r = normalize({ dec: { a: 1 }, integration: { "SIDE.PMSchedule": { system: "Jira" } } });
-  assert.deepEqual(r, { dec: { a: 1 }, oqPolicy: {}, scope: {}, targets: { "SIDE.PMSchedule": { system: "Jira" } }, ruleBindings: {} });
+  assert.deepEqual(r, { dec: { a: 1 }, oqPolicy: {}, scope: {}, targets: { "SIDE.PMSchedule": { system: "Jira" } }, ruleBindings: {}, aiQuestions: {} });
 });
 
 test("loadRecord falls back when the file is missing", () => {
@@ -55,4 +55,18 @@ test("diffRecords lists exactly what changed, per field and per target key", () 
 test("diffRecords shows an empty binding map as an explicit change", () => {
   const d = diffRecords(normalize({}), normalize({ ruleBindings: { "OQ.A": {} } }));
   assert.deepEqual(d, [{ id: "OQ.A", label: "OQ.A", field: "ruleBindings.(none)", before: null, after: "(none)" }]);
+});
+
+test("diffRecords reports aiQuestions.keep, aiQuestions.wording, aiQuestions.params.<key> per id", () => {
+  const before = normalize({});
+  const after  = normalize({ aiQuestions: { "AIQ.HighValueNoContract": { keep: true, wording: "High-value check", params: { threshold: 50000, valueColumn: "TOTAL_ASSET_VALUE" } } } });
+  const diffs  = diffRecords(before, after, id => "L:" + id);
+  // keep change
+  assert.ok(diffs.some(d => d.id === "AIQ.HighValueNoContract" && d.field === "aiQuestions.keep" && d.after === true), "keep diff present");
+  // wording change
+  assert.ok(diffs.some(d => d.id === "AIQ.HighValueNoContract" && d.field === "aiQuestions.wording"), "wording diff present");
+  // params.threshold change
+  assert.ok(diffs.some(d => d.id === "AIQ.HighValueNoContract" && d.field === "aiQuestions.params.threshold" && d.after === 50000), "params.threshold diff present");
+  // params.valueColumn change
+  assert.ok(diffs.some(d => d.id === "AIQ.HighValueNoContract" && d.field === "aiQuestions.params.valueColumn"), "params.valueColumn diff present");
 });

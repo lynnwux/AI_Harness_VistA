@@ -1,10 +1,17 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs   = require("fs");
+const path = require("path");
 const { graph, rec, IM } = require("./helpers");
 const { runTool, TOOL_SPECS } = require("../lib/tools");
 
-const ctx = record => ({ graph, decisions: record, implemented: IM });
+const inv = JSON.parse(fs.readFileSync(
+  path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json"), "utf8"
+));
+
+const ctx        = record => ({ graph, decisions: record, implemented: IM });
+const ctxWithInv = record => ({ graph, decisions: record, implemented: IM, inventory: inv });
 
 test("Defer without a reason records a default reason and takes the gated side effect out of the build", () => {
   const r = rec();
@@ -95,4 +102,83 @@ test("getState reports stage, missing items, evidence, the request contract and 
   assert.ok(st.requestContract.some(f => f.field === "7"));
   assert.deepEqual(st.mandatory, ["SIDE.Bulletin"]);
   assert.deepEqual(st.blocking, ["OQ.WorkOrderPolicy", "OQ.PMEnrollmentPolicy", "OQ.FAConfirmation"]);
+});
+
+// ── setQuickQuestion ──────────────────────────────────────────────────────────
+
+test("setQuickQuestion records keep, wording, and valid params", () => {
+  const r = rec();
+  const out = runTool("setQuickQuestion", {
+    id: "AIQ.HighValueNoContract",
+    keep: true,
+    wording: "Which high-value items have no service contract?",
+    params: { threshold: 50000, valueColumn: "TOTAL_ASSET_VALUE", useStatuses: ["1"] },
+  }, ctxWithInv(r));
+  assert.equal(out.ok, true, out.message);
+  assert.ok(r.aiQuestions["AIQ.HighValueNoContract"], "aiQuestions entry created");
+  assert.equal(r.aiQuestions["AIQ.HighValueNoContract"].keep, true);
+  assert.equal(r.aiQuestions["AIQ.HighValueNoContract"].params.threshold, 50000);
+});
+
+test("setQuickQuestion merges params (partial update)", () => {
+  const r = rec();
+  runTool("setQuickQuestion", { id: "AIQ.HighValueNoContract", params: { threshold: 50000 } }, ctxWithInv(r));
+  runTool("setQuickQuestion", { id: "AIQ.HighValueNoContract", params: { valueColumn: "ORIGINAL_ASSET_VALUE" } }, ctxWithInv(r));
+  assert.equal(r.aiQuestions["AIQ.HighValueNoContract"].params.threshold, 50000);
+  assert.equal(r.aiQuestions["AIQ.HighValueNoContract"].params.valueColumn, "ORIGINAL_ASSET_VALUE");
+});
+
+test("setQuickQuestion refuses unknown id", () => {
+  const r = rec();
+  const out = runTool("setQuickQuestion", { id: "AIQ.Nope" }, ctx(r));
+  assert.equal(out.ok, false);
+  assert.match(out.message, /unknown/i);
+  assert.equal(r.aiQuestions["AIQ.Nope"], undefined);
+});
+
+test("setQuickQuestion refuses wording that looks like a secret", () => {
+  const r = rec();
+  const out = runTool("setQuickQuestion", { id: "AIQ.HighValueNoContract", wording: "token: abc123456" }, ctxWithInv(r));
+  assert.equal(out.ok, false);
+  assert.match(out.message, /credential/);
+  assert.equal(r.aiQuestions["AIQ.HighValueNoContract"], undefined);
+});
+
+test("setQuickQuestion refuses an unknown param key", () => {
+  const r = rec();
+  const out = runTool("setQuickQuestion", { id: "AIQ.AgingOutFY", params: { badKey: 99 } }, ctxWithInv(r));
+  assert.equal(out.ok, false);
+  assert.match(out.message, /badKey/);
+});
+
+test("setQuickQuestion refuses an invalid param value and lists valid options", () => {
+  const r = rec();
+  const out = runTool("setQuickQuestion", {
+    id: "AIQ.AgingOutFY",
+    params: { fiscalYear: 1800 },
+  }, ctxWithInv(r));
+  assert.equal(out.ok, false);
+  assert.match(out.message, /fiscalYear/);
+});
+
+test("getState.ai returns questions with ids, defaultWording, and stage", () => {
+  const st = runTool("getState", {}, ctxWithInv(rec()));
+  assert.ok(st.ai, "ai section present");
+  assert.ok(Array.isArray(st.ai.questions), "ai.questions is array");
+  assert.equal(st.ai.questions.length, 4, "four questions");
+  assert.ok(st.ai.questions.every(q => q.id && q.defaultWording && Array.isArray(q.params) && Array.isArray(q.missing)), "question shape ok");
+  assert.ok(st.ai.stage, "ai.stage present");
+  assert.equal(st.ai.stage.total, 4);
+});
+
+test("getState.ai sqlPreview is set when all params are recorded and valid", () => {
+  const r = rec();
+  runTool("setQuickQuestion", {
+    id: "AIQ.AgingOutFY",
+    params: { fiscalYear: 2030, capitalizedMeans: "INVESTMENT_CATEGORY = 1", useStatuses: ["ALL"] },
+  }, ctxWithInv(r));
+  const st = runTool("getState", {}, ctxWithInv(r));
+  const q = st.ai.questions.find(q => q.id === "AIQ.AgingOutFY");
+  assert.ok(q.sqlPreview, "sqlPreview present when all params valid");
+  assert.match(q.sqlPreview, /FROM VISTA\.EQUIPMENT_INV_6914/);
 });

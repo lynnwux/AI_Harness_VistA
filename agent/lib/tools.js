@@ -5,6 +5,7 @@ const { normalize } = require("./record");
 const { cap: C, isBlocking, isMandatory, allowedTargetKeys, VIA } = require("./rules");
 const { generate, stage } = require("./specs");
 const { requestContract } = require("./specs/api");
+const { TEMPLATES, validateParams, missingFor, sqlFor, validateOne } = require("./ai-templates");
 
 const CAT_OPTS = {
   oq:   ["Business rule", "Required input", "Defer"],
@@ -71,6 +72,65 @@ function label(node) {
 
 // ---- tool handlers ----
 
+function invCodesFor(inventory, table, column) {
+  if (!inventory) return [];
+  const tblObj = (inventory.tables || {})[table];
+  if (!tblObj) return [];
+  const colObj = (tblObj.columns || []).find(c => c.column === column);
+  return (colObj && colObj.codes) ? colObj.codes : [];
+}
+
+function invEvidenceFor(inventory, table, column) {
+  if (!inventory) return [];
+  return (inventory.evidence || {})[`${table}.${column}`] || [];
+}
+
+function buildAiState(record, inventory) {
+  const questions = TEMPLATES.map(t => {
+    const recEntry  = (record.aiQuestions || {})[t.id] || null;
+    const recParams = recEntry ? (recEntry.params || {}) : {};
+    const missing   = missingFor(t, recParams);
+
+    // Build param descriptors for the UI: key, describe, options|codes, evidence.
+    const paramDescs = t.params.map(p => {
+      const desc = { key: p.key, describe: p.describe };
+      if (p.type === "enum" || p.type === "enumSet") {
+        desc.options = p.options;
+      } else if (p.type === "codes") {
+        // workOrderStatuses column depends on the sibling workOrderStatusColumn param.
+        const col = p.key === "workOrderStatuses" && recParams.workOrderStatusColumn
+          ? recParams.workOrderStatusColumn
+          : p.column;
+        if (col) {
+          desc.codes    = invCodesFor(inventory, p.table || "EQUIPMENT_INV_6914", col).map(([c, l]) => `${c}: ${l}`);
+          desc.evidence = invEvidenceFor(inventory, p.table || "EQUIPMENT_INV_6914", col);
+        } else {
+          desc.codes = []; desc.evidence = [];
+        }
+      } else if (p.type === "year") {
+        desc.options = ["integer 1990–2100"];
+      } else if (p.type === "money") {
+        desc.options = ["number ≥ 0"];
+      }
+      return desc;
+    });
+
+    // SQL preview: generated only when all params are recorded and valid.
+    let sqlPreview = null;
+    if (missing.length === 0 && inventory) {
+      try {
+        const v = validateParams(t, recParams, inventory);
+        if (v.ok) sqlPreview = sqlFor(t, recParams, inventory);
+      } catch (_e) { /* params not yet fully valid */ }
+    }
+
+    return { id: t.id, defaultWording: t.defaultWording, recorded: recEntry, params: paramDescs, missing, sqlPreview };
+  });
+
+  const configured = questions.filter(q => q.recorded && q.recorded.keep && q.missing.length === 0).length;
+  return { questions, stage: { total: TEMPLATES.length, configured } };
+}
+
 function getState(graph, decisions, extra = {}) {
   const c = C(graph);
   const record = normalize(decisions);
@@ -91,6 +151,7 @@ function getState(graph, decisions, extra = {}) {
     requestContract: specs.api.request,
     mandatory: (c.sideEffects || []).filter(isMandatory).map(s => s.id),
     stage: stage(specs, implemented),
+    ai: buildAiState(record, extra.inventory || null),
   };
 }
 
@@ -208,6 +269,35 @@ function bindRuleTerms(graph, decisions, id, bindings) {
   return { ok: true, message: entries.length ? `${id} bindings: ${entries.map(([w, f]) => `${w} → fld ${f} ${fields.get(f)}`).join("; ")}` : `${id}: recorded that the policy uses no data words` };
 }
 
+function setQuickQuestion(decisions, id, keep, wording, params, inventory) {
+  const t = TEMPLATES.find(t => t.id === id);
+  if (!t) return { ok: false, message: `unknown quick-access question id "${id}"; valid ids: ${TEMPLATES.map(t => t.id).join(", ")}` };
+  if (wording !== undefined && wording !== null) {
+    if (looksSecret(wording)) return { ok: false, message: SECRET_MSG("the wording") };
+  }
+  if (params !== undefined && params !== null) {
+    const paramMap = new Map(t.params.map(p => [p.key, p]));
+    const errors = [];
+    for (const [key, value] of Object.entries(params)) {
+      if (!paramMap.has(key)) { errors.push(`unknown param "${key}" for ${id}; valid: ${t.params.map(p => p.key).join(", ")}`); continue; }
+      const errs = validateOne(paramMap.get(key), value, params, inventory);
+      errors.push(...errs);
+    }
+    if (errors.length) return { ok: false, message: errors.join("; ") };
+  }
+  // Merge into the record.
+  if (!decisions.aiQuestions) decisions.aiQuestions = {};
+  if (!decisions.aiQuestions[id]) decisions.aiQuestions[id] = {};
+  const entry = decisions.aiQuestions[id];
+  if (keep !== undefined && keep !== null)   entry.keep    = Boolean(keep);
+  if (wording !== undefined && wording !== null) entry.wording = String(wording);
+  if (params  !== undefined && params  !== null) {
+    if (!entry.params) entry.params = {};
+    Object.assign(entry.params, params);
+  }
+  return { ok: true, message: `${id} updated` };
+}
+
 const TARGET_PROPS = { via: { type: "string", description: "where the work is performed: vista | iris | external" } };
 for (const k of ["writePath", "fields", "operatorValues", "channel", "recipients", "content", "system", "endpoint", "trigger", "mapping", "settings"]) TARGET_PROPS[k] = { type: "string" };
 
@@ -220,6 +310,7 @@ const TOOL_SPECS = [
   { toolSpec: { name: "setBuildScope", description: "Set whether a side effect is built in this phase: 'Build now' or 'Defer'. Defer is refused for mandatory items.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, phase: { type: "string" } }, required: ["nodeId", "phase"] } } } },
   { toolSpec: { name: "setTarget", description: "Record target details for a built side effect so the production can be built. Never changes the disposition. Accepts via plus only the keys for that side effect's kind (vistaWrite: writePath, fields, operatorValues; notification: channel, recipients, content; Integration disposition: system, endpoint, trigger, mapping, settings). Never pass credentials or tokens.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, ...TARGET_PROPS }, required: ["nodeId"] } } } },
   { toolSpec: { name: "bindRuleTerms", description: "Bind the data words in a resolved open question's policy to DD field numbers from the API request contract (getState.requestContract). Pass {} if the policy uses no data. A word with no field in the contract is an unmet need — report it instead of binding.", inputSchema: { json: { type: "object", properties: { id: { type: "string" }, bindings: { type: "object", description: "map of policy word → DD field number from getState.requestContract, shaped {\"<word in the policy>\": \"<field number>\"}" } }, required: ["id", "bindings"] } } } },
+  { toolSpec: { name: "setQuickQuestion", description: "Set whether to keep a quick-access AI question and/or record its wording and SQL parameters. Merges into any previously recorded values. Refuses unknown ids, unknown or invalid param keys and values (message lists valid options/codes), and wording that looks like a credential.", inputSchema: { json: { type: "object", properties: { id: { type: "string", description: "AIQ template id (AIQ.AgingOutFY, AIQ.HighValueNoContract, AIQ.JCAHOPendingInspection, AIQ.CapitalPlanningTotals)" }, keep: { type: "boolean", description: "Whether to include this question on the AI quick-access page" }, wording: { type: "string", description: "Custom question wording shown to the user; defaults to the template's defaultWording" }, params: { type: "object", description: "Parameter values for this question — see getState.ai.questions for valid keys and options" } }, required: ["id"] } } } },
 ];
 
 function runTool(name, input, ctx) {
@@ -233,6 +324,7 @@ function runTool(name, input, ctx) {
     case "setBuildScope": return setBuildScope(graph, decisions, input.nodeId, input.phase);
     case "setTarget": { const { nodeId, ...details } = input || {}; return setTarget(graph, decisions, nodeId, details); }
     case "bindRuleTerms": return bindRuleTerms(graph, decisions, input.id, input.bindings);
+    case "setQuickQuestion": return setQuickQuestion(decisions, input.id, input.keep, input.wording, input.params, ctx.inventory || null);
     default: return { error: `unknown tool ${name}` };
   }
 }

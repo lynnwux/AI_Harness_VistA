@@ -15,6 +15,8 @@ const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(f
 
 function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   let graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
+  const invPath = path.join(ROOT, "capability-graph", "inventory-fields.json");
+  const inventory = fs.existsSync(invPath) ? (() => { try { return JSON.parse(fs.readFileSync(invPath, "utf8")); } catch (_e) { return null; } })() : null;
   let notice = null;
   const onCorrupt = bak => { notice = `decisions.json could not be read, so the workbench started from the default decisions. The unreadable file was backed up as ${path.basename(bak)} — nothing in it is lost.`; };
   const state = { record: loadRecord(paths.decisions, () => defaultDecisions(graph), { onCorrupt }), specs: null, md: null, stage: null, specsError: null, notice: null };
@@ -114,7 +116,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
     const before = JSON.parse(JSON.stringify(state.record));
     let out = null, err = null;
     try {
-      const ctx = { graph, decisions: state.record, implemented: implemented(), system: systemPrompt() };
+      const ctx = { graph, decisions: state.record, implemented: implemented(), system: systemPrompt(), inventory };
       const next = state.stage && state.stage.next;   // the item being worked on, before tools change it
       const currentId = next ? next.id || next.for || null : null;
       // tools mutate state.record in place; a draft the guardrail rejects has its record changes undone before the retry
