@@ -6,6 +6,7 @@ const os = require("os");
 const path = require("path");
 
 const { chatAppFiles } = require("../lib/chat-app");
+const { GUARD_CASES } = require("../lib/ai-hub");
 
 // ── chatAppFiles ─────────────────────────────────────────────────────────────
 
@@ -198,6 +199,29 @@ test("main() calls _buildChatApp with the spec's questions and ends Deployed —
     const fakeSession    = () => "WEBAPP:exists\nCONFIG:set\nVADEMO:stored\nBEDROCK:stored\n";
     const fakeBuildChat  = async (questions, _outDir) => { capturedQuestions = questions; };
 
+    // Minimal success fake for the Task-8 verification step (no real HTTP calls).
+    const fakeFetch = async (url, opts) => {
+      const body = JSON.parse((opts && opts.body) || "{}");
+      if (/\/equipmentai\/quick\//.test(url)) {
+        return { json: () => Promise.resolve({ reply: "OK", tool: "test", sql: "", columns: [], rows: [], rowCount: 0, truncated: false }) };
+      }
+      if (/\/equipmentai\/chat/.test(url)) {
+        return { json: () => Promise.resolve({ reply: "We have 295 pieces of equipment.", tool: "RunQuery", sql: "", columns: ["n"], rows: [{ n: 295 }], rowCount: 1, truncated: false }) };
+      }
+      if (/\/equipmentai\/guard/.test(url)) {
+        const gc = GUARD_CASES.find(c => c.sql === body.sql);
+        return { json: () => Promise.resolve({ ok: gc ? gc.allowed : false, reason: "" }) };
+      }
+      if (/\/api\/atelier\//.test(url)) {
+        const sql = (body.query || "").trim();
+        if (/^SELECT\s+COUNT\(\*\)\s+AS\s+n\s+FROM/i.test(sql)) {
+          return { json: () => Promise.resolve({ result: { content: [{ n: 295 }] }, status: { errors: [] } }) };
+        }
+        return { json: () => Promise.resolve({ result: { content: [] }, status: { errors: [] } }) };
+      }
+      throw new Error("Unexpected URL in chat-app test fakeFetch: " + url);
+    };
+
     await main(paths, {
       _irisSession:   fakeSession,
       _irisScript:    fakeIrisScript,
@@ -205,13 +229,14 @@ test("main() calls _buildChatApp with the spec's questions and ends Deployed —
       _configFile:    fakeConfig,
       _productionDir: fakeProdDir,
       _buildChatApp:  fakeBuildChat,
+      _fetch:         fakeFetch,
     });
 
     const status = JSON.parse(fs.readFileSync(fakeStatus, "utf8"));
     assert.equal(status.state, "done",
       "state must be 'done' when all steps succeed");
-    assert.match(status.step, /Deployed — not yet verified/,
-      "step must contain 'Deployed — not yet verified'");
+    assert.match(status.step, /Deployed/,
+      "step must say Deployed");
 
     // _buildChatApp must have been called with the spec's questions
     assert.ok(capturedQuestions !== null,

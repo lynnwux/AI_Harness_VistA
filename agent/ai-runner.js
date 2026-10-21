@@ -8,7 +8,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { DEFAULT_PATHS, loadInputs, inputHashes } = require("./lib/specs");
-const { aiClasses, PKG, WEB_APP, CREDENTIALS } = require("./lib/ai-hub");
+const { aiClasses, PKG, WEB_APP, CREDENTIALS, GUARD_CASES } = require("./lib/ai-hub");
 const { serverEntry, docPath, redact, irisSession, irisScript } = require("./lib/iris-deploy");
 const { DEFAULT_REGION, DEFAULT_MODEL_ID } = require("./lib/bedrock");
 const { chatAppFiles } = require("./lib/chat-app");
@@ -96,6 +96,102 @@ function aiSettingsScript(env) {
   ].join("\n");
 }
 
+// ── Task 8 pure functions ──────────────────────────────────────────────────────────────────────────
+
+// Canonical string for a row object: sorted keys, values as trimmed strings (null/"" both become "").
+function normalizeRow(row) {
+  if (!row || typeof row !== "object") return String(row == null ? "" : row).trim();
+  return Object.keys(row).sort().map(k => {
+    const v = row[k];
+    return k + "=" + String(v == null ? "" : v).trim();
+  }).join("\x00");
+}
+
+// Order-insensitive row comparison; values compared as trimmed strings.
+function sameRows(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  const na = a.map(normalizeRow).sort();
+  const nb = b.map(normalizeRow).sort();
+  return na.every((v, i) => v === nb[i]);
+}
+
+// For a single-row/single-column result whose value is numeric, return that number; otherwise rowCount.
+function countFrom(result) {
+  if (!result) return null;
+  const rows = result.rows || [];
+  const cols = result.columns || [];
+  if (rows.length === 1 && cols.length === 1) {
+    const v = rows[0][cols[0]];
+    const trimmed = String(v == null ? "" : v).trim();
+    const n = Number(trimmed);
+    if (trimmed !== "" && !isNaN(n)) return n;
+  }
+  return typeof result.rowCount === "number" ? result.rowCount : null;
+}
+
+// Does reply contain n (integer) with or without thousands-separator commas, as a whole number?
+// "We have 1,295 items" matches 1295; "12950" does not match 1295.
+function countInReply(reply, n) {
+  const s = String(Math.round(Number(n)));
+  let pat = "";
+  for (let i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 === 0) pat += ",?";
+    pat += s[i];
+  }
+  return new RegExp("(?<!\\d)" + pat + "(?!\\d)").test(reply);
+}
+
+// Evaluate all three verification axes. Returns { ok, problems }.
+// quick[]: { id, chatbot (full result obj with rows/rowCount/truncated), direct (rows array) }
+// count:   { result (chatbot full result), reply (string), reference (number) } — null to skip
+// guard[]: { sql, allowed (bool), got (bool) }
+// Comparison rules (ruling 4):
+//   Not truncated: compare as sets with sameRows (order-insensitive).
+//   Truncated:     compare chatbot.rowCount <= direct.length + subset check (each chatbot row in direct).
+function judgeAi({ quick = [], count = null, guard = [] }) {
+  const problems = [];
+
+  for (const q of quick) {
+    const chatbotRows = (q.chatbot && q.chatbot.rows) || [];
+    const directRows  = q.direct || [];
+    const truncated   = !!(q.chatbot && q.chatbot.truncated);
+    let ok;
+    if (!truncated) {
+      ok = sameRows(chatbotRows, directRows);
+    } else {
+      // Truncated path: all 200 chatbot rows must be present in the full direct result.
+      const directNorm  = new Set(directRows.map(normalizeRow));
+      const allPresent  = chatbotRows.every(r => directNorm.has(normalizeRow(r)));
+      ok = chatbotRows.length <= directRows.length && allPresent;
+    }
+    if (!ok) {
+      const cb = truncated
+        ? `${(q.chatbot && q.chatbot.rowCount) || chatbotRows.length} rows (truncated)`
+        : `${chatbotRows.length} rows`;
+      problems.push(`question ${q.id}: chatbot returned ${cb}, VistA returned ${directRows.length} rows`);
+    }
+  }
+
+  if (count) {
+    const n         = count.reference;
+    const chatCount = countFrom(count.result);
+    const replyOk   = n != null && countInReply(count.reply || "", n);
+    const countOk   = replyOk || (chatCount != null && n != null && String(chatCount).trim() === String(n).trim());
+    if (!countOk) {
+      problems.push(`count mismatch: chatbot="${String(count.reply || "").trim().slice(0, 80)}", VistA=${n}`);
+    }
+  }
+
+  for (const g of guard) {
+    if (g.got !== g.allowed) {
+      problems.push(`guard case "${String(g.sql).slice(0, 60)}": expected allowed=${g.allowed}, got ${g.got}`);
+    }
+  }
+
+  return { ok: problems.length === 0, problems };
+}
+
 // Check that every expected marker line came back with its success value.
 // Returns an array of problem descriptions (empty when all is well).
 // This is the primary guard against a silent false-success when the container is missing,
@@ -128,6 +224,7 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     _configFile:    configFile     = CONFIG_FILE,
     _productionDir: productionDir  = path.join(__dirname, "_production"),
     _buildChatApp:  buildChatApp   = _defaultBuildChatApp,
+    _fetch:         fetchFn        = (typeof fetch === "function" ? fetch : null),
   } = _deps;
 
   const status = { state: "building", step: "", log: [], error: null, startedAt: new Date().toISOString() };
@@ -148,6 +245,7 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     const { INTERCLAW_SCRIPTS: scripts } = process.env;
 
     // Collect secrets for redaction BEFORE any error that might mention them.
+    const vuser  = (process.env.VADEMO_READ_USER || process.env.VADEMO_USER || "").trim();
     const vpass  = process.env.VADEMO_READ_PASSWORD != null ? process.env.VADEMO_READ_PASSWORD
                  : (process.env.VADEMO_PASSWORD || "");
     const btoken = process.env.AWS_BEARER_TOKEN_BEDROCK || "";
@@ -209,13 +307,133 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     await buildChatApp(d.questions, CHAT_OUT);
     note("chat app built → " + CHAT_HREF);
 
-    // ── Task 8: verify and mark implemented ── do NOT write implemented.ai here ──
-    // (verify the /guard endpoint and run the GUARD_CASES — Task 8)
+    // ── Task 8: verify the chatbot against VistA ─────────────────────────────────
+    step("Verifying the chatbot against VistA");
+
+    if (!fetchFn) throw new Error("fetch is not available — Node 18+ required for verification");
+
+    const vademoUrl = (process.env.VADEMO_URL || "").replace(/\/+$/, "");
+    if (!vademoUrl) throw new Error("VADEMO_URL is not set — add it to agent/.env");
+
+    const hubBase   = (url || "").replace(/\/+$/, "");
+    const hubAuth   = "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
+    const atAuth    = "Basic " + Buffer.from(`${vuser}:${vpass}`).toString("base64");
+    const atUrl     = vademoUrl + VADEMO_PATH;
+
+    // POST to the hub; redact any secrets that might appear in error text.
+    async function hubPost(p, body) {
+      const r = await fetchFn(hubBase + p, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": hubAuth },
+        body: JSON.stringify(body),
+      });
+      return r.json();
+    }
+
+    // POST direct SQL to VADEMO's Atelier endpoint; return content rows (array).
+    async function directQuery(sql) {
+      const r    = await fetchFn(atUrl, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "Authorization": atAuth },
+        body:    JSON.stringify({ query: sql }),
+      });
+      const data = await r.json();
+      if (data.status && data.status.errors && data.status.errors.length) {
+        throw new Error(redact("VistA error: " + (data.status.errors[0].error || "unknown"), secrets));
+      }
+      return (data.result && data.result.content) || [];
+    }
+
+    // 1. Quick questions: for each kept question, compare chatbot vs direct.
+    const sessionId = "verify-" + Date.now();
+    const quickInput = [];
+    for (const q of d.questions) {
+      const qId      = q.id.replace(/^AIQ\./, "");
+      const chatbot  = await hubPost(`/equipmentai/quick/${encodeURIComponent(qId)}`, { sessionId });
+      const direct   = await directQuery(q.sql);
+      quickInput.push({ id: q.id, chatbot, direct });
+      const cb = chatbot.truncated ? `${chatbot.rowCount} rows (truncated)` : `${chatbot.rowCount} rows`;
+      safeNote(`quick ${q.id}: chatbot=${cb}, vista=${direct.length} rows`);
+    }
+
+    // 2. Count check: ask chat "How many pieces of equipment do we have?" — one retry on failure.
+    const countQ      = "How many pieces of equipment do we have?";
+    const countRefSQL = "SELECT COUNT(*) AS n FROM VISTA.EQUIPMENT_INV_6914";
+    let countChat     = await hubPost("/equipmentai/chat", { sessionId: "verify-count-" + Date.now(), message: countQ });
+    const countDirect = await directQuery(countRefSQL);
+    const countRef    = countFrom({ rows: countDirect, rowCount: countDirect.length,
+                                    columns: countDirect.length ? Object.keys(countDirect[0]) : [] });
+    const countOkFirst = countRef != null && (
+      countInReply(countChat.reply || "", countRef) ||
+      String(countFrom(countChat)).trim() === String(countRef).trim()
+    );
+    if (!countOkFirst) {
+      // one retry with a fresh session
+      const retryChat = await hubPost("/equipmentai/chat", { sessionId: "verify-retry-" + Date.now(), message: countQ });
+      const retryOk   = countRef != null && (
+        countInReply(retryChat.reply || "", countRef) ||
+        String(countFrom(retryChat)).trim() === String(countRef).trim()
+      );
+      if (retryOk) countChat = retryChat;
+    }
+
+    // 3. Guard cases: replay every GUARD_CASES entry through /guard.
+    const guardInput = [];
+    for (const gc of GUARD_CASES) {
+      const resp = await hubPost("/equipmentai/guard", { sql: gc.sql });
+      guardInput.push({ sql: gc.sql, allowed: gc.allowed, got: resp.ok === true });
+    }
+
+    // Build status.verification (short human-readable entries).
+    const verificationRows = [];
+    for (const q of quickInput) {
+      const chatbotRows = (q.chatbot && q.chatbot.rows) || [];
+      const truncated   = !!(q.chatbot && q.chatbot.truncated);
+      const cb   = truncated ? `${(q.chatbot.rowCount || chatbotRows.length)} rows (truncated)` : `${chatbotRows.length} rows`;
+      const vista = `${q.direct.length} rows`;
+      const ok   = truncated
+        ? (chatbotRows.length <= q.direct.length && chatbotRows.every(r => { const dn = new Set(q.direct.map(normalizeRow)); return dn.has(normalizeRow(r)); }))
+        : sameRows(chatbotRows, q.direct);
+      verificationRows.push({ question: q.id, chatbot: cb, vista, ok });
+    }
+    // Count entry
+    const countOk = countRef != null && (
+      countInReply(countChat.reply || "", countRef) ||
+      String(countFrom(countChat)).trim() === String(countRef).trim()
+    );
+    verificationRows.push({
+      question: "count",
+      chatbot:  redact(String(countChat.reply || "(no reply)").slice(0, 80), secrets),
+      vista:    `${countRef}`,
+      ok:       countOk,
+    });
+    // Guard summary entry
+    const guardFail = guardInput.filter(g => g.got !== g.allowed).length;
+    verificationRows.push({ question: "guard", chatbot: `${GUARD_CASES.length - guardFail}/${GUARD_CASES.length} passed`, vista: "expected", ok: guardFail === 0 });
+
+    status.verification = verificationRows;
+    save();
+
+    const judgeResult = judgeAi({
+      quick:  quickInput,
+      count:  { result: countChat, reply: countChat.reply || "", reference: countRef },
+      guard:  guardInput,
+    });
+
+    if (!judgeResult.ok) {
+      throw new Error("verification failed:\n" + judgeResult.problems.map(p => "  • " + p).join("\n"));
+    }
+
+    // Write implemented.ai — only on success (ruling 2).
+    const implData = JSON.parse(fs.readFileSync(paths.implemented, "utf8"));
+    implData.ai = { built: true, verified: true, verifiedAt: new Date().toISOString() };
+    fs.writeFileSync(paths.implemented, JSON.stringify(implData, null, 2) + "\n");
+    note("implemented.ai marked verified");
 
     status.state   = "done";
-    status.step    = "Deployed — not yet verified";
+    status.step    = "Deployed and verified";
     status.chatUrl = CHAT_HREF;
-    status.log.push("✅ Deployed — not yet verified · chat: " + CHAT_HREF);
+    status.log.push("✅ Deployed and verified · chat: " + CHAT_HREF);
     save();
 
   } catch (e) {
@@ -229,4 +447,5 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
 
 if (require.main === module) main();
 
-module.exports = { readAiSpec, aiSettingsScript, checkSettingsMarkers, main, STATUS_FILE };
+module.exports = { readAiSpec, aiSettingsScript, checkSettingsMarkers, main, STATUS_FILE,
+                   sameRows, countFrom, countInReply, judgeAi };
