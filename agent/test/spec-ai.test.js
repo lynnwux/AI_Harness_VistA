@@ -191,3 +191,13 @@ test("buildAiSpec detail has the required fields", () => {
   assert.equal(d.general.rowCap, 200);
   assert.ok(Array.isArray(d.questions));
 });
+
+test("the general path's allow-list is the inventory's (schema-qualified), the one the guard enforces, and is rendered that way", () => {
+  const spec = buildAiSpec(graph, rec({ aiQuestions: fullyDecidedAiQ }), IM, inventory);
+  assert.deepEqual(spec.detail.general.allowList, inventory.allowList);
+  assert.ok(!spec.detail.general.allowList.includes("VISTA.WORK_ORDER_6920"));
+  const line = renderAi(spec).split("\n").find(l => l.startsWith("- Allow-list:"));
+  assert.equal(line, `- Allow-list: ${inventory.allowList.map(t => `\`${t}\``).join(", ")}.`);
+  assert.ok(!/WORK_ORDER_6920|NEW_PERSON200/.test(line));
+  assert.deepEqual(buildAiSpec(graph, rec(), IM, null).detail.general.allowList, []);
+});

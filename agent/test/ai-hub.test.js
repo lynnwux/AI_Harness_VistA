@@ -6,7 +6,7 @@ const path = require("path");
 const { graph, rec, IM } = require("./helpers");
 const { generate } = require("../lib/specs");
 const { TEMPLATES } = require("../lib/ai-templates");
-const { aiClasses, agingSqlTemplate, fillFiscalYear, PKG, WEB_APP, CREDENTIALS, CONFIG_KEYS, TOKEN_EXPIRED } = require("../lib/ai-hub");
+const { aiClasses, agingSqlTemplate, fillFiscalYear, PKG, WEB_APP, CREDENTIALS, CONFIG_KEYS, TOKEN_EXPIRED, GUARD_CASES } = require("../lib/ai-hub");
 
 const inventory = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json"), "utf8"));
 const MODEL = "us.anthropic.example-model-v1:0";
@@ -154,6 +154,13 @@ test("the guard checks comments, statements, SELECT, forbidden words and every F
   assert.match(g, /"SELECT"/);
   assert.match(g, /"FROM"/);
   assert.match(g, /"JOIN"/);
+  // the FROM walk: ends at these words at its own depth; every FROM/JOIN/comma item is checked
+  assert.match(g, /Parameter ENDCLAUSE = "WHERE,GROUP,ORDER,HAVING,UNION,EXCEPT,INTERSECT";/);
+  assert.match(g, /ClassMethod FromList\(ByRef pTok, p As %Integer, pAllow As %List\) As %String/);
+  assert.match(g, /Set:\(t = ","\)\|\|\(t = "JOIN"\) tExpect = 1/);
+  // only built-in functions; no quoted names
+  assert.match(g, /Parameter FUNCTIONS = "COUNT,SUM,AVG,MIN,MAX,CAST,[^"]*\$PIECE,[^"]*%SQLUPPER/);
+  assert.match(g, /If t = """" \{/);
 });
 
 test("the agent: bedrock, the given model, the toolset, rules and a schema guide naming every pointer's name column", () => {
@@ -213,6 +220,39 @@ test("the REST dispatch: POST /chat, /quick/:id, /guard and the exact token-expi
   assert.ok(t.includes("Bedrock token expired — update it in agent/.env and press 🔨 again"));
   assert.match(t, /"ok"/);
   assert.match(t, /"reason"/);
+});
+
+test("GUARD_CASES is a regression suite covering every bypass class, with allowed and rejected cases", () => {
+  assert.ok(GUARD_CASES.every(c => typeof c.sql === "string" && typeof c.allowed === "boolean" && typeof c.kind === "string"));
+  assert.equal(new Set(GUARD_CASES.map(c => c.sql)).size, GUARD_CASES.length, "no duplicate cases");
+  const kinds = ["plain", "case", "statement", "forbidden-word", "into", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "schema-less", "quoted", "dots", "implicit-join", "function", "cte"];
+  for (const k of kinds) assert.ok(GUARD_CASES.some(c => c.kind === k), `kind ${k}`);
+  for (const k of ["plain", "case", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "function"]) {
+    assert.ok(GUARD_CASES.some(c => c.kind === k && c.allowed) && GUARD_CASES.some(c => c.kind === k && !c.allowed), `kind ${k} has both allowed and rejected cases`);
+  }
+  const has = (re, allowed = false) => assert.ok(GUARD_CASES.some(c => re.test(c.sql) && c.allowed === allowed), String(re));
+  has(/^DELETE /);                                           // a write
+  has(/; DELETE/);                                           // a second statement
+  has(/DEL\/\*\*\/ETE/);                                     // a comment splitting a word
+  has(/\/\* ; \*\/ ;/);                                      // a comment hiding a second statement
+  has(/ "e", VISTA\.NEW_PERSON200/);                         // review: quoted alias before a comma
+  has(/AS "e", VISTA\.NEW_PERSON200/);
+  has(/\) "s", VISTA\.NEW_PERSON200/);
+  has(/\(VISTA\.EQUIPMENT_INV_6914 "e", VISTA\.NEW_PERSON200\)/);
+  has(/ON a\.ID = b\.ID, VISTA\.NEW_PERSON200/);             // review: comma after a JOIN condition
+  has(/USING \(IEN\), VISTA\.NEW_PERSON200/);
+  has(/JOIN VISTA\.NEW_PERSON200/);
+  has(/JOIN VISTA\.WORK_ORDER_6920/);
+  has(/IN \(SELECT ID FROM %Dictionary/);                    // a subquery on another schema
+  has(/UNION SELECT Name FROM %Dictionary/);
+  has(/FROM EQUIPMENT_INV_6914$/);                           // schema-less
+  has(/^SELECT SomeProc\(\)/);                               // review: unqualified procedure call
+  has(/%SYSTEM\.SQL\.Functions_Foo\(/);
+  has(/VISTA\.Proc\(/);
+  has(/^WITH /);
+  has(/ INTO /);
+  has(/->/);
+  has(/^select ien from vista\.equipment_inv_6914/, true);   // lower case
 });
 
 test("nothing generated holds a host, an account or a credential", () => {

@@ -92,7 +92,7 @@ function buildAiSpec(graph, record, implemented, inventory) {
       namespace: NAMESPACE,
       package:   PACKAGE,
       questions,
-      general:   { allowList: ALL_TABLES, rowCap: 200 },
+      general:   { allowList: inventory ? [...(inventory.allowList || [])] : [], rowCap: 200 },
       schemaColumns,
     },
   };
