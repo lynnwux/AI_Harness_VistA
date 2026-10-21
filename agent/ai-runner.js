@@ -5,15 +5,40 @@
 // Task 7 will add the chat-app build step; Task 8 will add verification and mark the layer built+verified.
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { DEFAULT_PATHS, loadInputs, inputHashes } = require("./lib/specs");
 const { aiClasses, PKG, WEB_APP, CREDENTIALS } = require("./lib/ai-hub");
 const { serverEntry, docPath, redact, irisSession, irisScript } = require("./lib/iris-deploy");
 const { DEFAULT_REGION, DEFAULT_MODEL_ID } = require("./lib/bedrock");
+const { chatAppFiles } = require("./lib/chat-app");
+const { buildAngularApp } = require("./lib/angular-build");
+const { DEFAULT_COMPONENT_FILES } = require("./lib/angular-app");
 
-const STATUS_FILE = path.join(__dirname, "ai-status.json");
-const CONFIG_FILE = path.join(__dirname, "interclaw-servers.json");
-const SERVER = "iris-ai-hub";
+const STATUS_FILE  = path.join(__dirname, "ai-status.json");
+const CONFIG_FILE  = path.join(__dirname, "interclaw-servers.json");
+const SERVER       = "iris-ai-hub";
+const CHAT_OUT     = path.join(__dirname, "..", "prototype", "chat");
+const CHAT_HREF    = "/prototype/chat/";
+
+// Default real chat-app build: scaffold → generate → compile → publish to outDir.
+// Uses a fresh temp workspace so it never writes under agent/_build or collides with build-runner.js.
+async function _defaultBuildChatApp(questions, outDir) {
+  const tmpWork = fs.mkdtempSync(path.join(os.tmpdir(), "eqchat-"));
+  try {
+    await buildAngularApp({
+      workRoot:    tmpWork,
+      name:        "eqchat",
+      files:       chatAppFiles({ questions, title: "Equipment inventory assistant" }),
+      removeFiles: DEFAULT_COMPONENT_FILES,
+      baseHref:    CHAT_HREF,
+      outDir,
+      // no log — progress goes nowhere in the background runner
+    });
+  } finally {
+    try { fs.rmSync(tmpWork, { recursive: true, force: true }); } catch (_) {}
+  }
+}
 
 // The fixed Atelier SQL path that the AI layer uses for VistA queries (same as server.js ATELIER_QUERY).
 const VADEMO_PATH = "/api/atelier/v1/VISTA-DIEGO/action/query";
@@ -93,15 +118,16 @@ function checkSettingsMarkers(irisOut) {
   return problems;
 }
 
-// _deps allows test injection of irisSession, irisScript, and output paths so tests
-// never write to the real agent/ paths (ai-status.json, interclaw-servers.json, _production/).
+// _deps allows test injection of irisSession, irisScript, output paths, and the chat-app build so
+// tests never write to the real agent/ paths or prototype/chat/.
 async function main(paths = DEFAULT_PATHS, _deps = {}) {
   const {
-    _irisSession:   sessionFn    = irisSession,
-    _irisScript:    scriptFn     = irisScript,
-    _statusFile:    statusFile   = STATUS_FILE,
-    _configFile:    configFile   = CONFIG_FILE,
-    _productionDir: productionDir = path.join(__dirname, "_production"),
+    _irisSession:   sessionFn      = irisSession,
+    _irisScript:    scriptFn       = irisScript,
+    _statusFile:    statusFile     = STATUS_FILE,
+    _configFile:    configFile     = CONFIG_FILE,
+    _productionDir: productionDir  = path.join(__dirname, "_production"),
+    _buildChatApp:  buildChatApp   = _defaultBuildChatApp,
   } = _deps;
 
   const status = { state: "building", step: "", log: [], error: null, startedAt: new Date().toISOString() };
@@ -178,15 +204,18 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     const said = k => ((irisOut || "").match(new RegExp(`^${k}:(.*)$`, "m")) || [])[1];
     safeNote(`web app: ${said("WEBAPP")} · config: ${said("CONFIG")} · vademo: ${said("VADEMO")} · bedrock: ${said("BEDROCK")}`);
 
-    // ── Task 7: build chat app ── leave a clear place for the next task ──
-    // step("Building the chat app") — Task 7 will add this step
+    // ── Task 7: build the chat app ──────────────────────────────────────────
+    step("Building the chat app");
+    await buildChatApp(d.questions, CHAT_OUT);
+    note("chat app built → " + CHAT_HREF);
 
     // ── Task 8: verify and mark implemented ── do NOT write implemented.ai here ──
     // (verify the /guard endpoint and run the GUARD_CASES — Task 8)
 
-    status.state = "done";
-    status.step  = "Deployed — not yet verified";
-    status.log.push("✅ " + status.step);
+    status.state   = "done";
+    status.step    = "Deployed — not yet verified";
+    status.chatUrl = CHAT_HREF;
+    status.log.push("✅ Deployed — not yet verified · chat: " + CHAT_HREF);
     save();
 
   } catch (e) {

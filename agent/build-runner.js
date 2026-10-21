@@ -4,8 +4,8 @@
    Invoked (detached) by POST /api/build. Takes minutes (fresh scaffold + install + compile). */
 const fs = require("fs");
 const path = require("path");
-const { spawn } = require("child_process");
 const { angularFiles, DEFAULT_COMPONENT_FILES } = require("./lib/angular-app");
+const { buildAngularApp } = require("./lib/angular-build");
 const { DEFAULT_PATHS, loadInputs, inputHashes, canon } = require("./lib/specs");
 const API_SPEC = path.join(DEFAULT_PATHS.specsDir, "api.json");
 
@@ -13,7 +13,6 @@ const ROOT = path.join(__dirname, "..");                    // repo root
 const WORK_ROOT = path.join(__dirname, "_build");           // holds per-build workspaces
 const RUN_ID = new Date().toISOString().replace(/[:.]/g, "-");
 const WORK = path.join(WORK_ROOT, "run-" + RUN_ID);         // fresh, unique per build → guaranteed clean start
-const APP = path.join(WORK, "eqbuild");
 const OUT = path.join(ROOT, "prototype", "build");          // published site
 const STATUS = path.join(__dirname, "build-status.json");
 
@@ -47,17 +46,6 @@ function setStep(step) {
   if (i >= 0) { phaseIdx = i; phaseStart = Date.now(); status.pct = PHASES[i].from; }
   status.step = step; status.state = "building"; log("▶ " + step);
 }
-function run(cmd, args, cwd) {
-  return new Promise((resolve, reject) => {
-    log("$ " + cmd + " " + args.join(" ") + (cwd ? "   (in " + path.relative(ROOT, cwd) + ")" : ""));
-    const p = spawn(cmd, args, { cwd: cwd || WORK, shell: true, env: process.env });
-    p.stdout.on("data", d => String(d).split(/\r?\n/).forEach(l => l.trim() && log(l.trim().slice(0, 200))));
-    p.stderr.on("data", d => String(d).split(/\r?\n/).forEach(l => l.trim() && log(l.trim().slice(0, 200))));
-    p.on("close", code => code === 0 ? resolve() : reject(new Error(cmd + " exited " + code)));
-    p.on("error", reject);
-  });
-}
-
 // The build reads ONLY the API layer spec, and refuses one generated from inputs that have since changed.
 function buildConfig(specFile = API_SPEC, paths = DEFAULT_PATHS){
   const spec = JSON.parse(fs.readFileSync(specFile, "utf8"));
@@ -89,20 +77,21 @@ async function main(){
 
     // Pin CLI to v20 — its Node engine (^22.12.0) is satisfied by this machine's
     // Node 22.13.1; @latest (v21) needs >=22.22.3 which this box doesn't have.
-    setStep("Scaffolding Angular project (npx @angular/cli@20 new)");
-    await run("npx", ["-y", "@angular/cli@20", "new", "eqbuild", "--routing=false", "--style=css", "--skip-git", "--skip-tests", "--defaults", "--ssr=false"], WORK);
-
-    setStep("Generating app from spec");
-    writeAngularApp(cfg);
-
-    setStep("Compiling (ng build) — this is the long part");
-    await run("npx", ["ng", "build", "--base-href", "/prototype/build/", "--output-path", "dist"], APP);
-
-    setStep("Publishing to /prototype/build/");
-    fs.rmSync(OUT, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
-    const browser = path.join(APP, "dist", "browser");
-    const src = fs.existsSync(browser) ? browser : path.join(APP, "dist");
-    fs.cpSync(src, OUT, { recursive: true });
+    await buildAngularApp({
+      workRoot:    WORK,
+      name:        "eqbuild",
+      files:       angularFiles(cfg),
+      removeFiles: DEFAULT_COMPONENT_FILES,
+      baseHref:    "/prototype/build/",
+      outDir:      OUT,
+      log,
+      onPhase: p => {
+        if      (p === "scaffold") setStep("Scaffolding Angular project (npx @angular/cli@20 new)");
+        else if (p === "generate") setStep("Generating app from spec");
+        else if (p === "build")    setStep("Compiling (ng build) — this is the long part");
+        else if (p === "publish")  setStep("Publishing to /prototype/build/");
+      },
+    });
     // tidy this run's workspace now that its output is published (best-effort — the
     // start-of-build sweep is the real guarantee, so a locked dir here is harmless).
     try { fs.rmSync(WORK, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (e) {}
@@ -117,14 +106,5 @@ async function main(){
   }
 }
 if (require.main === module) main();
-
-// ---- generate the Angular source (standalone component wizard) from the config ----
-
-// remove default component files if present (avoid confusion; main.ts imports ./app/app)
-function writeAngularApp(cfg){
-  for (const [rel, content] of Object.entries(angularFiles(cfg))) fs.writeFileSync(path.join(APP, rel), content);
-  const appDir = path.join(APP, "src", "app");
-  DEFAULT_COMPONENT_FILES.forEach(f=>{ try{ fs.rmSync(path.join(appDir,f),{force:true}); }catch(e){} });
-}
 
 module.exports = { buildConfig, angularFiles };
