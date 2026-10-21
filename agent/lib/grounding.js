@@ -79,18 +79,22 @@ function buildIndex(graph, inventory) {
           .flatMap(([, lines]) => lines)
       );
       const text = [t.defaultWording, ...evLines].join("\n");
+      // Strip trailing punctuation (e.g. "contract?" → "contract") so alias tokens
+      // behave as whole words. need=4: AI wordings share common terms like "inspection",
+      // "work", "order" with capability-graph replies; 4 matches prevent false positives
+      // while still focusing on replies that clearly name the AI question (3+ distinctive
+      // words like "jcaho","pending","inspection","items" from a single AI question).
       const aliasWords = [...new Set(
         [t.defaultWording].flatMap(n => String(n).toLowerCase().split(/[\s\-/]+/))
+          .map(w => w.replace(/[^a-z0-9]/g, ""))
           .filter(w => w.length >= 2 && !NAME_STOP.has(w))
       )];
-      // AI template wordings are full sentences with common words; require 3 matches to
-      // avoid false positives when capability-graph replies contain coincidental words.
       groups.push({
         id: t.id,
         names: [t.defaultWording],
         members: [],
         aliasWords,
-        need: Math.max(3, aliasWords.length >= 3 ? 2 : 1),
+        need: 4,
         vocab: tokens(text),
         lex: new Set(lexicon.filter(w => lexRe(w).test(text))),
         evidence: evLines,

@@ -156,3 +156,62 @@ test("checkReply passes $50,000 in a high-value reply when the user said it", ()
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.deepEqual(r.thresholds, []);
 });
+
+test("a recorded money param allows the same threshold in a subsequent reply", () => {
+  const ix = buildIndex(graph, inventory);
+  // Developer previously recorded threshold: 50000 — that value should unblock "$50,000"
+  const r = checkReply({
+    graph, index: ix,
+    reply: "For high-value assets without a service contract, $50,000 is a reasonable threshold.",
+    userMessage: "",
+    record: { oqPolicy: {}, aiQuestions: { "AIQ.HighValueNoContract": { keep: true, params: { threshold: 50000 } } } },
+    currentId: "AIQ.HighValueNoContract",
+  });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.thresholds, []);
+});
+
+test("a reply that clearly names an AI question focuses its group via alias matching", () => {
+  const ix = buildIndex(graph, inventory);
+
+  // AIQ.AgingOutFY — "capitalized", "scheduled", "replacement", "fiscal" (4+ matches)
+  const r1 = checkReply({ graph, index: ix,
+    reply: "For capitalized items, look at those scheduled for replacement this fiscal year.",
+    userMessage: "", record: { oqPolicy: {} }, currentId: null });
+  assert.ok(r1.focus.includes("AIQ.AgingOutFY"), "AgingOutFY should be focused");
+
+  // AIQ.HighValueNoContract — "high", "value", "service", "contract" (4 matches)
+  const r2 = checkReply({ graph, index: ix,
+    reply: "High-value assets that have no service contract need attention.",
+    userMessage: "", record: { oqPolicy: {} }, currentId: null });
+  assert.ok(r2.focus.includes("AIQ.HighValueNoContract"), "HighValueNoContract should be focused");
+
+  // AIQ.JCAHOPendingInspection — "jcaho", "regulated", "items", "pending" (4+ matches)
+  const r3 = checkReply({ graph, index: ix,
+    reply: "JCAHO-regulated items with a pending inspection work order should be flagged.",
+    userMessage: "", record: { oqPolicy: {} }, currentId: null });
+  assert.ok(r3.focus.includes("AIQ.JCAHOPendingInspection"), "JCAHOPendingInspection should be focused");
+
+  // AIQ.CapitalPlanningTotals — "capital", "planning", "totals", "active" (4+ matches)
+  const r4 = checkReply({ graph, index: ix,
+    reply: "Capital planning totals for active equipment in use.",
+    userMessage: "", record: { oqPolicy: {} }, currentId: null });
+  assert.ok(r4.focus.includes("AIQ.CapitalPlanningTotals"), "CapitalPlanningTotals should be focused");
+});
+
+test("capability-graph replies do not focus AI groups (false-positive prevention)", () => {
+  const ix = buildIndex(graph, inventory);
+
+  // The work-order reply matches 3 JCAHO alias words (inspection, work, order) — below need=4
+  const woReply = "For the incoming inspection work order, ENEQ1 ADDEQ asks the clerk; IIWO^ENWONEW3 creates the 6920 work order.";
+  const r1 = checkReply({ graph, index: ix, reply: woReply,
+    userMessage: "", record: { oqPolicy: {} }, currentId: "OQ.WorkOrderPolicy" });
+  assert.ok(!r1.focus.some(id => id.startsWith("AIQ.")), "no AI group should be focused by the work-order reply");
+  assert.ok(r1.focus.includes("OQ.WorkOrderPolicy"), "orchestrator work-order group should still focus");
+
+  // An unrelated orchestrator reply (mandatory bulletin) matches no AI alias words
+  const r2 = checkReply({ graph, index: ix,
+    reply: "The MailMan bulletin is mandatory: the legacy sends it unconditionally.",
+    userMessage: "", record: { oqPolicy: {} }, currentId: "SIDE.Bulletin" });
+  assert.ok(!r2.focus.some(id => id.startsWith("AIQ.")), "no AI group should be focused by a bulletin reply");
+});
