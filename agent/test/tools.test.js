@@ -182,3 +182,61 @@ test("getState.ai sqlPreview is set when all params are recorded and valid", () 
   assert.ok(q.sqlPreview, "sqlPreview present when all params valid");
   assert.match(q.sqlPreview, /FROM VISTA\.EQUIPMENT_INV_6914/);
 });
+
+// ── Fix 1: cross-param validation uses the merged (recorded + incoming) params ─
+
+test("setQuickQuestion JCAHO: two separate calls — workOrderStatusColumn then workOrderStatuses — both succeed", () => {
+  const r = rec();
+  // First call: record the column
+  const out1 = runTool("setQuickQuestion", {
+    id: "AIQ.JCAHOPendingInspection",
+    params: { workOrderStatusColumn: "STATUS" },
+  }, ctxWithInv(r));
+  assert.equal(out1.ok, true, "first call (column): " + out1.message);
+  // Second call: record the statuses — must use the already-recorded column for validation
+  const out2 = runTool("setQuickQuestion", {
+    id: "AIQ.JCAHOPendingInspection",
+    params: { workOrderStatuses: ["1", "2"] },
+  }, ctxWithInv(r));
+  assert.equal(out2.ok, true, "second call (statuses): " + out2.message);
+  assert.deepEqual(r.aiQuestions["AIQ.JCAHOPendingInspection"].params.workOrderStatuses, ["1", "2"]);
+});
+
+// ── Fix 2a: changing workOrderStatusColumn drops workOrderStatuses ─────────────
+
+test("setQuickQuestion: changing workOrderStatusColumn drops workOrderStatuses and says so", () => {
+  const r = rec();
+  // Set column + statuses in one call
+  runTool("setQuickQuestion", {
+    id: "AIQ.JCAHOPendingInspection",
+    params: { workOrderStatusColumn: "STATUS", workOrderStatuses: ["1", "2"] },
+  }, ctxWithInv(r));
+  assert.equal(r.aiQuestions["AIQ.JCAHOPendingInspection"].params.workOrderStatuses.length, 2);
+  // Change the column — should clear workOrderStatuses
+  const out = runTool("setQuickQuestion", {
+    id: "AIQ.JCAHOPendingInspection",
+    params: { workOrderStatusColumn: "PM_STATUS" },
+  }, ctxWithInv(r));
+  assert.equal(out.ok, true, out.message);
+  assert.match(out.message, /workOrderStatuses/i, "message mentions workOrderStatuses");
+  assert.equal(r.aiQuestions["AIQ.JCAHOPendingInspection"].params.workOrderStatuses, undefined,
+    "workOrderStatuses removed after column change");
+});
+
+// ── Fix 2b: recorded-but-invalid param appears in missing list ────────────────
+
+test("getState.ai: a recorded-but-invalid param (STATUS codes under PM_STATUS) appears in missing", () => {
+  const r = rec();
+  // Construct the invalid state directly (STATUS code "2" is invalid for PM_STATUS)
+  r.aiQuestions["AIQ.JCAHOPendingInspection"] = {
+    params: { workOrderStatusColumn: "PM_STATUS", workOrderStatuses: ["2"] },
+  };
+  const st = runTool("getState", {}, ctxWithInv(r));
+  const q = st.ai.questions.find(q => q.id === "AIQ.JCAHOPendingInspection");
+  assert.ok(
+    q.missing.some(m => m.key === "workOrderStatuses"),
+    "workOrderStatuses reported missing when value is invalid for current column"
+  );
+  // sqlPreview must be null (params not fully valid)
+  assert.equal(q.sqlPreview, null, "sqlPreview null when a param is invalid");
+});

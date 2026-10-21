@@ -89,7 +89,16 @@ function buildAiState(record, inventory) {
   const questions = TEMPLATES.map(t => {
     const recEntry  = (record.aiQuestions || {})[t.id] || null;
     const recParams = recEntry ? (recEntry.params || {}) : {};
-    const missing   = missingFor(t, recParams);
+    // Start with absent params, then add recorded-but-invalid params so completeness
+    // can never be true while sqlFor would throw.
+    const absentMissing  = missingFor(t, recParams);
+    const invalidMissing = inventory ? t.params
+      .filter(p => recParams[p.key] !== undefined && recParams[p.key] !== null)
+      .flatMap(p => {
+        const errs = validateOne(p, recParams[p.key], recParams, inventory);
+        return errs.length ? [{ key: p.key, what: errs[0] }] : [];
+      }) : [];
+    const missing = [...absentMissing, ...invalidMissing];
 
     // Build param descriptors for the UI: key, describe, options|codes, evidence.
     const paramDescs = t.params.map(p => {
@@ -276,11 +285,16 @@ function setQuickQuestion(decisions, id, keep, wording, params, inventory) {
     if (looksSecret(wording)) return { ok: false, message: SECRET_MSG("the wording") };
   }
   if (params !== undefined && params !== null) {
+    // Merge existing recorded params with this call's params so cross-param
+    // validation (e.g. workOrderStatuses needing workOrderStatusColumn) works
+    // across separate one-param-at-a-time calls.
+    const existingParams = ((decisions.aiQuestions || {})[id] || {}).params || {};
+    const mergedParams   = { ...existingParams, ...params };
     const paramMap = new Map(t.params.map(p => [p.key, p]));
     const errors = [];
     for (const [key, value] of Object.entries(params)) {
       if (!paramMap.has(key)) { errors.push(`unknown param "${key}" for ${id}; valid: ${t.params.map(p => p.key).join(", ")}`); continue; }
-      const errs = validateOne(paramMap.get(key), value, params, inventory);
+      const errs = validateOne(paramMap.get(key), value, mergedParams, inventory);
       errors.push(...errs);
     }
     if (errors.length) return { ok: false, message: errors.join("; ") };
@@ -289,13 +303,25 @@ function setQuickQuestion(decisions, id, keep, wording, params, inventory) {
   if (!decisions.aiQuestions) decisions.aiQuestions = {};
   if (!decisions.aiQuestions[id]) decisions.aiQuestions[id] = {};
   const entry = decisions.aiQuestions[id];
-  if (keep !== undefined && keep !== null)   entry.keep    = Boolean(keep);
+  if (keep !== undefined && keep !== null)       entry.keep    = Boolean(keep);
   if (wording !== undefined && wording !== null) entry.wording = String(wording);
-  if (params  !== undefined && params  !== null) {
+  let extraMsg = "";
+  if (params !== undefined && params !== null) {
     if (!entry.params) entry.params = {};
+    // For JCAHOPendingInspection: if workOrderStatusColumn is being changed to a
+    // different value, the previously recorded workOrderStatuses are no longer valid
+    // (they were validated against the old column's codes) — drop them so the chat
+    // knows to ask again.
+    if (id === "AIQ.JCAHOPendingInspection" && params.workOrderStatusColumn !== undefined) {
+      const prevCol = entry.params.workOrderStatusColumn;
+      if (prevCol && prevCol !== params.workOrderStatusColumn && entry.params.workOrderStatuses !== undefined) {
+        delete entry.params.workOrderStatuses;
+        extraMsg = `; workOrderStatuses cleared because workOrderStatusColumn changed from ${prevCol} to ${params.workOrderStatusColumn} — please re-record workOrderStatuses for the new column`;
+      }
+    }
     Object.assign(entry.params, params);
   }
-  return { ok: true, message: `${id} updated` };
+  return { ok: true, message: `${id} updated${extraMsg}` };
 }
 
 const TARGET_PROPS = { via: { type: "string", description: "where the work is performed: vista | iris | external" } };
