@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const { graph, rec, IM } = require("./helpers");
 const { generate } = require("../lib/specs");
-const { TEMPLATES } = require("../lib/ai-templates");
+const { TEMPLATES, sqlFor } = require("../lib/ai-templates");
 const { aiClasses, agingSqlTemplate, fillFiscalYear, PKG, WEB_APP, CREDENTIALS, CONFIG_KEYS, TOKEN_EXPIRED, GUARD_CASES } = require("../lib/ai-hub");
 
 const inventory = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json"), "utf8"));
@@ -229,9 +229,9 @@ test("the REST dispatch: POST /chat, /quick/:id, /guard and the exact token-expi
 test("GUARD_CASES is a regression suite covering every bypass class, with allowed and rejected cases", () => {
   assert.ok(GUARD_CASES.every(c => typeof c.sql === "string" && typeof c.allowed === "boolean" && typeof c.kind === "string"));
   assert.equal(new Set(GUARD_CASES.map(c => c.sql)).size, GUARD_CASES.length, "no duplicate cases");
-  const kinds = ["number-run", "name-boundary", "plain", "case", "statement", "forbidden-word", "into", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "schema-less", "quoted", "dots", "implicit-join", "function", "cte"];
+  const kinds = ["charset", "number-run", "name-boundary", "plain", "case", "statement", "forbidden-word", "into", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "schema-less", "quoted", "dots", "implicit-join", "function", "cte"];
   for (const k of kinds) assert.ok(GUARD_CASES.some(c => c.kind === k), `kind ${k}`);
-  for (const k of ["number-run", "name-boundary", "plain", "case", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "function"]) {
+  for (const k of ["charset", "number-run", "name-boundary", "plain", "case", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "function"]) {
     assert.ok(GUARD_CASES.some(c => c.kind === k && c.allowed) && GUARD_CASES.some(c => c.kind === k && !c.allowed), `kind ${k} has both allowed and rejected cases`);
   }
   const has = (re, allowed = false) => assert.ok(GUARD_CASES.some(c => re.test(c.sql) && c.allowed === allowed), String(re));
@@ -264,6 +264,42 @@ test("GUARD_CASES is a regression suite covering every bypass class, with allowe
   has(/> 1\.5E3$/, true);                                    // a valid numeric literal still passes
   has(/FROM%Dictionary/);                                    // IRIS splits FROM%X into FROM %X
   has(/JOIN%Dictionary/);
+  has(/ @WHERE, VISTA\.NEW_PERSON200/);                      // re-review: a lone @ / # faking the end of the FROM list
+  has(/ #WHERE, VISTA\.NEW_PERSON200/);
+  has(/\u200BWHERE/);                                        // zero-width space
+  has(/\uFF26\uFF32\uFF2F\uFF2D VISTA/);                     // fullwidth FROM
+  has(/IEN\u0085FROM/);                                      // NEL
+  has(/= \^X/);
+  has(/\{oj /);
+  has(/= :ien/);
+  has(/= \?$/);
+  has(/!= '4'/, true);                                       // != comparison
+  has(/\|\| ' ' \|\|/, true);                                // || concatenation
+  has(/'caf\u00E9/, true);                                   // non-ASCII inside a string literal
+});
+
+test("the guard's character set covers the templates' SQL, every allow-listed name and the instructions' SQL examples", () => {
+  const { CHARSET } = require("../lib/ai-hub");
+  const outside = sql => sql.replace(/'(?:[^']|'')*'/g, "''");          // string literal contents are free
+  const ok = sql => [...outside(sql)].every((ch, i, a) => (CHARSET.includes(ch) || " \t\r\n".includes(ch)) && (ch !== "!" || a[i + 1] === "="));
+  const codes = (t, c) => inventory.tables[t].columns.find(x => x.column === c).codes.map(([k]) => k);
+  const use = codes("EQUIPMENT_INV_6914", "USE_STATUS").slice(0, 2);
+  const variants = {
+    "AIQ.AgingOutFY": [decided["AIQ.AgingOutFY"].params, { fiscalYear: 2032, capitalizedMeans: "TYPE_OF_ENTRY = NX and INVESTMENT_CATEGORY = 1", useStatuses: use }],
+    "AIQ.HighValueNoContract": [decided["AIQ.HighValueNoContract"].params, { threshold: 12500.5, valueColumn: "ORIGINAL_ASSET_VALUE", useStatuses: use }],
+    "AIQ.JCAHOPendingInspection": [decided["AIQ.JCAHOPendingInspection"].params, { workOrderStatusColumn: "STATUS", workOrderStatuses: codes("WORK_ORDER_6920", "STATUS").slice(0, 2), useStatuses: use }],
+    "AIQ.CapitalPlanningTotals": [decided["AIQ.CapitalPlanningTotals"].params, { useStatuses: use, valueColumns: ["TOTAL_ASSET_VALUE", "ORIGINAL_ASSET_VALUE"], groupBy: "EQUIPMENT_CATEGORY_NAME" }],
+  };
+  assert.deepEqual(Object.keys(variants), TEMPLATES.map(t => t.id));
+  for (const t of TEMPLATES) for (const p of variants[t.id]) { const sql = sqlFor(t, p, inventory); assert.ok(ok(sql), `${t.id}: ${sql}`); }
+  for (const q of inventory.allowList) {
+    assert.ok(ok(q), q);
+    for (const c of inventory.tables[q.replace(/^VISTA\./, "")].columns) assert.match(c.column, /^[A-Za-z][A-Za-z0-9_]*$/, `${q}.${c.column}`);
+  }
+  const agentText = byName(classes())["EquipmentAI.Agent"];
+  assert.ok(agentText.includes("CAST(column AS INTEGER) against (year - 1700) * 10000 + month * 100 + day"));
+  assert.ok(!/SUM\(…\)|TRIM\(…|[−×]/.test(agentText));
+  assert.match(byName(classes())["EquipmentAI.Guard"], /Parameter CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_%\$\.,\(\)\*\+-\/=<>'\|!";/);
 });
 
 test("every postcondition is one expression (a space ends it in ObjectScript)", () => {

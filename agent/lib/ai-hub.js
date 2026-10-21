@@ -14,6 +14,8 @@ const CONFIG_KEYS = ["vademoServer", "vademoPort", "vademoPath", "bedrockRegion"
 const TOKEN_EXPIRED = "Bedrock token expired — update it in agent/.env and press 🔨 again";
 // The brief's words, plus other statements a SELECT never contains.
 const FORBIDDEN = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "GRANT", "CALL", "EXEC", "INTO", "TRUNCATE", "EXECUTE", "REVOKE", "MERGE"];
+// The only characters a general query may use outside string literals (plus space, tab, CR, LF; ! only before =).
+const CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_%$.,()*+-/=<>'|!";
 // Words that end a FROM clause at its own parenthesis depth.
 const END_CLAUSE = ["WHERE", "GROUP", "ORDER", "HAVING", "UNION", "EXCEPT", "INTERSECT"];
 // The built-in functions a general query may call; any other name followed by "(" is rejected (it could be a
@@ -152,6 +154,9 @@ Parameter ALLOWLIST = ${os(allowList.join(","))};
 /// The most rows any result returns to the chat; Cap asks for one more, to detect truncation.
 Parameter ROWCAP = ${rowCap};
 
+/// The only characters a query may use outside string literals (plus space, tab, CR, LF; ! only in !=).
+Parameter CHARSET = ${os(CHARSET)};
+
 /// Never allowed anywhere in a query: whole words, any case, string literals included.
 Parameter FORBIDDEN = ${os(FORBIDDEN.join(","))};
 
@@ -222,16 +227,17 @@ ClassMethod Check(sql As %String) As %String
 }
 
 /// sql without its comments (each becomes a space). pWhy is set when the text cannot be read safely: an
-/// unterminated string, quoted name or comment, a ; outside a string, //, a stray */, or -> (an implicit join).
+/// unterminated string or comment, a ; or a quoted name outside a string, //, a stray */, -> (an implicit join),
+/// or any character outside CHARSET (string contents are free; comments are held to CHARSET too).
 ClassMethod Strip(sql As %String, Output pWhy As %String) As %String
 {
     Set pWhy = "", tOut = "", tLen = $length(sql), i = 1
     While i <= tLen {
         Set c = $extract(sql, i), c2 = $extract(sql, i, i + 1)
-        If (c = "'") || (c = """") {
+        If c = "'" {
             Set j = ..QuoteEnd(sql, i)
             If j = 0 {
-                Set pWhy = "the query has an unterminated "_$select(c = "'": "string", 1: "quoted name")
+                Set pWhy = "the query has an unterminated string"
                 Quit
             }
             Set tOut = tOut_$extract(sql, i, j), i = j + 1
@@ -240,6 +246,8 @@ ClassMethod Strip(sql As %String, Output pWhy As %String) As %String
         If c2 = "--" {
             Set j = i + 2
             While (j <= tLen) && ($char(10, 13) '[ $extract(sql, j)) { Set j = j + 1 }
+            Set pWhy = ..Charset($extract(sql, i + 2, j - 1))
+            Quit:pWhy'=""
             Set tOut = tOut_" ", i = j
             Continue
         }
@@ -249,6 +257,8 @@ ClassMethod Strip(sql As %String, Output pWhy As %String) As %String
                 Set pWhy = "the query has an unterminated /* comment"
                 Quit
             }
+            Set pWhy = ..Charset($extract(sql, i + 2, j - 3))
+            Quit:pWhy'=""
             Set tOut = tOut_" ", i = j
             Continue
         }
@@ -256,9 +266,25 @@ ClassMethod Strip(sql As %String, Output pWhy As %String) As %String
         If c2 = "*/" { Set pWhy = "the query has a stray */" Quit }
         If c2 = "->" { Set pWhy = "implicit joins (->) are not allowed: join an allow-listed table explicitly" Quit }
         If c = ";" { Set pWhy = "only one statement is allowed (found ; outside a string)" Quit }
+        If c = """" { Set pWhy = "quoted names (""..."") are not allowed: use the plain names from the schema guide" Quit }
+        Set pWhy = ..Charset($select(c = "!": c2, 1: c))
+        Quit:pWhy'=""
         Set tOut = tOut_c, i = i + 1
     }
     Quit $select(pWhy = "": tOut, 1: "")
+}
+
+/// "" when every character of pText is in CHARSET (and each ! is followed by =), else the reason.
+ClassMethod Charset(pText As %String) As %String
+{
+    Set tOK = ..#CHARSET_$char(32, 9, 13, 10)
+    For i=1:1:$length(pText) {
+        Set c = $extract(pText, i)
+        If (tOK '[ c) || ((c = "!") && ($extract(pText, i + 1) '= "=")) {
+            Return "the character "_$select(($ascii(c) > 32) && ($ascii(c) < 127): c, 1: "U+"_$translate($justify($zhex($ascii(c)), 4), " ", "0"))_" is not allowed outside a string (letters, digits, spaces and _ % $ . , ( ) * + - / = < > ' | != only)"
+        }
+    }
+    Quit ""
 }
 
 /// Position of the quote that closes the string or quoted name opening at i (a doubled quote is an escape), or 0.
@@ -291,8 +317,8 @@ ClassMethod Forbidden(pText As %String) As %String
     Quit tWhy
 }
 
-/// Splits the comment-free text into tokens: names (upper case, dots kept), numbers, a single ' for a string, a
-/// single " for a quoted name, and single characters. Returns the count. Like IRIS, a % mid-name starts a new
+/// Splits the comment-free text (CHARSET only, see Strip) into tokens: names (upper case, dots kept), numbers,
+/// a single ' for a string, and single characters. Returns the count. Like IRIS, a % mid-name starts a new
 /// token (FROM%X is FROM then %X). A number takes digits, an optional fraction and exponent; letters, dots or
 /// $ # @ running straight on stay in the same token (1FROM, 5.FROM, 1E1FROM), which Check rejects.
 ClassMethod Tokens(pText As %String, Output pTok) As %Integer
@@ -302,7 +328,7 @@ ClassMethod Tokens(pText As %String, Output pTok) As %Integer
     While i <= tLen {
         Set c = $extract(pText, i)
         If (c = " ") || (c?1C) { Set i = i + 1 Continue }
-        If (c = "'") || (c = """") {
+        If c = "'" {
             Set j = ..QuoteEnd(pText, i)
             Set:j=0 j = tLen
             Set n = n + 1, pTok(n) = c, i = j + 1
@@ -591,9 +617,9 @@ You answer questions about the equipment inventory in VistA: FileMan file 6914 (
 2. When a question matches a quick-access question below, call its tool. For any other question, write one read-only SELECT and call \`RunQuery\`.
 3. When a tool returns an error: if it says \"rejected by the read-only guard\" or \"VistA rejected the query\", the query itself was wrong — correct the SQL and call \`RunQuery\` again (twice at most). Any other error means VistA could not be reached: say so plainly and stop — do not retry and do not answer another way.
 4. Show names, not pointer entry numbers: select a pointer's name column — ${names.join(", ")} and the others the schema guide names ("use … for the name"). For a coded column, show the code's meaning from the guide.
-5. A result holds at most ${rowCap} rows. When \`truncated\` is true, say that only the first ${rowCap} rows are shown and the full list is longer — never present it as complete. Count and total with COUNT(*) and SUM(…) in SQL, not by counting rows.
-6. You are read-only: you never change VistA. \`RunQuery\` takes one SELECT statement (no semicolon) over the allow-listed tables of the schema guide, written schema-qualified (e.g. VISTA.EQUIPMENT_INV_6914); anything else is rejected. Write FROM only before table names (no TRIM(… FROM …) or EXTRACT(… FROM …)), join tables explicitly (no ->), use plain unquoted names, and call only these functions: ${FUNCTIONS.join(", ")}.
-7. Dates are FileMan dates (YYYMMDD, where YYY is the year minus 1700): compare them as CAST(column AS INTEGER) against (year − 1700) × 10000 + month × 100 + day. The federal fiscal year N runs from October 1 of N − 1 through September 30 of N.
+5. A result holds at most ${rowCap} rows. When \`truncated\` is true, say that only the first ${rowCap} rows are shown and the full list is longer — never present it as complete. Count and total with COUNT(*) and SUM(column) in SQL, not by counting rows.
+6. You are read-only: you never change VistA. \`RunQuery\` takes one SELECT statement (no semicolon) over the allow-listed tables of the schema guide, written schema-qualified (e.g. VISTA.EQUIPMENT_INV_6914); anything else is rejected. Write FROM only before table names (no TRIM(x FROM y) or EXTRACT(x FROM y)), join tables explicitly (no ->), use plain unquoted names, write the query in plain ASCII (outside string literals only letters, digits, spaces and _ % $ . , ( ) * + - / = < > ' | and != ), and call only these functions: ${FUNCTIONS.join(", ")}.
+7. Dates are FileMan dates (YYYMMDD, where YYY is the year minus 1700): compare them as CAST(column AS INTEGER) against (year - 1700) * 10000 + month * 100 + day. The federal fiscal year N runs from October 1 of N - 1 through September 30 of N.
 8. Be brief: lead with the count or total, then a markdown table of the rows that matter.
 
 ## Quick-access questions
@@ -914,7 +940,9 @@ const GUARD_CASES = [
   { kind: "into", allowed: false, sql: `SELECT IEN INTO VISTA.COPY FROM ${E}` },
   // comments
   { kind: "comment", allowed: true, sql: `/* leading comment */ SELECT IEN FROM ${E} -- trailing` },
-  { kind: "comment", allowed: true, sql: `SELECT IEN FROM ${E} WHERE MFGR__EQUIPMENT_NAME = 'a' -- ' ; DELETE FROM ${E}` },
+  // a comment is outside any string, so its characters are held to CHARSET too: the ; here is rejected
+  { kind: "comment", allowed: false, sql: `SELECT IEN FROM ${E} WHERE MFGR__EQUIPMENT_NAME = 'a' -- ' ; DELETE FROM ${E}` },
+  { kind: "comment", allowed: true, sql: `SELECT IEN FROM ${E} WHERE MFGR__EQUIPMENT_NAME = 'a' -- it's the name, then the model\nAND MODEL = 'b'` },
   { kind: "comment", allowed: false, sql: `SELECT IEN FROM ${E} /* ; */ ; DROP TABLE X` },
   { kind: "comment", allowed: false, sql: `SELECT IEN FROM ${E} -- \n; DELETE FROM ${E}` },
   { kind: "comment", allowed: false, sql: `SELECT IEN FROM ${E} /* unterminated` },
@@ -1011,9 +1039,29 @@ const GUARD_CASES = [
   { kind: "name-boundary", allowed: false, sql: "SELECT $FROM VISTA.NEW_PERSON200" },
   { kind: "name-boundary", allowed: false, sql: `SELECT _X FROM ${E}` },
   { kind: "name-boundary", allowed: true, sql: `SELECT IEN FROM ${E} WHERE MFGR__EQUIPMENT_NAME%STARTSWITH'BED'` },
+  // the character set: outside string literals only CHARSET, space, tab, CR, LF (and ! only in !=)
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E} @WHERE, VISTA.NEW_PERSON200` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E} #WHERE, VISTA.NEW_PERSON200` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E} \u200BWHERE, VISTA.NEW_PERSON200` },
+  { kind: "charset", allowed: false, sql: "SELECT SSN \uFF26\uFF32\uFF2F\uFF2D VISTA.NEW_PERSON200" },
+  { kind: "charset", allowed: false, sql: `SELECT IEN\u0085FROM ${E}` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E}\u00A0WHERE IEN = 1` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN = ^X` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM {oj ${E} e LEFT OUTER JOIN ${S} s ON s.IEN = e.LOCATION}` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN = :ien` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN = ?` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E} WHERE MODEL [ 'X'` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN ! 1` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN = 1 \\ 2` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E} -- caf\u00E9` },
+  { kind: "charset", allowed: false, sql: `SELECT IEN FROM ${E}\u000BWHERE IEN = 1` },
+  { kind: "charset", allowed: true, sql: `SELECT IEN FROM ${E} WHERE USE_STATUS != '4'` },
+  { kind: "charset", allowed: true, sql: `SELECT MFGR__EQUIPMENT_NAME || ' ' || MODEL FROM ${E}` },
+  { kind: "charset", allowed: true, sql: `SELECT IEN FROM ${E} WHERE MFGR__EQUIPMENT_NAME = 'caf\u00E9 \u2014 \uFF26\uFF32\uFF2F\uFF2D @#^?'` },
+  { kind: "charset", allowed: true, sql: `SELECT IEN\r\nFROM ${E}\r\nWHERE IEN <= 10 AND IEN >= 1 AND IEN <> 5 AND IEN * 2 / 2 + 1 - 1 > 0` },
   // CTEs
   { kind: "cte", allowed: false, sql: `WITH x AS (SELECT 1 FROM ${E}) SELECT * FROM x` },
   { kind: "cte", allowed: false, sql: `WITH x AS (SELECT IEN FROM ${E}) SELECT IEN FROM ${E}` },
 ];
 
-module.exports = { PKG, WEB_APP, CREDENTIALS, CONFIG_KEYS, TOKEN_EXPIRED, GUARD_CASES, aiClasses, agingSqlTemplate, fillFiscalYear };
+module.exports = { PKG, WEB_APP, CREDENTIALS, CONFIG_KEYS, TOKEN_EXPIRED, GUARD_CASES, CHARSET, aiClasses, agingSqlTemplate, fillFiscalYear };
