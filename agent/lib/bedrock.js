@@ -5,8 +5,10 @@
 
 const { TOOL_SPECS, runTool } = require("./tools");
 
-const REGION = process.env.AWS_DEFAULT_REGION || "us-east-1";
-const MODEL = process.env.BEDROCK_MODEL_ID || "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+const DEFAULT_REGION = "us-east-1";
+const DEFAULT_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+const REGION = process.env.AWS_DEFAULT_REGION || DEFAULT_REGION;
+const MODEL = process.env.BEDROCK_MODEL_ID || DEFAULT_MODEL_ID;
 
 async function converse({ system, messages, tools }) {
   const token = process.env.AWS_BEARER_TOKEN_BEDROCK;
@@ -60,4 +62,4 @@ async function runAgent(userText, history, ctx) {
   return { reply: "(stopped: too many tool iterations)", toolTrace };
 }
 
-module.exports = { converse, runAgent, REGION, MODEL };
+module.exports = { converse, runAgent, REGION, MODEL, DEFAULT_REGION, DEFAULT_MODEL_ID };

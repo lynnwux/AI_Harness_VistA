@@ -184,6 +184,27 @@ test("the production build refuses an orchestrator spec that is not complete, an
   } finally { t.srv.close(); }
 });
 
+test("POST /api/build/ai on an unconfigured spec returns 409 with missing items", async () => {
+  const t = await setup();
+  try {
+    const r = await fetch(t.base + "/api/build/ai", { method: "POST" });
+    assert.equal(r.status, 409);
+    const body = await r.json();
+    assert.equal(body.started, false);
+    assert.ok(Array.isArray(body.missing) && body.missing.length > 0);
+  } finally { t.srv.close(); }
+});
+
+test("POST /ai/chat with no IRIS_AI_HUB_URL returns 502 naming the setting", async () => {
+  const t = await setup();
+  try {
+    const r = await fetch(t.base + "/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "hi" }) });
+    assert.equal(r.status, 502);
+    const body = await r.json();
+    assert.match(body.error, /IRIS_AI_HUB_URL/);
+  } finally { t.srv.close(); }
+});
+
 test("when the orchestrator is verified, the system prompt guides the AI layer and drops the no-AI ban", async () => {
   // Minimal decisions: all OQs deferred with policy text, mandatory SIDE.Bulletin has recipients.
   const minDec = {

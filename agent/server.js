@@ -147,6 +147,8 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   registerVistaRoutes(app);
   registerBuildRoutes(app, regenerate, serially);
   registerProductionRoutes(app, regenerate, serially, () => state.specs);
+  registerAiRoutes(app, regenerate, serially, () => state.specs);
+  registerAiProxyRoutes(app);
   app.use(express.static(ROOT));
 
   regenerate();
@@ -345,6 +347,67 @@ function registerProductionRoutes(app, regenerate, serially, specs) {
   app.get("/api/build/production/status", (_req, res) => {
     try { res.json(JSON.parse(fs.readFileSync(PRODUCTION_STATUS, "utf8"))); }
     catch (e) { res.json({ state: "idle", step: "", log: [] }); }
+  });
+}
+
+const { STATUS_FILE: AI_STATUS_FILE } = require("./ai-runner");
+let aiProc = null;
+function registerAiRoutes(app, regenerate, serially, specs) {
+  app.post("/api/build/ai", (_req, res) => serially(() => {
+    if (aiProc) return res.json({ started: false, running: true, note: "an AI build is already running" });
+    const g = regenerate();
+    if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
+    const a = specs() && specs().ai;
+    if (!a || !a.complete) return res.status(409).json({ started: false, error: "the AI spec is not complete — finish its missing items in the Decide chat first", missing: (a && a.missing || []).map(m => m.what) });
+    fs.writeFileSync(AI_STATUS_FILE, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], error: null, startedAt: new Date().toISOString() }, null, 2));
+    aiProc = spawn(process.execPath, [path.join(__dirname, "ai-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
+    aiProc.on("exit", code => {
+      aiProc = null;
+      try {
+        const s = JSON.parse(fs.readFileSync(AI_STATUS_FILE, "utf8"));
+        if (s.state !== "done" && s.state !== "error") {
+          s.state = "error"; s.error = "the AI build exited unexpectedly (code " + code + ")";
+          (s.log = s.log || []).push("✗ " + s.error);
+          fs.writeFileSync(AI_STATUS_FILE, JSON.stringify(s, null, 2));
+        }
+      } catch (e) { /* no status file — nothing to reconcile */ }
+      serially(() => regenerate());   // implemented.json may now say built + verified
+    });
+    res.json({ started: true, statusUrl: "/api/build/ai/status" });
+  }));
+  app.get("/api/build/ai/status", (_req, res) => {
+    try { res.json(JSON.parse(fs.readFileSync(AI_STATUS_FILE, "utf8"))); }
+    catch (e) { res.json({ state: "idle", step: "", log: [] }); }
+  });
+}
+
+function registerAiProxyRoutes(app) {
+  // Proxy POST /ai/chat and POST /ai/quick/:id → the AI hub's /equipmentai REST front door.
+  // IRIS basic auth comes from the environment (same credentials as the build).
+  // On a missing setting → 502 naming the setting; on a network error → 502 with the message.
+  const HUB_URL  = (process.env.IRIS_AI_HUB_URL || "").replace(/\/+$/, "");
+  const HUB_AUTH = process.env.IRIS_AI_HUB_USER
+    ? "Basic " + Buffer.from(process.env.IRIS_AI_HUB_USER + ":" + (process.env.IRIS_AI_HUB_PASSWORD || "")).toString("base64")
+    : "";
+
+  function aiHub(p) {
+    if (!HUB_URL)  throw new Error("IRIS_AI_HUB_URL is not configured — add it to agent/.env");
+    if (!HUB_AUTH) throw new Error("IRIS_AI_HUB_USER is not configured — add it to agent/.env");
+    return HUB_URL + "/equipmentai" + p;
+  }
+
+  app.post("/ai/chat", async (req, res) => {
+    try {
+      const r = await fetch(aiHub("/chat"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: HUB_AUTH }, body: JSON.stringify(req.body || {}) });
+      res.status(r.status).json(await r.json());
+    } catch (e) { res.status(502).json({ error: String(e.message || e) }); }
+  });
+
+  app.post("/ai/quick/:id", async (req, res) => {
+    try {
+      const r = await fetch(aiHub("/quick/" + encodeURIComponent(req.params.id)), { method: "POST", headers: { "Content-Type": "application/json", Authorization: HUB_AUTH }, body: JSON.stringify(req.body || {}) });
+      res.status(r.status).json(await r.json());
+    } catch (e) { res.status(502).json({ error: String(e.message || e) }); }
   });
 }
 

@@ -7,6 +7,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { DEFAULT_PATHS, loadInputs, inputHashes } = require("./lib/specs");
 const { productionClasses, PKG, WEB_APP, BULLETIN } = require("./lib/production");
+const { serverEntry, docPath } = require("./lib/iris-deploy");
 
 const SERVER = "iris-ai-hub";
 const STATUS_FILE = path.join(__dirname, "production-status.json");
@@ -26,13 +27,7 @@ function readSpecs(paths = DEFAULT_PATHS) {
   return { orchestrator, api };
 }
 
-function serverEntry(url) {
-  if (!url) throw new Error("IRIS_AI_HUB_URL is not set — add it to agent/.env (see agent/.env.example)");
-  const u = new URL(url);
-  const scheme = u.protocol.replace(":", "");
-  const port = Number(u.port) || (scheme === "https" ? 443 : 80);
-  return { default: SERVER, "intersystems.servers": { [SERVER]: { webServer: { scheme, host: u.hostname, port, pathPrefix: u.pathname.replace(/\/+$/, "") } } } };
-}
+// serverEntry is imported from ./lib/iris-deploy
 
 // A capitalized NX test item, keyed by the form's own keys, so the bulletin's |7| branch is exercised.
 // Every text value says TEST and every date is 2000-01-01, so it cannot pass for real equipment. Lookup fields
@@ -95,8 +90,7 @@ function findDelivered(messages, { subject, recipients, since }) {
   }) || null;
 }
 
-// Atelier answers 409 when a PUT would overwrite an existing class; the generated classes are meant to replace it.
-const docPath = (namespace, name) => `/v2/${namespace}/doc/${name}?ignoreConflict=1`;
+// docPath is imported from ./lib/iris-deploy
 
 // The Management Portal page that shows the production, under the namespace's default web app.
 function portalUrl(base, app) {
