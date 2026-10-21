@@ -10,6 +10,30 @@
 const fs   = require("fs");
 const path = require("path");
 
+// ─── Personal data rule ───────────────────────────────────────────────────────
+// The general SQL path may read only tables without personal data. A table is judged by its columns, not
+// by its file name: any column holding a social security or tax id, a home address or phone, a birth date,
+// or pay (wage, salary, hourly rate), or a phone or address that belongs to a person, keeps the whole table
+// off the allow-list. 6914's own *_NAME columns still give people's names where a question needs them.
+const PERSONAL_NAMES = [
+  /(^|_)SSN|SSN(_|$)/,                         // social security number (SSN, TAX_IDSSN, SSNTAX_ID_INDICATOR)
+  /TAX_?ID/,                                   // tax id
+  /(^|_)HOME(_|$)/,                            // home address / phone
+  /(^|_)DOB(_|$)|DATE_OF_BIRTH|BIRTH_?DATE/,   // birth date
+  /WAGE|SALAR|HOURLY/,                         // pay
+];
+const CONTACT = /PHONE|TELE|ADDRESS|STREET|ZIP|CITY/;
+const A_PERSON = /\b(EMPLOYEE'?S?|PERSON|PERSONAL|OFFICIAL|RESIDENCE|HOME|INDIVIDUAL)\b/i;
+
+/** The personal-data columns of a table (entries with column, ddName, meaning). */
+function personalColumns(columns) {
+  return (columns || []).filter(c => {
+    const col = String(c.column || "").toUpperCase();
+    if (PERSONAL_NAMES.some(re => re.test(col))) return true;
+    return CONTACT.test(col) && A_PERSON.test([col.replace(/_/g, " "), c.ddName || "", c.meaning || ""].join(" "));
+  });
+}
+
 // ─── Pure builder ─────────────────────────────────────────────────────────────
 
 /**
@@ -21,10 +45,12 @@ const path = require("path");
  *   Raw INFORMATION_SCHEMA.COLUMNS rows for the tables to include.
  * @param {object} params.dd
  *   Keyed by SQL table name (e.g. "EQUIPMENT_INV_6914"):
- *   { file: string, allowList?: boolean,
+ *   { file: string, allowList?: boolean, reason?: string, keep?: boolean,
  *     fields: { [COLUMN_NAME]: { fieldNum, ddName, type,
  *                                codes?: [[code,label]], pointsTo?, description } } }
- * @returns {object} inventory-fields shape
+ * @returns {object} inventory-fields shape. A table with personal data (personalColumns) is never
+ *   allow-listed and is left out of `tables` and `evidence` unless its dd entry says keep (a quick-access
+ *   template reads it); `excluded` records why each table is off the allow-list.
  */
 function inventoryFields({ columns, dd }) {
   // Group columns by table, preserving insertion order.
@@ -43,16 +69,14 @@ function inventoryFields({ columns, dd }) {
   const tables    = {};
   const evidence  = {};
   const allowList = [];
+  const excluded  = {};
 
   for (const [tableName, cols] of byTable) {
     const meta        = dd[tableName] || {};
     const file        = meta.file   || "";
     const fields      = meta.fields || {};
-    const inAllowList = meta.allowList !== false;
-
-    if (inAllowList) allowList.push("VISTA." + tableName);
-
     const columnEntries = [];
+    const tableEvidence = {};
     for (const col of cols) {
       const colName = col.COLUMN_NAME;
       const fm      = fields[colName];   // may be undefined for computed cols
@@ -94,11 +118,21 @@ function inventoryFields({ columns, dd }) {
           lines.push("Codes: " + fm.codes.map(([c, l]) => c + "=" + l).join(", "));
         }
         if (fm.pointsTo) lines.push("Points to FileMan file " + fm.pointsTo);
-        if (lines.length) evidence[tableName + "." + colName] = lines;
+        if (lines.length) tableEvidence[tableName + "." + colName] = lines;
       }
     }
 
+    const personal = personalColumns(columnEntries).map(c => c.column);
+    const reasons  = [];
+    if (meta.allowList === false) reasons.push(meta.reason || "not allow-listed");
+    if (personal.length) reasons.push("personal data: " + personal.join(", "));
+    if (reasons.length) excluded["VISTA." + tableName] = reasons.join("; ");
+    else allowList.push("VISTA." + tableName);
+
+    // A personal-data table is not described at all unless a quick-access template needs it.
+    if (personal.length && !meta.keep) continue;
     tables[tableName] = { file, columns: columnEntries };
+    Object.assign(evidence, tableEvidence);
   }
 
   return {
@@ -106,11 +140,12 @@ function inventoryFields({ columns, dd }) {
     source:       "VADEMO VISTA-DIEGO",
     tables,
     allowList:    allowList.sort(),
+    excluded:     Object.fromEntries(Object.keys(excluded).sort().map(k => [k, excluded[k]])),
     evidence,
   };
 }
 
-module.exports = { inventoryFields };
+module.exports = { inventoryFields, personalColumns };
 
 // ─── Discovery main ───────────────────────────────────────────────────────────
 if (require.main === module) {
@@ -212,14 +247,14 @@ async function main() {
   // Full relevant set: 6914 family + external pointer targets + 6920
   const relevantTables = new Set([...tables6914, ...ptrTables, "WORK_ORDER_6920"]);
 
-  // Tables excluded from allowList (kept in `tables` for schema reference but
-  // the general SQL path must not query them):
-  //   WORK_ORDER_6920   — not an inventory file; included only for its equipment-
-  //                       pointer / status metadata needed by the AI layer.
-  //   NEW_PERSON200     — VistA's personnel file (personal data); 6914's own
-  //                       *_NAME columns already surface people's names without
-  //                       requiring a direct query of this file.
-  const noAllowList = new Set(["WORK_ORDER_6920", "NEW_PERSON200"]);
+  // Tables kept off the allowList by name (kept in `tables` because a quick-access template reads them).
+  // Every other exclusion comes from the personal-data rule (personalColumns), applied to each table's columns.
+  const NOT_INVENTORY = {
+    WORK_ORDER_6920: "not an inventory file — read only by the JCAHO quick-access question's fixed query",
+  };
+  const ddMeta = tableName => NOT_INVENTORY[tableName]
+    ? { allowList: false, keep: true, reason: NOT_INVENTORY[tableName] }
+    : {};
 
   console.log("Relevant tables (" + relevantTables.size + "):",
     [...relevantTables].sort().join(", "));
@@ -347,7 +382,7 @@ async function main() {
     const className = tableToClass.get(tableName);
     if (!className) {
       console.warn("  No class found for:", tableName);
-      dd[tableName] = { file: "", allowList: !noAllowList.has(tableName), fields: {} };
+      dd[tableName] = { file: "", ...ddMeta(tableName), fields: {} };
       continue;
     }
 
@@ -355,7 +390,7 @@ async function main() {
     const lines   = await getClassDoc(className);
     if (!lines) {
       console.warn("  Cannot read class doc for:", className);
-      dd[tableName] = { file: fileNum, allowList: !noAllowList.has(tableName), fields: {} };
+      dd[tableName] = { file: fileNum, ...ddMeta(tableName), fields: {} };
       continue;
     }
 
@@ -363,11 +398,7 @@ async function main() {
     console.log("  " + className + " → " + tableName +
       " (file " + fileNum + ", " + Object.keys(fields).length + " fields)");
 
-    dd[tableName] = {
-      file:      fileNum,
-      allowList: !noAllowList.has(tableName),
-      fields,
-    };
+    dd[tableName] = { file: fileNum, ...ddMeta(tableName), fields };
   }
 
   // ── Step 5: Build and write the JSON ─────────────────────────────────────────
@@ -382,5 +413,7 @@ async function main() {
   console.log("  tables:    ", Object.keys(result.tables).length);
   console.log("  allowList: ", result.allowList.length);
   console.log("  evidence:  ", Object.keys(result.evidence).length);
+  console.log("  excluded:  ");
+  for (const [t, why] of Object.entries(result.excluded)) console.log("    " + t + " — " + why);
   console.log("Done. No DDProbe was needed — all field metadata came from compiled class docs.");
 }

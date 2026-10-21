@@ -184,14 +184,15 @@ test("the production build refuses an orchestrator spec that is not complete, an
   } finally { t.srv.close(); }
 });
 
-test("POST /api/build/ai on an unconfigured spec returns 409 with missing items", async () => {
+test("POST /api/build/ai on a default record (orchestrator still being decided) returns 409 and starts nothing", async () => {
   const t = await setup();
   try {
     const r = await fetch(t.base + "/api/build/ai", { method: "POST" });
     assert.equal(r.status, 409);
     const body = await r.json();
     assert.equal(body.started, false);
-    assert.ok(Array.isArray(body.missing) && body.missing.length > 0);
+    assert.match(body.error, /orchestrator/);
+    assert.equal(body.stage.layer, "orchestrator");
   } finally { t.srv.close(); }
 });
 
@@ -237,4 +238,130 @@ test("when the orchestrator is verified, the system prompt guides the AI layer a
     assert.match(p, /setQuickQuestion/);
     assert.doesNotMatch(p, /Never start or offer the AI layer/);
   } finally { t.srv.close(); }
+});
+
+// ── Final review M7 / M8 / trivial ─────────────────────────────────────────────
+const http = require("http");
+const { EventEmitter } = require("events");
+const INVENTORY = path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json");
+const MIN_DEC = {
+  dec: { "OQ.WorkOrderPolicy": "Defer", "OQ.PMEnrollmentPolicy": "Defer", "OQ.FAConfirmation": "Defer",
+         "SIDE.WorkOrder": "Business Operation", "SIDE.PMSchedule": "Business Operation", "SIDE.FinancialAsset": "Business Operation", "SIDE.Bulletin": "Event" },
+  oqPolicy: { "OQ.WorkOrderPolicy": "Deferred — will decide later", "OQ.PMEnrollmentPolicy": "Deferred — will decide later", "OQ.FAConfirmation": "Deferred — will decide later" },
+  scope: {}, targets: { "SIDE.Bulletin": { recipients: "equipment@va.gov" } }, ruleBindings: {},
+};
+const ALL_KEPT = {
+  "AIQ.AgingOutFY":             { keep: true, wording: "Ages out?",   params: { fiscalYear: 2031, capitalizedMeans: "INVESTMENT_CATEGORY = 1", useStatuses: ["ALL"] } },
+  "AIQ.HighValueNoContract":    { keep: true, wording: "High value?", params: { threshold: 50000, valueColumn: "TOTAL_ASSET_VALUE", useStatuses: ["ALL"] } },
+  "AIQ.JCAHOPendingInspection": { keep: true, wording: "JCAHO?",      params: { workOrderStatusColumn: "STATUS", workOrderStatuses: ["ALL"], useStatuses: ["ALL"] } },
+  "AIQ.CapitalPlanningTotals":  { keep: true, wording: "Totals?",     params: { useStatuses: ["ALL"], valueColumns: ["TOTAL_ASSET_VALUE"], groupBy: "none" } },
+};
+
+// A server whose builds are fake processes: nothing is spawned, and the status files are temp files.
+async function buildSetup({ orchestratorVerified = true, aiQuestions = undefined } = {}) {
+  const procs = [];
+  const spawnImpl = (_cmd, args) => { const p = new EventEmitter(); p.args = args; p.pid = 0; p.unref = () => {}; procs.push(p); return p; };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-b-"));
+  const paths = { graph: path.join(dir, "graph.json"), decisions: path.join(dir, "decisions.json"), implemented: path.join(dir, "implemented.json"), inventory: INVENTORY, specsDir: path.join(dir, "specs") };
+  fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), paths.graph);
+  fs.writeFileSync(paths.decisions, JSON.stringify(aiQuestions ? { ...MIN_DEC, aiQuestions } : MIN_DEC));
+  fs.writeFileSync(paths.implemented, JSON.stringify({ api: [{ id: "read:lookup", endpoint: "GET /lookup/{file}" }], orchestrator: { built: orchestratorVerified, verified: orchestratorVerified } }));
+  const statusFiles = { production: path.join(dir, "production-status.json"), ai: path.join(dir, "ai-status.json") };
+  const made = createApp({ paths, runAgentImpl: async () => ({ reply: "ok", toolTrace: [] }), spawnImpl, statusFiles });
+  const t = await new Promise(resolve => {
+    const srv = made.app.listen(0, "127.0.0.1", () => resolve({ ...made, srv, paths, dir, base: `http://127.0.0.1:${srv.address().port}` }));
+  });
+  const done = () => { for (const p of procs) p.emit("exit", 0); t.srv.close(); };
+  return { ...t, procs, statusFiles, done };
+}
+const post = (t, p) => fetch(t.base + p, { method: "POST" });
+
+test("POST /api/build/ai is refused (409) until the orchestrator is built and verified — the spec's offer rule", async () => {
+  const t = await buildSetup({ orchestratorVerified: false, aiQuestions: ALL_KEPT });
+  try {
+    const r = await post(t, "/api/build/ai");
+    assert.equal(r.status, 409);
+    const body = await r.json();
+    assert.equal(body.started, false);
+    assert.match(body.error, /orchestrator/i);
+    assert.equal(t.procs.length, 0, "nothing was started");
+  } finally { t.done(); }
+});
+
+test("POST /api/build/ai on an incomplete AI spec (orchestrator verified) returns 409 with the missing items", async () => {
+  const t = await buildSetup();
+  try {
+    const r = await post(t, "/api/build/ai");
+    assert.equal(r.status, 409);
+    const body = await r.json();
+    assert.ok(Array.isArray(body.missing) && body.missing.length > 0);
+    assert.equal(t.procs.length, 0);
+  } finally { t.done(); }
+});
+
+test("the AI build and the production build never run at the same time", async () => {
+  const t = await buildSetup({ aiQuestions: ALL_KEPT });
+  try {
+    const p = await (await post(t, "/api/build/production")).json();
+    assert.equal(p.started, true, JSON.stringify(p));
+    const r = await post(t, "/api/build/ai");
+    assert.equal(r.status, 409);
+    assert.match((await r.json()).error, /production build is running/);
+    t.procs[0].emit("exit", 0);                       // the production build ends
+    await new Promise(res => setTimeout(res, 20));
+    const a = await (await post(t, "/api/build/ai")).json();
+    assert.equal(a.started, true, JSON.stringify(a));
+    assert.match(t.procs[1].args.join(" "), /ai-runner\.js/);
+    const r2 = await post(t, "/api/build/production");
+    assert.equal(r2.status, 409);
+    assert.match((await r2.json()).error, /AI build is running/);
+    assert.ok(fs.existsSync(t.statusFiles.ai) && fs.existsSync(t.statusFiles.production), "the status files are the temp ones");
+  } finally { t.done(); }
+});
+
+async function withHub(handler, fn) {
+  const hub = http.createServer(handler);
+  await new Promise(r => hub.listen(0, "127.0.0.1", r));
+  const keys = ["IRIS_AI_HUB_URL", "IRIS_AI_HUB_USER", "IRIS_AI_HUB_PASSWORD"];
+  const saved = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+  Object.assign(process.env, { IRIS_AI_HUB_URL: `http://127.0.0.1:${hub.address().port}`, IRIS_AI_HUB_USER: "u", IRIS_AI_HUB_PASSWORD: "fake-pass" });
+  try { const t = await setup(); try { await fn(t); } finally { t.srv.close(); } }
+  finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } hub.close(); }
+}
+
+test("/ai/* proxy: an IRIS answer that is not JSON is a 502 that says so, never 'Unexpected token <'", async () => {
+  await withHub((_req, res) => { res.writeHead(401, { "Content-Type": "text/html" }); res.end("<html><body>Unauthorized</body></html>"); }, async t => {
+    for (const p of ["/ai/chat", "/ai/quick/AgingOutFY"]) {
+      const r = await fetch(t.base + p, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      assert.equal(r.status, 502, p);
+      const body = await r.json();
+      assert.match(body.error, /IRIS answered HTTP 401 \(not JSON\) — has the AI layer been built\?/, p);
+      assert.doesNotMatch(body.error, /Unexpected token/);
+    }
+  });
+});
+
+test("/ai/* proxy passes a JSON answer through with its status", async () => {
+  await withHub((_req, res) => { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ reply: "295", rows: [] })); }, async t => {
+    const r = await fetch(t.base + "/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "hi" }) });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { reply: "295", rows: [] });
+  });
+});
+
+test("the server reads the inventory from paths.inventory and /api/state carries the AI questions with their codes", async () => {
+  const t = await buildSetup();
+  try {
+    const s = await (await fetch(t.base + "/api/state")).json();
+    const q = s.state.ai.questions.find(x => x.id === "AIQ.AgingOutFY");
+    const use = q.params.find(p => p.key === "useStatuses");
+    assert.ok(use.codes.length > 0, "codes come from the inventory");
+    assert.equal(s.state.stage.layer, "ai");
+  } finally { t.done(); }
+  // a missing inventory file at paths.inventory means no inventory — never a fixed path
+  const t2 = await setup(null, paths => { paths.inventory = path.join(path.dirname(paths.decisions), "no-such-inventory.json"); });
+  try {
+    const sp = await (await fetch(t2.base + "/api/specs")).json();
+    assert.ok(sp.layers.ai.missing.some(m => /inventory-fields\.json not loaded/.test(m.what)), "the AI spec reports the missing discovery file");
+  } finally { t2.srv.close(); }
 });

@@ -870,3 +870,146 @@ test("guard: all main() tests left agent/ai-status.json and agent/implemented.js
   assert.deepEqual(newEntries, [],
     "no new entries must appear in agent/_production/ after tests — main() must use the injected _productionDir path");
 });
+
+// ── Final review I6: one helper picks the VADEMO login as a pair ───────────────
+const { vademoLogin } = require("../ai-runner");
+test("vademoLogin: the read-only pair only when VADEMO_READ_USER is set, else the main pair — never a mix", () => {
+  const main = { VADEMO_USER: "main", VADEMO_PASSWORD: "mainpass" };
+  assert.deepEqual(vademoLogin({ ...main, VADEMO_READ_USER: "ro", VADEMO_READ_PASSWORD: "ropass" }), { user: "ro", password: "ropass", readOnly: true });
+  assert.deepEqual(vademoLogin(main), { user: "main", password: "mainpass", readOnly: false });
+  // a read password without a read user is ignored; an empty read password never replaces the main one
+  assert.deepEqual(vademoLogin({ ...main, VADEMO_READ_PASSWORD: "ropass" }), { user: "main", password: "mainpass", readOnly: false });
+  assert.deepEqual(vademoLogin({ ...main, VADEMO_READ_PASSWORD: "" }), { user: "main", password: "mainpass", readOnly: false });
+  assert.deepEqual(vademoLogin({ ...main, VADEMO_READ_USER: "", VADEMO_READ_PASSWORD: "" }), { user: "main", password: "mainpass", readOnly: false });
+  assert.deepEqual(vademoLogin({ ...main, VADEMO_READ_USER: "   " }), { user: "main", password: "mainpass", readOnly: false });
+  // a read user without its password is an error, never (read user, main password)
+  assert.throws(() => vademoLogin({ ...main, VADEMO_READ_USER: "ro" }), /VADEMO_READ_USER is set but VADEMO_READ_PASSWORD is not/);
+  assert.throws(() => vademoLogin({ ...main, VADEMO_READ_USER: "ro", VADEMO_READ_PASSWORD: "" }), /VADEMO_READ_PASSWORD/);
+  assert.throws(() => vademoLogin({}), /VADEMO_USER/);
+});
+
+test("aiSettingsScript stores the pair vademoLogin picks, and refuses a read user without its password", () => {
+  const base = { VADEMO_URL: "http://h:80", VADEMO_USER: "mainuser", VADEMO_PASSWORD: "mainpass", AWS_BEARER_TOKEN_BEDROCK: "tok" };
+  assert.throws(() => aiSettingsScript({ ...base, VADEMO_READ_USER: "ro" }), /VADEMO_READ_PASSWORD/);
+  const s = aiSettingsScript({ ...base, VADEMO_READ_PASSWORD: "" });
+  const cred = s.split("\n").find(l => l.includes("EquipmentAIVademo"));
+  assert.match(cred, /"mainuser","mainpass"/);
+});
+
+// ── Final review M5: no Bedrock token stops the build at the start ─────────────
+test("aiSettingsScript refuses an empty Bedrock token, naming the setting", () => {
+  const base = { VADEMO_URL: "http://h:80", VADEMO_USER: "u", VADEMO_PASSWORD: "p" };
+  assert.throws(() => aiSettingsScript(base), /AWS_BEARER_TOKEN_BEDROCK/);
+  assert.throws(() => aiSettingsScript({ ...base, AWS_BEARER_TOKEN_BEDROCK: "  " }), /AWS_BEARER_TOKEN_BEDROCK/);
+});
+
+test("main() with no AWS_BEARER_TOKEN_BEDROCK fails before pushing anything, naming the setting", async () => {
+  const pathsObj = setupCompleteAiSpecs();
+  const { tmpDir, scriptsDir, deps, envKeys, envVals } = makeVerifyMainDeps(pathsObj.paths);
+  const savedEnv = Object.fromEntries(envKeys.map(k => [k, process.env[k]]));
+  const savedExitCode = process.exitCode;
+  let pushed = 0;
+  Object.assign(process.env, envVals);
+  delete process.env.AWS_BEARER_TOKEN_BEDROCK;
+  try {
+    await main(pathsObj.paths, { ...deps, _irisScript: () => () => { pushed++; return "ok"; } });
+    const status = JSON.parse(fs.readFileSync(deps._statusFile, "utf8"));
+    assert.equal(status.state, "error");
+    assert.match(status.error, /AWS_BEARER_TOKEN_BEDROCK is not set/);
+    assert.equal(pushed, 0, "nothing was pushed to IRIS");
+  } finally {
+    process.exitCode = savedExitCode;
+    for (const [k, v] of Object.entries(savedEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    fs.rmSync(tmpDir, { recursive: true, force: true }); fs.rmSync(scriptsDir, { recursive: true, force: true }); fs.rmSync(pathsObj.dir, { recursive: true, force: true });
+  }
+});
+
+// ── Final review M1 + trivial: secrets reach the session helper; the chat build's output reaches the log ──
+test("main() hands irisSession the secrets to redact, and the chat-app build its log", async () => {
+  const pathsObj = setupCompleteAiSpecs();
+  let sessionOpts = null;
+  const { status } = await runMainWith(pathsObj, {
+    _irisSession: (_c, _s, opts) => { sessionOpts = opts; return "WEBAPP:exists\nCONFIG:set\nVADEMO:stored\nBEDROCK:stored\n"; },
+    _buildChatApp: async (_q, _out, log) => { log("$ npx -y @angular/cli@20 new eqchat"); log("npm ERR! code E404 fake-bedrock-tok-456"); throw new Error("npx exited 1"); },
+  });
+  assert.ok(sessionOpts && Array.isArray(sessionOpts.secrets), "irisSession receives { secrets }");
+  for (const s of ["fake-vademo-pass-123", "fake-bedrock-tok-456", "fake-hub-pass-789"]) assert.ok(sessionOpts.secrets.includes(s), s);
+  assert.equal(status.state, "error");
+  const log = status.log.join("\n");
+  assert.match(log, /npm ERR! code E404/, "the scaffold's output shows in the build log");
+  assert.ok(!log.includes("fake-bedrock-tok-456"), "and is redacted");
+});
+
+// runMain with extra dependency overrides (used by the final-review tests above).
+async function runMainWith(pathsObj, overrides) {
+  const { paths, dir: specsDir } = pathsObj;
+  const { tmpDir, scriptsDir, deps, envKeys, envVals } = makeVerifyMainDeps(paths);
+  const savedEnv = Object.fromEntries(envKeys.map(k => [k, process.env[k]]));
+  const savedExitCode = process.exitCode;
+  Object.assign(process.env, envVals);
+  try {
+    await main(paths, { ...deps, ...overrides });
+    const status = fs.existsSync(deps._statusFile) ? JSON.parse(fs.readFileSync(deps._statusFile, "utf8")) : null;
+    const implContent = fs.existsSync(paths.implemented) ? fs.readFileSync(paths.implemented, "utf8") : null;
+    return { status, implContent };
+  } finally {
+    process.exitCode = savedExitCode;
+    for (const [k, v] of Object.entries(savedEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    fs.rmSync(tmpDir, { recursive: true, force: true }); fs.rmSync(scriptsDir, { recursive: true, force: true }); fs.rmSync(specsDir, { recursive: true, force: true });
+  }
+}
+
+// ── Final review M2: the finish table shows each question's wording and readable answers ──
+test("judgeAi items: the question's wording, the single value of a one-row result, and correctly pluralized row counts", () => {
+  const totals = [{ TOTAL_COUNT: "295", SUM_TOTAL_ASSET_VALUE: "1234567.5", CAPITALIZED_COUNT: "40" }];
+  const one = [{ IEN: "7", MFGR__EQUIPMENT_NAME: "BED, ELECTRIC" }];
+  const twelve = Array.from({ length: 12 }, (_, i) => ({ IEN: String(i) }));
+  const r = judgeAi({
+    quick: [
+      { id: "AIQ.CapitalPlanningTotals", wording: "What are the capital-planning totals?", chatbot: { rows: totals, columns: Object.keys(totals[0]), rowCount: 1, truncated: false }, direct: totals },
+      { id: "AIQ.AgingOutFY", wording: "Which items age out in FY2030?", chatbot: { rows: one, columns: ["IEN", "MFGR__EQUIPMENT_NAME"], rowCount: 1, truncated: false }, direct: one },
+      { id: "AIQ.HighValueNoContract", wording: "High value, no contract?", chatbot: { rows: twelve, columns: ["IEN"], rowCount: 12, truncated: false }, direct: twelve },
+      { id: "AIQ.JCAHOPendingInspection", chatbot: { rows: [], columns: [], rowCount: 0, truncated: false }, direct: [] },
+    ],
+    count: { result: { rows: [{ n: 295 }], columns: ["n"], rowCount: 1 }, reply: "We have 295 pieces of equipment.", reference: 295 },
+    guard: [{ sql: "SELECT 1", allowed: true, got: true }],
+  });
+  assert.ok(r.ok, r.problems.join("; "));
+  const [t, a, h, j, c, g] = r.items;
+  assert.equal(t.question, "What are the capital-planning totals?");
+  assert.equal(t.chatbot, "TOTAL_COUNT 295 · SUM_TOTAL_ASSET_VALUE 1234567.5 · CAPITALIZED_COUNT 40");
+  assert.equal(t.vista, t.chatbot);
+  assert.equal(a.question, "Which items age out in FY2030?");
+  assert.equal(a.chatbot, "1 row: IEN 7 · MFGR__EQUIPMENT_NAME BED, ELECTRIC");
+  assert.equal(h.chatbot, "12 rows");
+  assert.equal(h.vista, "12 rows");
+  assert.equal(j.question, "AIQ.JCAHOPendingInspection", "falls back to the id when there is no wording");
+  assert.equal(j.chatbot, "0 rows");
+  assert.equal(c.question, "How many pieces of equipment do we have?");
+  assert.equal(c.vista, "295");
+  assert.match(g.question, /guard/i);
+  for (const i of r.items) assert.doesNotMatch(`${i.chatbot} ${i.vista}`, /\b1 rows\b/);
+});
+
+test("judgeAi items: a single-value result shows the value; a truncated one says only the first rows were shown", () => {
+  const capped = Array.from({ length: 3 }, (_, i) => ({ IEN: String(i) }));
+  const r = judgeAi({
+    quick: [
+      { id: "AIQ.A", wording: "Count?", chatbot: { rows: [{ N: "42" }], columns: ["N"], rowCount: 1, truncated: false }, direct: [{ N: "42" }] },
+      { id: "AIQ.B", wording: "List?", chatbot: { rows: capped, columns: ["IEN"], rowCount: 3, truncated: true }, direct: [...capped, { IEN: "9" }] },
+    ],
+    rowCap: 3,
+  });
+  assert.ok(r.ok, r.problems.join("; "));
+  assert.equal(r.items[0].chatbot, "42");
+  assert.equal(r.items[1].chatbot, "first 3 rows (truncated)");
+  assert.equal(r.items[1].vista, "4 rows");
+});
+
+test("main() passes each question's wording to the finish table", async () => {
+  const { status } = await runMainWith(setupCompleteAiSpecs(), {});
+  assert.equal(status.state, "done", status.error);
+  const qs = status.verification.map(v => v.question);
+  for (const w of ["Ages out?", "High value?", "JCAHO?", "Totals?", "How many pieces of equipment do we have?"]) assert.ok(qs.includes(w), w);
+  assert.ok(!qs.some(q => /^AIQ\./.test(q)), "no template ids");
+});

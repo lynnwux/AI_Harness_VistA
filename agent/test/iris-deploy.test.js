@@ -26,3 +26,25 @@ test("docPath appends ?ignoreConflict=1 for the interclaw PUT", () => {
   assert.equal(docPath("INTEROP", "EquipmentAI.Agent.cls"), "/v2/INTEROP/doc/EquipmentAI.Agent.cls?ignoreConflict=1");
   assert.equal(docPath("INTEROP", "EquipmentEntry.Production.cls"), "/v2/INTEROP/doc/EquipmentEntry.Production.cls?ignoreConflict=1");
 });
+
+// ── Final review M1: a secret straddling the cut never leaks its prefix ───────
+test("irisSession redacts before it cuts the output, so a long token across the 600-char cut leaves no prefix", () => {
+  const { irisSession } = require("../lib/iris-deploy");
+  const token = "BEDROCK-API-KEY-" + "abcdefghijklmnopqrstuvwxyz0123456789".repeat(8);   // ~300 chars
+  const echo = "x".repeat(580) + `set sc=##class(Ens.Config.Credentials).SetCredential("EquipmentAIBedrock","","${token}",1)\n`;
+  const fakeSpawn = () => ({ status: 1, stdout: echo, stderr: "" });
+  let msg = "";
+  try { irisSession("iris-ai-hub", "script", { secrets: [token], spawnSyncImpl: fakeSpawn }); } catch (e) { msg = e.message; }
+  assert.match(msg, /iris session failed \(exit 1\)/);
+  assert.ok(!msg.includes("BEDROCK-API-KEY"), "no prefix of the token survives: " + msg.slice(-80));
+  assert.ok(!msg.includes("abcdefghij"), "no part of the token survives");
+  // an error message never carries the echoed SetCredential line either
+  assert.doesNotMatch(msg, /SetCredential/);
+});
+
+test("irisScript redacts the IRIS password from a failed call's output", () => {
+  const { irisScript } = require("../lib/iris-deploy");
+  const pass = "iris-pass-" + "q".repeat(700);
+  const call = irisScript({ INTERCLAW_SCRIPTS: "x", IRIS_PASSWORD: pass }, "iris-ai-hub", "cfg.json", { spawnSyncImpl: () => ({ status: 2, stdout: "", stderr: "auth " + pass }) });
+  assert.throws(() => call("GET", "/v2/INTEROP/doc/X.cls"), e => !e.message.includes("iris-pass") && !e.message.includes("qqqq") && /\*\*\*/.test(e.message));
+});

@@ -1,8 +1,8 @@
 "use strict";
 // The AI-layer build: reads the AI spec, generates the EquipmentAI classes, pushes and compiles them into
-// iris-ai-hub, configures IRIS settings and credentials, and creates the /equipmentai web app.
+// iris-ai-hub, configures IRIS settings and credentials, creates the /equipmentai web app, builds the chat app,
+// verifies the chatbot against direct VADEMO queries and marks the layer built and verified in implemented.json.
 // Host and all secrets come only from the environment (agent/.env, git-ignored).
-// Task 7 will add the chat-app build step; Task 8 will add verification and mark the layer built+verified.
 
 const fs = require("fs");
 const os = require("os");
@@ -23,7 +23,8 @@ const CHAT_HREF    = "/prototype/chat/";
 
 // Default real chat-app build: scaffold → generate → compile → publish to outDir.
 // Uses a fresh temp workspace so it never writes under agent/_build or collides with build-runner.js.
-async function _defaultBuildChatApp(questions, outDir) {
+// log receives every command and output line, so a scaffold or compile failure shows its output in the status.
+async function _defaultBuildChatApp(questions, outDir, log) {
   const tmpWork = fs.mkdtempSync(path.join(os.tmpdir(), "eqchat-"));
   try {
     await buildAngularApp({
@@ -33,7 +34,7 @@ async function _defaultBuildChatApp(questions, outDir) {
       removeFiles: DEFAULT_COMPONENT_FILES,
       baseHref:    CHAT_HREF,
       outDir,
-      // no log — progress goes nowhere in the background runner
+      log,
     });
   } finally {
     try { fs.rmSync(tmpWork, { recursive: true, force: true }); } catch (_) {}
@@ -59,6 +60,27 @@ function readAiSpec(paths = DEFAULT_PATHS) {
   return { ai: aiSpec, inventory: inputs.inventory };
 }
 
+// The VADEMO login the AI layer uses, chosen as a pair: the read-only login when VADEMO_READ_USER is set
+// (then VADEMO_READ_PASSWORD is required), otherwise VADEMO_USER / VADEMO_PASSWORD. Never a mix of the two.
+function vademoLogin(env) {
+  const readUser = String(env.VADEMO_READ_USER || "").trim();
+  if (readUser) {
+    const readPass = env.VADEMO_READ_PASSWORD == null ? "" : String(env.VADEMO_READ_PASSWORD);
+    if (!readPass) throw new Error("VADEMO_READ_USER is set but VADEMO_READ_PASSWORD is not — set both in agent/.env, or remove VADEMO_READ_USER to use VADEMO_USER");
+    return { user: readUser, password: readPass, readOnly: true };
+  }
+  const user = String(env.VADEMO_USER || "").trim();
+  if (!user) throw new Error("VADEMO_READ_USER or VADEMO_USER is not set — add it to agent/.env");
+  return { user, password: String(env.VADEMO_PASSWORD || ""), readOnly: false };
+}
+
+// The Bedrock bearer token the chatbot uses; the build stops at the start when it is missing.
+function bedrockToken(env) {
+  const t = String(env.AWS_BEARER_TOKEN_BEDROCK || "").trim();
+  if (!t) throw new Error("AWS_BEARER_TOKEN_BEDROCK is not set — add the Bedrock bearer token to agent/.env, then press 🔨 Build AI again");
+  return t;
+}
+
 // Generate the ObjectScript session script that writes the AI-layer settings and stores the credentials.
 // Secrets (VADEMO password, Bedrock token) appear only inside SetCredential(…) calls — never on a command
 // line, a log line, a status file or an error message.
@@ -70,11 +92,8 @@ function aiSettingsScript(env) {
   const vademoPort   = u.port || (u.protocol === "https:" ? "443" : "80");
   const region = ((env.AWS_DEFAULT_REGION || DEFAULT_REGION) || "").trim() || DEFAULT_REGION;
 
-  // Use the read-only login when provided, else fall back to the main login.
-  const vuser = (env.VADEMO_READ_USER  || env.VADEMO_USER  || "").trim();
-  const vpass =  env.VADEMO_READ_PASSWORD != null ? String(env.VADEMO_READ_PASSWORD)
-               : String(env.VADEMO_PASSWORD || "");
-  const btoken = String(env.AWS_BEARER_TOKEN_BEDROCK || "");
+  const { user: vuser, password: vpass } = vademoLogin(env);
+  const btoken = bedrockToken(env);
 
   const ns       = "INTEROP";   // AI classes always live in INTEROP (global constraint)
   const dispatch = `${PKG}.REST.Dispatch`;
@@ -156,8 +175,28 @@ function countInReply(reply, n) {
   return false;
 }
 
+const COUNT_QUESTION = "How many pieces of equipment do we have?";
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const cell = v => String(v == null ? "" : v).trim();
+
+// A result as the finish table shows it: the value of a single-value result, the values of a one-row result
+// (totals), otherwise the row count — "first N rows (truncated)" when the chatbot's list was cut at the cap.
+function describeRows(rows, { truncated = false } = {}) {
+  if (!Array.isArray(rows)) return "no rows";
+  if (truncated) return `first ${plural(rows.length, "row")} (truncated)`;
+  if (rows.length === 1 && rows[0] && typeof rows[0] === "object") {
+    const entries = Object.entries(rows[0]);
+    if (entries.length === 1) return cell(entries[0][1]);
+    const values = entries.map(([k, v]) => `${k} ${cell(v)}`).join(" · ");
+    const totals = entries.every(([, v]) => cell(v) === "" || !isNaN(Number(cell(v))));   // a row of totals
+    const text = totals ? values : `1 row: ${values}`;
+    return text.length > 160 ? text.slice(0, 159) + "…" : text;
+  }
+  return plural(rows.length, "row");
+}
+
 // Evaluate all three verification axes. Returns { ok, problems, items }.
-// quick[]: { id, chatbot (full result obj with rows/rowCount/truncated/error?), direct (rows array) }
+// quick[]: { id, wording?, chatbot (full result obj with rows/rowCount/truncated/error?), direct (rows array) }
 // count:   { result (chatbot full result), reply (string), reference (number) } — null to skip
 // guard[]: { sql, allowed (bool), got (bool), error? (string) }
 // rowCap:  the row cap the AI build uses (default 200)
@@ -174,17 +213,18 @@ function judgeAi({ quick = [], count = null, guard = [], rowCap = 200 }) {
   const items = [];
 
   for (const q of quick) {
+    const asked = q.wording || q.id;
     // N3: any present, non-null error value (including "" and 0) is a real error.
     const chatHasError = q.chatbot != null && q.chatbot.error != null;
     if (chatHasError) {
       const chatErrMsg = String(q.chatbot.error || "(empty)").slice(0, 60);
       problems.push(`question ${q.id}: chatbot error — ${chatErrMsg}`);
-      items.push({ question: q.id, chatbot: `error: ${chatErrMsg}`, vista: `${(q.direct || []).length} rows`, ok: false });
+      items.push({ question: asked, chatbot: `error: ${chatErrMsg}`, vista: describeRows(q.direct || []), ok: false });
       continue;
     }
     if (!Array.isArray(q.chatbot && q.chatbot.rows)) {
       problems.push(`question ${q.id}: chatbot result has no rows array`);
-      items.push({ question: q.id, chatbot: "no rows array", vista: `${(q.direct || []).length} rows`, ok: false });
+      items.push({ question: asked, chatbot: "no rows array", vista: describeRows(q.direct || []), ok: false });
       continue;
     }
     const chatbotRows = q.chatbot.rows;
@@ -210,10 +250,10 @@ function judgeAi({ quick = [], count = null, guard = [], rowCap = 200 }) {
         });
       }
     }
-    const cb    = truncated ? `${q.chatbot.rowCount || chatbotRows.length} rows (truncated)` : `${chatbotRows.length} rows`;
-    const vista = `${directRows.length} rows`;
+    const cb    = describeRows(chatbotRows, { truncated });
+    const vista = describeRows(directRows);
     if (!ok) problems.push(`question ${q.id}: chatbot returned ${cb}, VistA returned ${vista}`);
-    items.push({ question: q.id, chatbot: cb, vista, ok });
+    items.push({ question: asked, chatbot: cb, vista, ok });
   }
 
   if (count) {
@@ -223,7 +263,7 @@ function judgeAi({ quick = [], count = null, guard = [], rowCap = 200 }) {
     if (chatHasError) {
       const chatErrMsg = String(count.result.error || "(empty)").slice(0, 60);
       problems.push(`count: chatbot error — ${chatErrMsg}`);
-      items.push({ question: "count", chatbot: `error: ${chatErrMsg}`, vista: `${n}`, ok: false });
+      items.push({ question: count.question || COUNT_QUESTION, chatbot: `error: ${chatErrMsg}`, vista: `${n}`, ok: false });
     } else {
       // Require BOTH: countFrom(result) matches reference AND countInReply(reply, reference).
       const chatCount  = countFrom(count.result);
@@ -232,7 +272,7 @@ function judgeAi({ quick = [], count = null, guard = [], rowCap = 200 }) {
       const countOk    = countMatch && replyOk;
       const chatDesc   = String(count.reply || "").trim().slice(0, 80);
       if (!countOk) problems.push(`count mismatch: chatbot="${chatDesc}", VistA=${n}`);
-      items.push({ question: "count", chatbot: chatDesc, vista: `${n}`, ok: countOk });
+      items.push({ question: count.question || COUNT_QUESTION, chatbot: chatDesc, vista: `${n}`, ok: countOk });
     }
   }
 
@@ -245,8 +285,8 @@ function judgeAi({ quick = [], count = null, guard = [], rowCap = 200 }) {
     }
   }
   if (guard.length) {
-    const guardFail = guard.filter(g => g.error || g.got !== g.allowed).length;
-    items.push({ question: "guard", chatbot: `${guard.length - guardFail}/${guard.length} passed`, vista: "expected", ok: guardFail === 0 });
+    const guardFail = guard.filter(g => g.error != null || g.got !== g.allowed).length;
+    items.push({ question: "The read-only guard (general SQL)", chatbot: `${guard.length - guardFail} of ${guard.length} cases as expected`, vista: `${guard.length} cases`, ok: guardFail === 0 });
   }
 
   return { ok: problems.length === 0, problems, items };
@@ -305,13 +345,15 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     const { INTERCLAW_SCRIPTS: scripts } = process.env;
 
     // Collect secrets for redaction BEFORE any error that might mention them.
-    const vuser  = (process.env.VADEMO_READ_USER || process.env.VADEMO_USER || "").trim();
-    const vpass  = process.env.VADEMO_READ_PASSWORD != null ? process.env.VADEMO_READ_PASSWORD
-                 : (process.env.VADEMO_PASSWORD || "");
-    const btoken = process.env.AWS_BEARER_TOKEN_BEDROCK || "";
-    if (vpass)  secrets.push(vpass);
-    if (btoken) secrets.push(btoken);
-    if (pass)   secrets.push(pass);
+    for (const k of ["VADEMO_PASSWORD", "VADEMO_READ_PASSWORD", "AWS_BEARER_TOKEN_BEDROCK", "IRIS_AI_HUB_PASSWORD"]) {
+      const v = process.env[k];
+      if (v) secrets.push(v);
+      if (v && v.trim() && v.trim() !== v) secrets.push(v.trim());
+    }
+
+    // The logins and the token are checked before anything is pushed: a missing one stops the build here.
+    const { user: vuser, password: vpass } = vademoLogin(process.env);
+    bedrockToken(process.env);
 
     if (!url)         throw new Error("IRIS_AI_HUB_URL is not set — add it to agent/.env");
     if (!user || !pass) throw new Error("IRIS_AI_HUB_USER and IRIS_AI_HUB_PASSWORD are not set — add them to agent/.env");
@@ -348,7 +390,7 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
 
     step(`Configuring IRIS settings and creating the ${WEB_APP} web app`);
     const script  = aiSettingsScript(process.env);
-    const irisOut = sessionFn(d.container, script);
+    const irisOut = sessionFn(d.container, script, { secrets });
 
     // Primary guard: verify every marker line came back with its success value.
     // A missing container, IRIS outage or auth failure leaves the output empty or garbled,
@@ -364,7 +406,7 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
 
     // ── Task 7: build the chat app ──────────────────────────────────────────
     step("Building the chat app");
-    await buildChatApp(d.questions, CHAT_OUT);
+    await buildChatApp(d.questions, CHAT_OUT, safeNote);
     note("chat app built → " + CHAT_HREF);
 
     // ── Task 8: verify the chatbot against VistA ─────────────────────────────────
@@ -374,7 +416,6 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
 
     const vademoUrl = (process.env.VADEMO_URL || "").replace(/\/+$/, "");
     if (!vademoUrl) throw new Error("VADEMO_URL is not set — add it to agent/.env");
-    if (!vuser) throw new Error("VADEMO_READ_USER or VADEMO_USER is not set — add it to agent/.env");
 
     const hubBase   = (url || "").replace(/\/+$/, "");
     const hubAuth   = "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
@@ -415,14 +456,14 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
       const qSessId = "verify-q-" + Date.now() + "-" + qi;
       const chatbot = await hubPost(`/equipmentai/quick/${encodeURIComponent(qId)}`, { sessionId: qSessId });
       const direct  = await directQuery(q.sql);
-      quickInput.push({ id: q.id, chatbot, direct });
+      quickInput.push({ id: q.id, wording: q.wording, chatbot, direct });
       const cb = (chatbot.truncated) ? `${chatbot.rowCount} rows (truncated)` : `${(chatbot.rows || []).length} rows`;
       safeNote(`quick ${q.id}: chatbot=${cb}, vista=${direct.length} rows`);
     }
 
     // 2. Count check: ask chat "How many pieces of equipment do we have?" — one retry on failure.
     //    The direct reference must be exactly one row with one numeric value, otherwise throw.
-    const countQ      = "How many pieces of equipment do we have?";
+    const countQ      = COUNT_QUESTION;
     const countRefSQL = "SELECT COUNT(*) AS n FROM VISTA.EQUIPMENT_INV_6914";
     let countChat     = await hubPost("/equipmentai/chat", { sessionId: "verify-count-" + Date.now(), message: countQ });
     const countDirect = await directQuery(countRefSQL);
@@ -479,7 +520,7 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     // Judge — judgeAi is the single source of truth; items becomes status.verification.
     const judgeResult = judgeAi({
       quick:  quickInput,
-      count:  { result: countChat, reply: redact(countChat.reply || "", secrets), reference: countRef },
+      count:  { question: countQ, result: countChat, reply: redact(countChat.reply || "", secrets), reference: countRef },
       guard:  guardInput,
       rowCap: 200,
     });
@@ -515,4 +556,4 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
 if (require.main === module) main();
 
 module.exports = { readAiSpec, aiSettingsScript, checkSettingsMarkers, main, STATUS_FILE,
-                   sameRows, countFrom, countInReply, judgeAi };
+                   sameRows, countFrom, countInReply, judgeAi, describeRows, vademoLogin, bedrockToken, _defaultBuildChatApp };

@@ -19,7 +19,7 @@ const VA_CSS = `
 button{font:inherit;font-weight:700;padding:10px 20px;border-radius:5px;border:2px solid var(--accent);background:#fff;color:var(--accent);cursor:pointer}
 button.primary{background:var(--accent);color:#fff}button:disabled{opacity:.5;cursor:default}
 .answer-card{background:var(--card);border:1px solid var(--line);border-top:4px solid var(--navy);border-radius:4px;padding:18px 20px;margin-bottom:14px}
-.reply-text{margin:0 0 10px;line-height:1.6}
+.reply-text{margin:0 0 10px;line-height:1.6;white-space:pre-line}
 .err-notice{background:#fdeaee;color:var(--err);border:1px solid #f5c6cb;border-radius:4px;padding:9px 12px;margin-bottom:10px;font-size:14px}
 .trunc-note{background:#eaf1fc;color:var(--accent);border:1px solid #b8d4f0;border-radius:4px;padding:8px 12px;margin-bottom:10px;font-size:13px}
 .result-table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:10px}
@@ -65,7 +65,7 @@ const ROW_CAP: number = /*__ROW_CAP__*/;
       </p>
       <table class="result-table" *ngIf="ans.columns && ans.rows && ans.rows.length">
         <thead><tr><th *ngFor="let c of ans.columns">{{c}}</th></tr></thead>
-        <tbody><tr *ngFor="let r of ans.rows"><td *ngFor="let v of r">{{v}}</td></tr></tbody>
+        <tbody><tr *ngFor="let r of ans.rows"><td *ngFor="let c of ans.columns">{{r[c]}}</td></tr></tbody>
       </table>
       <details class="sql-details" *ngIf="ans.sql">
         <summary>SQL used</summary>

@@ -30,25 +30,34 @@ function redact(text, secrets = []) {
   return result;
 }
 
+// The output of a failed command, safe for an error message: lines echoing a credential call are dropped,
+// every secret is redacted, and only then is the text cut — so a secret straddling the cut leaves no prefix.
+function failureText(r, secrets = []) {
+  const text = String(r.stderr || r.stdout || "").split(/\r?\n/).filter(l => !/SetCredential|Credentials/.test(l)).join("\n");
+  return redact(text, secrets).trim().slice(0, 600);
+}
+
 // Run iris session IRIS in the container with the given script on stdin; return stdout.
 // Throws on OS error (docker binary missing) or non-zero exit (container missing, IRIS down, auth refused).
 // Live-confirmed 2026-10-20: successful halt → exit 0; missing container → exit 1, stderr "No such container".
-// Redaction of any secret in the thrown message is the caller's responsibility.
-function irisSession(container, script) {
-  const r = spawnSync("docker", ["exec", "-i", container, "iris", "session", "IRIS"], { input: script, encoding: "utf8", timeout: 180000 });
-  if (r.error) throw new Error(`could not run docker: ${r.error.message}`);
-  if (r.status !== 0) throw new Error(`iris session failed (exit ${r.status}): ${(r.stderr || r.stdout || "").trim().slice(0, 600)}`);
+// secrets: values the script carries (passwords, tokens) — redacted from the thrown message before it is cut.
+function irisSession(container, script, { secrets = [], spawnSyncImpl = spawnSync } = {}) {
+  const r = spawnSyncImpl("docker", ["exec", "-i", container, "iris", "session", "IRIS"], { input: script, encoding: "utf8", timeout: 180000 });
+  if (r.error) throw new Error(redact(`could not run docker: ${r.error.message}`, secrets));
+  if (r.status !== 0) throw new Error(`iris session failed (exit ${r.status}): ${failureText(r, secrets)}`);
   return r.stdout || "";
 }
 
 // Returns a function that calls iris.py with the given server and config file.
 // env must include INTERCLAW_SCRIPTS, IRIS_USERNAME and IRIS_PASSWORD.
-function irisScript(env, server, configFile) {
+// The IRIS password in env (and any extra secrets) is redacted from every error message.
+function irisScript(env, server, configFile, { secrets = [], spawnSyncImpl = spawnSync } = {}) {
   const scripts = (env.INTERCLAW_SCRIPTS || "").trim();
+  const hide = [env.IRIS_PASSWORD, ...secrets];
   return (method, p, extra = []) => {
-    const r = spawnSync("python", [path.join(scripts, "lib", "iris.py"), "--server", server, "--config", configFile, method, p, ...extra], { env, encoding: "utf8", timeout: 180000 });
-    if (r.error) throw new Error(`could not run the interclaw script: ${r.error.message}`);
-    if (r.status !== 0) throw new Error(`${method} ${p} failed: ${(r.stderr || r.stdout || "").trim().slice(0, 600)}`);
+    const r = spawnSyncImpl("python", [path.join(scripts, "lib", "iris.py"), "--server", server, "--config", configFile, method, p, ...extra], { env, encoding: "utf8", timeout: 180000 });
+    if (r.error) throw new Error(redact(`could not run the interclaw script: ${r.error.message}`, hide));
+    if (r.status !== 0) throw new Error(`${method} ${p} failed: ${failureText(r, hide)}`);
     try { return JSON.parse(r.stdout); } catch (e) { return r.stdout; }
   };
 }

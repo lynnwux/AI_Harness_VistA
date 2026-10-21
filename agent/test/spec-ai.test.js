@@ -201,3 +201,24 @@ test("the general path's allow-list is the inventory's (schema-qualified), the o
   assert.ok(!/WORK_ORDER_6920|NEW_PERSON200/.test(line));
   assert.deepEqual(buildAiSpec(graph, rec(), IM, null).detail.general.allowList, []);
 });
+
+// ── Final review M9: a finished AI build never makes the orchestrator spec stale ──
+test("implemented.ai changes the AI hash but not the orchestrator's (or the API's)", () => {
+  const { inputHashes } = require("../lib/specs");
+  const before = { api: IM.api, orchestrator: { built: true, verified: true }, ai: { built: false, verified: false } };
+  const after  = { ...before, ai: { built: true, verified: true, verifiedAt: "2026-10-21T00:00:00.000Z" } };
+  const ins = implemented => ({ graph, record: rec({}), implemented, inventory });
+  assert.deepEqual(inputHashes("orchestrator", ins(after)), inputHashes("orchestrator", ins(before)));
+  assert.deepEqual(inputHashes("api", ins(after)), inputHashes("api", ins(before)));
+  assert.notDeepEqual(inputHashes("ai", ins(after)), inputHashes("ai", ins(before)));
+  // the orchestrator's own build still changes its hash
+  const built = { ...before, orchestrator: { built: true, verified: true, verifiedAt: "x" } };
+  assert.notDeepEqual(inputHashes("orchestrator", ins(built)), inputHashes("orchestrator", ins(before)));
+});
+
+// ── Final review (trivial): the AI layer is not routed through the production ──
+test("the AI spec's uses name the 6914 SQL projection on VADEMO, never the production's front door", () => {
+  const ai = generate({ graph, record: rec({}), implemented: IM, inventory }).ai;
+  assert.ok(!ai.uses.some(u => /Orchestrator|production|front door/i.test(u)), JSON.stringify(ai.uses));
+  assert.ok(ai.uses.some(u => /6914 SQL projection on VADEMO/.test(u)), JSON.stringify(ai.uses));
+});

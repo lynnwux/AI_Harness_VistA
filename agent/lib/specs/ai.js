@@ -83,7 +83,8 @@ function buildAiSpec(graph, record, implemented, inventory) {
       "general question path — read-only SQL over the allow-listed tables only",
     ],
     owns:    ["the quick-access question page", "the general question handler"],
-    uses:    ["Orchestrator: the production front door", "API: GET /lookup — read-only SQL over the 6914 projection"],
+    // Not routed through the production (a non-goal): the chatbot reads VistA directly.
+    uses:    ["the 6914 SQL projection on VADEMO — read-only SQL through the Atelier query endpoint that GET /lookup uses"],
     needs,
     missing,
     complete: missing.length === 0 && needs.every(n => n.met),

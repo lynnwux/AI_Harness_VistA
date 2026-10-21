@@ -193,7 +193,19 @@ function safeChatUrl(url, fallback){
 }
 const TARGET = "RegisterEquipment";
 let G = null, SPECS = null, TAB = "orchestrator", PORTAL = null;
-let AI_CHAT_URL = null, AI_BUILT = false;
+let AI_CHAT_URL = null, AI_BUILT = false, AI_STATUS_JSON = true;
+// A server started before the AI layer was added answers /api/build/ai/status with an HTML page and serves the
+// old AI placeholder spec; the page then asks for a restart instead of failing in odd ways.
+const OLD_SERVER_NOTICE = "This page is newer than the running workbench server — restart the workbench server (npm start) in agent/ to load the AI layer.";
+function serverLooksOld(specs, aiStatusIsJson){
+  if(aiStatusIsJson===false) return true;
+  if(!specs||!specs.layers) return false;            // unreachable or failed: shown by its own message
+  const ai=specs.layers.ai;
+  if(!ai) return true;
+  return (ai.missing||[]).some(m=>m.kind==="design") || !/^# AI layer spec — Equipment inventory chatbot/.test(ai.md||"");
+}
+// The tab the page opens on: the layer the stage is working on.
+function defaultTab(specs){ return specs&&specs.stage&&specs.stage.layer==="ai" ? "ai" : "orchestrator"; }
 // the last successful production build's Management Portal page, if any
 async function loadPortal(){
   try{ const s=await (await fetch("/api/build/production/status",{cache:"no-store"})).json(); PORTAL = s.state==="done" ? s.portalUrl||null : PORTAL; }catch(e){}
@@ -201,7 +213,11 @@ async function loadPortal(){
 }
 // the last successful AI build's chat URL, if any
 async function loadAiStatus(){
-  try{ const s=await (await fetch("/api/build/ai/status",{cache:"no-store"})).json(); if(s.state==="done"){ AI_CHAT_URL=safeChatUrl(s.chatUrl,"/prototype/chat/"); AI_BUILT=true; } }catch(e){}
+  try{
+    const text=await (await fetch("/api/build/ai/status",{cache:"no-store"})).text();
+    let s=null; try{ s=JSON.parse(text); AI_STATUS_JSON=true; }catch(e){ AI_STATUS_JSON=false; }
+    if(s&&s.state==="done"){ AI_CHAT_URL=safeChatUrl(s.chatUrl,"/prototype/chat/"); AI_BUILT=true; }
+  }catch(e){}
   renderRight();
 }
 
@@ -256,7 +272,8 @@ function renderRight(){
   if(!aiBtn.dataset.busy){ aiBtn.disabled=!aDone; aiBtn.title=aDone?"Generate the AI layer from the AI spec, deploy it to IRIS and verify it against VistA":"Finish the AI spec's missing items in the Decide chat first"; }
   const doc=document.getElementById("doc");
   if(!SPECS||!SPECS.layers){ doc.innerHTML=`<div class="specerr">${esc((SPECS&&SPECS.error)||"Specs not available")}</div>`; return; }
-  const banner = (SPECS.notice ? `<div class="specerr">⚠ ${esc(SPECS.notice)}</div>` : "")
+  const banner = (serverLooksOld(SPECS, AI_STATUS_JSON) ? `<div class="specerr">⚠ ${esc(OLD_SERVER_NOTICE)}</div>` : "")
+    + (SPECS.notice ? `<div class="specerr">⚠ ${esc(SPECS.notice)}</div>` : "")
     + (SPECS.error ? `<div class="specerr">⚠ Spec generation failed — showing the last good version. ${esc(SPECS.error)}</div>` : "");
   doc.innerHTML = banner + mdToHtml(SPECS.layers[TAB].md);
   updateProg(); updateAgenda();
@@ -286,6 +303,28 @@ function capabilityOverview(){
   paras.push(`In plain terms: a clerk fills a **${screens}-screen form (${fields} fields)**; on save the record is created in file ${file} with its serial-number duplicate check preserved. The entry also triggers **${beh.length} downstream side effects** — ${sfx}.`);
   paras.push(`The right pane shows the spec for each layer — **API** (REST service on VistA + Angular app) · **Orchestrator** (IRIS Interoperability production) · **AI** (AI Hub) — and it renders live. **What you decide in this chat is what gets built:** every decision is recorded, the specs regenerate on the spot, and each build reads its layer's spec. Most of the capability is coded in the legacy and carries over; the legacy leaves **${oqs.length} decisions to a human**, plus how each side effect is wired. Let's settle those.`);
   return paras.join("\n\n");
+}
+
+/* the opening messages after the overview: where the build is, and what is next — driven by the stage */
+function openingMessages(specs){
+  if(!specs||!specs.layers) return ["⚠ The layer specs could not be generated — see the right pane."];
+  const st=specs.stage||{};
+  if(st.layer==="ai"){
+    const ai=specs.layers.ai, miss=(ai&&ai.missing)||[];
+    const where="**Where we are — ✅ Phase 1 and the production are built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/), and the IRIS production (the orchestrator layer) is built and verified.\n\nWe're working on the **AI** layer now — the equipment inventory chatbot on IRIS AI Hub; its spec is on the AI tab.";
+    const next = st.step==="done" ? "**The AI layer is built and verified.** Open the chat app from the AI tab (💬 Open chat app). To change a quick-access question, tell me here, then press 🔨 Build AI again."
+      : st.step==="ready" ? "**The AI spec is complete** — ready for 🔨 Build AI on the AI tab."
+      : st.step==="discovery" ? "⚠ The inventory discovery file (capability-graph/inventory-fields.json) is missing — run the discovery step (agent/discover-inventory.js) before designing the AI layer."
+      : `**Still to decide for the AI layer (${miss.length}):** ${miss.slice(0,6).map((m,i)=>`${i+1}. ${m.what}`).join(" · ")}${miss.length>6?" · …":""}.\n\nI'll take the quick-access questions one at a time — keep or drop, the wording, then each parameter — showing the legacy field meanings as evidence and asking you for every value; I never propose one. After each decision a card shows exactly what was recorded.\n\nReady to start with the first one?`;
+    return [where, next];
+  }
+  const o=specs.layers.orchestrator;
+  const pend=o.missing.filter(m=>m.kind==="decide");
+  const where="**Where we are — ✅ Phase 1 is built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/) and the write path is proven end-to-end against VADEMO file 6914.\n\nWe're working on the **Orchestrator** layer (the IRIS production) now; **AI** comes after the production is built and verified.";
+  const next = pend.length ? `**Still to decide for the orchestrator layer:** ${pend.map((m,i)=>`${i+1}. ${m.what.replace(/^decide: /,"")}`).join(" · ")}.\n\nFor each one I'll work the same way: **show you what the legacy code actually does** — quoting the MUMPS and breaking a compound condition into its individual parts — **explain it**, and then **you decide how to modernize** each part: keep it, change it, move it to a different layer, or drop it. Anything that departs from the legacy gets flagged, and after each decision a card shows exactly what was recorded.\n\nReady to start with the first one?`
+    : o.complete ? "**The orchestrator spec is complete** — ready for the production build."
+    : `**The open questions are decided.** Next: ${(st.next&&(st.next.what||st.next.service))||""}`;
+  return [where, next];
 }
 
 /* ---------- state + events ---------- */
@@ -520,16 +559,12 @@ document.getElementById("killBtn").onclick=async ()=>{
   catch(e){ document.getElementById("doc").innerHTML='<div class="specerr">Could not load the capability graph — run the workbench server and open http://localhost:8899/capability-graph/decide.html</div>'; return; }
   document.getElementById("hdrSub").textContent = G.workflow.name + " → " + TARGET;
   wireTabs(); wireChat();
-  await loadSpecs(); loadPortal(); loadAiStatus();
+  await loadSpecs(); TAB=defaultTab(SPECS); renderRight(); loadPortal(); loadAiStatus();
   addMsg("assistant", capabilityOverview());
-  addMsg("assistant","**Where we are — ✅ Phase 1 is built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/) and the write path is proven end-to-end against VADEMO file 6914.\n\nWe're working on the **Orchestrator** layer (the IRIS production) now; **AI** comes after the production is built and verified.");
-  const o = SPECS&&SPECS.layers ? SPECS.layers.orchestrator : null;
-  const pend = o ? o.missing.filter(m=>m.kind==="decide") : [];
-  addMsg("assistant", !o ? "⚠ The layer specs could not be generated — see the right pane."
-    : pend.length ? `**Still to decide for the orchestrator layer:** ${pend.map((m,i)=>`${i+1}. ${m.what.replace(/^decide: /,"")}`).join(" · ")}.\n\nFor each one I'll work the same way: **show you what the legacy code actually does** — quoting the MUMPS and breaking a compound condition into its individual parts — **explain it**, and then **you decide how to modernize** each part: keep it, change it, move it to a different layer, or drop it. Anything that departs from the legacy gets flagged, and after each decision a card shows exactly what was recorded.\n\nReady to start with the first one?`
-    : o.complete ? "**The orchestrator spec is complete** — ready for the production build."
-    : `**The open questions are decided.** Next: ${(SPECS.stage&&SPECS.stage.next&&(SPECS.stage.next.what||SPECS.stage.next.service))||""}`);
-  chatHistory.push({role:"assistant",text:`[intro: Phase 1 built+verified; stage=${SPECS&&SPECS.stage?SPECS.stage.step:"unknown"}; still to decide: ${pend.map(m=>m.id).join(", ")||"none"}; approach = show legacy evidence, explain, developer decides]`});
+  for(const m of openingMessages(SPECS)) addMsg("assistant", m);
+  const st=SPECS&&SPECS.stage, layer=st&&st.layer==="ai"?"ai":"orchestrator";
+  const pend=SPECS&&SPECS.layers ? (layer==="ai" ? SPECS.layers.ai.missing : SPECS.layers.orchestrator.missing.filter(m=>m.kind==="decide")) : [];
+  chatHistory.push({role:"assistant",text:`[intro: ${layer==="ai"?"Phase 1 and the production built+verified; working on the AI layer":"Phase 1 built+verified; working on the orchestrator"}; stage=${st?st.layer+"/"+st.step:"unknown"}; still to decide: ${pend.map(m=>m.id||m.what).join(", ")||"none"}; approach = show legacy evidence, explain, developer decides]`});
 })();
 </script>
 </body>

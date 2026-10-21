@@ -13,10 +13,10 @@ const ROOT = path.join(__dirname, "..");                 // repo root (serves ca
 const PORT = process.env.PORT || 8899;
 const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return fallback; } };
 
-function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
+// spawnImpl and statusFiles let tests run the build routes without starting a runner or touching agent/ files.
+function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl = spawn, statusFiles = {} } = {}) {
   let graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
-  const invPath = path.join(ROOT, "capability-graph", "inventory-fields.json");
-  const inventory = fs.existsSync(invPath) ? (() => { try { return JSON.parse(fs.readFileSync(invPath, "utf8")); } catch (_e) { return null; } })() : null;
+  const inventory = readJson(paths.inventory || DEFAULT_PATHS.inventory, null);   // the discovery file (null when missing)
   let notice = null;
   const onCorrupt = bak => { notice = `decisions.json could not be read, so the workbench started from the default decisions. The unreadable file was backed up as ${path.basename(bak)} — nothing in it is lost.`; };
   const state = { record: loadRecord(paths.decisions, () => defaultDecisions(graph), { onCorrupt }), specs: null, md: null, stage: null, specsError: null, notice: null };
@@ -104,7 +104,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
 
-  app.get("/api/state", (_req, res) => res.json({ workflow: graph.workflow, decisions: state.record, state: getState(graph, state.record, { implemented: implemented() }) }));
+  app.get("/api/state", (_req, res) => res.json({ workflow: graph.workflow, decisions: state.record, state: getState(graph, state.record, { implemented: implemented(), inventory }) }));
   app.get("/api/decisions", (_req, res) => res.json(state.record));
 
   app.get("/api/specs", (_req, res) => {
@@ -146,8 +146,9 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
 
   registerVistaRoutes(app);
   registerBuildRoutes(app, regenerate, serially);
-  registerProductionRoutes(app, regenerate, serially, () => state.specs);
-  registerAiRoutes(app, regenerate, serially, () => state.specs);
+  const runners = { spawnImpl, productionStatus: statusFiles.production || PRODUCTION_STATUS, aiStatus: statusFiles.ai || AI_STATUS_FILE };
+  registerProductionRoutes(app, regenerate, serially, () => state.specs, runners);
+  registerAiRoutes(app, regenerate, serially, () => state.specs, () => state.stage, runners);
   registerAiProxyRoutes(app);
   app.use(express.static(ROOT));
 
@@ -320,63 +321,68 @@ function registerBuildRoutes(app, regenerate, serially) {
 }
 
 const { STATUS_FILE: PRODUCTION_STATUS } = require("./production-runner");
+// The production build and the AI build both read-modify-write implemented.json, so they never run together.
 let productionProc = null;
-function registerProductionRoutes(app, regenerate, serially, specs) {
+let aiProc = null;
+
+// Mark a status file errored when its runner died without writing a terminal state.
+function reconcileExit(statusFile, what, code) {
+  try {
+    const s = JSON.parse(fs.readFileSync(statusFile, "utf8"));
+    if (s.state !== "done" && s.state !== "error") {
+      s.state = "error"; s.error = `${what} exited unexpectedly (code ${code})`;
+      (s.log = s.log || []).push("✗ " + s.error);
+      fs.writeFileSync(statusFile, JSON.stringify(s, null, 2));
+    }
+  } catch (e) { /* no status file — nothing to reconcile */ }
+}
+
+function registerProductionRoutes(app, regenerate, serially, specs, { spawnImpl = spawn, productionStatus = PRODUCTION_STATUS } = {}) {
   app.post("/api/build/production", (_req, res) => serially(() => {
     if (productionProc) return res.json({ started: false, running: true, note: "a production build is already running" });
+    if (aiProc) return res.status(409).json({ started: false, error: "the AI build is running — wait for it to finish, then build the production" });
     const g = regenerate();
     if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
     const o = specs().orchestrator;
     if (!o.complete) return res.status(409).json({ started: false, error: "the orchestrator spec is not complete — finish its missing items in the Decide chat first", missing: o.missing.map(m => m.what) });
-    fs.writeFileSync(PRODUCTION_STATUS, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], error: null, startedAt: new Date().toISOString() }, null, 2));
-    productionProc = spawn(process.execPath, [path.join(__dirname, "production-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
-    productionProc.on("exit", code => {
-      productionProc = null;
-      try {
-        const s = JSON.parse(fs.readFileSync(PRODUCTION_STATUS, "utf8"));
-        if (s.state !== "done" && s.state !== "error") {
-          s.state = "error"; s.error = "the production build exited unexpectedly (code " + code + ")";
-          (s.log = s.log || []).push("✗ " + s.error);
-          fs.writeFileSync(PRODUCTION_STATUS, JSON.stringify(s, null, 2));
-        }
-      } catch (e) { /* no status file — nothing to reconcile */ }
+    fs.writeFileSync(productionStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], error: null, startedAt: new Date().toISOString() }, null, 2));
+    const proc = productionProc = spawnImpl(process.execPath, [path.join(__dirname, "production-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
+    proc.on("exit", code => {
+      if (productionProc === proc) productionProc = null;
+      reconcileExit(productionStatus, "the production build", code);
       serially(() => regenerate());   // implemented.json may now say built + verified
     });
     res.json({ started: true, statusUrl: "/api/build/production/status" });
   }));
   app.get("/api/build/production/status", (_req, res) => {
-    try { res.json(JSON.parse(fs.readFileSync(PRODUCTION_STATUS, "utf8"))); }
+    try { res.json(JSON.parse(fs.readFileSync(productionStatus, "utf8"))); }
     catch (e) { res.json({ state: "idle", step: "", log: [] }); }
   });
 }
 
 const { STATUS_FILE: AI_STATUS_FILE } = require("./ai-runner");
-let aiProc = null;
-function registerAiRoutes(app, regenerate, serially, specs) {
+function registerAiRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl = spawn, aiStatus = AI_STATUS_FILE } = {}) {
   app.post("/api/build/ai", (_req, res) => serially(() => {
     if (aiProc) return res.json({ started: false, running: true, note: "an AI build is already running" });
+    if (productionProc) return res.status(409).json({ started: false, error: "the production build is running — wait for it to finish, then build the AI layer" });
     const g = regenerate();
     if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
+    // The spec's offer rule: the AI layer is offered only once the orchestrator is built and verified.
+    const st = stageOf();
+    if (!st || st.layer !== "ai") return res.status(409).json({ started: false, error: "the AI layer is offered only once the orchestrator is built and verified — finish and build the orchestrator first", stage: st || null });
     const a = specs() && specs().ai;
     if (!a || !a.complete) return res.status(409).json({ started: false, error: "the AI spec is not complete — finish its missing items in the Decide chat first", missing: (a && a.missing || []).map(m => m.what) });
-    fs.writeFileSync(AI_STATUS_FILE, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], error: null, startedAt: new Date().toISOString() }, null, 2));
-    aiProc = spawn(process.execPath, [path.join(__dirname, "ai-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
-    aiProc.on("exit", code => {
-      aiProc = null;
-      try {
-        const s = JSON.parse(fs.readFileSync(AI_STATUS_FILE, "utf8"));
-        if (s.state !== "done" && s.state !== "error") {
-          s.state = "error"; s.error = "the AI build exited unexpectedly (code " + code + ")";
-          (s.log = s.log || []).push("✗ " + s.error);
-          fs.writeFileSync(AI_STATUS_FILE, JSON.stringify(s, null, 2));
-        }
-      } catch (e) { /* no status file — nothing to reconcile */ }
+    fs.writeFileSync(aiStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], error: null, startedAt: new Date().toISOString() }, null, 2));
+    const proc = aiProc = spawnImpl(process.execPath, [path.join(__dirname, "ai-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
+    proc.on("exit", code => {
+      if (aiProc === proc) aiProc = null;
+      reconcileExit(aiStatus, "the AI build", code);
       serially(() => regenerate());   // implemented.json may now say built + verified
     });
     res.json({ started: true, statusUrl: "/api/build/ai/status" });
   }));
   app.get("/api/build/ai/status", (_req, res) => {
-    try { res.json(JSON.parse(fs.readFileSync(AI_STATUS_FILE, "utf8"))); }
+    try { res.json(JSON.parse(fs.readFileSync(aiStatus, "utf8"))); }
     catch (e) { res.json({ state: "idle", step: "", log: [] }); }
   });
 }
@@ -384,7 +390,8 @@ function registerAiRoutes(app, regenerate, serially, specs) {
 function registerAiProxyRoutes(app) {
   // Proxy POST /ai/chat and POST /ai/quick/:id → the AI hub's /equipmentai REST front door.
   // IRIS basic auth comes from the environment (same credentials as the build).
-  // On a missing setting → 502 naming the setting; on a network error → 502 with the message.
+  // On a missing setting → 502 naming the setting; on a network error → 502 with the message; on an answer that
+  // is not JSON (an IRIS login or not-found page) → 502 saying so.
   const HUB_URL  = (process.env.IRIS_AI_HUB_URL || "").replace(/\/+$/, "");
   const HUB_AUTH = process.env.IRIS_AI_HUB_USER
     ? "Basic " + Buffer.from(process.env.IRIS_AI_HUB_USER + ":" + (process.env.IRIS_AI_HUB_PASSWORD || "")).toString("base64")
@@ -396,19 +403,20 @@ function registerAiProxyRoutes(app) {
     return HUB_URL + "/equipmentai" + p;
   }
 
-  app.post("/ai/chat", async (req, res) => {
+  async function forward(res, p, body) {
     try {
-      const r = await fetch(aiHub("/chat"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: HUB_AUTH }, body: JSON.stringify(req.body || {}) });
-      res.status(r.status).json(await r.json());
+      const r = await fetch(aiHub(p), { method: "POST", headers: { "Content-Type": "application/json", Authorization: HUB_AUTH }, body: JSON.stringify(body || {}) });
+      const text = await r.text();
+      let data;
+      try { data = JSON.parse(text); } catch (_e) {
+        return res.status(502).json({ error: `IRIS answered HTTP ${r.status} (not JSON) — has the AI layer been built? Press 🔨 Build AI on the Decide page's AI tab.` });
+      }
+      res.status(r.status).json(data);
     } catch (e) { res.status(502).json({ error: String(e.message || e) }); }
-  });
+  }
 
-  app.post("/ai/quick/:id", async (req, res) => {
-    try {
-      const r = await fetch(aiHub("/quick/" + encodeURIComponent(req.params.id)), { method: "POST", headers: { "Content-Type": "application/json", Authorization: HUB_AUTH }, body: JSON.stringify(req.body || {}) });
-      res.status(r.status).json(await r.json());
-    } catch (e) { res.status(502).json({ error: String(e.message || e) }); }
-  });
+  app.post("/ai/chat", (req, res) => forward(res, "/chat", req.body));
+  app.post("/ai/quick/:id", (req, res) => forward(res, "/quick/" + encodeURIComponent(req.params.id), req.body));
 }
 
 if (require.main === module) {

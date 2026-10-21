@@ -284,3 +284,32 @@ test("guard: chat-app tests do not write to agent/ai-status.json or prototype/ch
       "prototype/chat/ must not be created by tests — _buildChatApp must use injected path");
   }
 });
+
+// ── Final review C1: rows are objects keyed by column ─────────────────────────
+// A tiny render of the results table's template: each *ngFor must iterate an array (NgFor throws NG02200 on a
+// plain object), and each cell's expression is evaluated against a sample row shaped like Atelier's
+// result.content — one object per row, keyed by column.
+function renderResultTable(app, ans) {
+  const tbody = /<tbody>([\s\S]*?)<\/tbody>/.exec(app);
+  assert.ok(tbody, "the results table has a tbody");
+  const m = /^<tr \*ngFor="let (\w+) of ([\w.]+)"><td \*ngFor="let (\w+) of ([\w.]+)">\{\{([^}]+)\}\}<\/td><\/tr>$/.exec(tbody[1].trim());
+  assert.ok(m, "tbody is one row loop with one cell loop: " + tbody[1].trim());
+  const [, rowVar, rowsExpr, cellVar, cellsExpr, cellExpr] = m;
+  const evalIn = (expr, scope) => new Function(...Object.keys(scope), "return (" + expr + ");")(...Object.values(scope));
+  const rows = evalIn(rowsExpr, { ans });
+  assert.ok(Array.isArray(rows), `${rowsExpr} must be an array for *ngFor`);
+  return rows.map(r => {
+    const cells = evalIn(cellsExpr, { ans, [rowVar]: r });
+    assert.ok(Array.isArray(cells), `${cellsExpr} must be an array for *ngFor (NgFor cannot iterate a row object)`);
+    return cells.map(c => String(evalIn(cellExpr, { ans, [rowVar]: r, [cellVar]: c })));
+  });
+}
+
+test("chatAppFiles: the results table indexes each row object by column, in the columns' order", () => {
+  const app = chatAppFiles({ questions: QUESTIONS })["src/app/app.ts"];
+  const ans = { columns: ["IEN", "MFGR__EQUIPMENT_NAME", "EQUIPMENT_CATEGORY_NAME"],
+                rows: [{ EQUIPMENT_CATEGORY_NAME: "BEDS", IEN: "12", MFGR__EQUIPMENT_NAME: "BED, ELECTRIC" },
+                       { IEN: "13", MFGR__EQUIPMENT_NAME: "PUMP", EQUIPMENT_CATEGORY_NAME: "INFUSION" }] };
+  assert.deepEqual(renderResultTable(app, ans), [["12", "BED, ELECTRIC", "BEDS"], ["13", "PUMP", "INFUSION"]]);
+  assert.match(app, /<th \*ngFor="let c of ans\.columns">\{\{c\}\}<\/th>/, "the header row lists the columns");
+});

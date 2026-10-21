@@ -619,8 +619,8 @@ You answer questions about the equipment inventory in VistA: FileMan file 6914 (
 4. Show names, not pointer entry numbers: select a pointer's name column — ${names.join(", ")} and the others the schema guide names ("use … for the name"). For a coded column, show the code's meaning from the guide.
 5. A result holds at most ${rowCap} rows. When \`truncated\` is true, say that only the first ${rowCap} rows are shown and the full list is longer — never present it as complete. Count and total with COUNT(*) and SUM(column) in SQL, not by counting rows.
 6. You are read-only: you never change VistA. \`RunQuery\` takes one SELECT statement (no semicolon) over the allow-listed tables of the schema guide, written schema-qualified (e.g. VISTA.EQUIPMENT_INV_6914); anything else is rejected. Write FROM only before table names (no TRIM(x FROM y) or EXTRACT(x FROM y)), join tables explicitly (no ->), use plain unquoted names, write the query in plain ASCII (outside string literals only letters, digits, spaces and _ % $ . , ( ) * + - / = < > ' | and != ), and call only these functions: ${FUNCTIONS.join(", ")}.
-7. Dates are FileMan dates (YYYMMDD, where YYY is the year minus 1700): compare them as CAST(column AS INTEGER) against (year - 1700) * 10000 + month * 100 + day. The federal fiscal year N runs from October 1 of N - 1 through September 30 of N.
-8. Be brief: lead with the count or total, then a markdown table of the rows that matter.
+7. Dates are stored as FileMan dates (YYYMMDD, where YYY is the year minus 1700, e.g. 3301015 is 2030-10-15): compare them as CAST(column AS INTEGER) against (year - 1700) * 10000 + month * 100 + day. When you mention a date, write it as YYYY-MM-DD (year = YYY + 1700) — never show the raw FileMan number. The federal fiscal year N runs from October 1 of N - 1 through September 30 of N.
+8. Be brief and write plain text — no markdown (no tables, headings or bullet markup). Lead with the count or total, then a short summary of what the rows show. The app shows the rows as a table below your reply: do not repeat them.
 
 ## Quick-access questions
 
@@ -783,11 +783,12 @@ ClassMethod Ask(pAgent As ${PKG}.Agent, pSession As %AI.Agent.Session, pText As 
     Quit $select($isobject(tResp): tResp.Content, 1: "")
 }
 
-/// The error text of a failed turn: the fixed token message when Bedrock refused the login.
+/// The error text of a failed turn: when Bedrock refused the login, the fixed token message followed by the
+/// provider's own words (so a model that is not enabled is not mistaken for an expired token).
 ClassMethod Failure(e As %Exception.AbstractException) As %String
 {
     Set tText = e.DisplayString()
-    Quit $select(..IsAuthFailure(tText): ..#TOKENEXPIRED, 1: tText)
+    Quit $select(..IsAuthFailure(tText): ..#TOKENEXPIRED_" (provider said: "_tText_")", 1: tText)
 }
 
 ClassMethod IsAuthFailure(pText As %String) As %Boolean
@@ -885,11 +886,12 @@ ClassMethod Body() As %DynamicObject
     Return ##class(%DynamicObject).%FromJSON(%request.Content)
 }
 
-/// An unexpected failure in the chat's result shape; a refused Bedrock login reads as the fixed token message.
+/// An unexpected failure in the chat's result shape; a refused Bedrock login reads as the fixed token message,
+/// followed by the provider's own words.
 ClassMethod Failed(e As %Exception.AbstractException) As %DynamicObject
 {
     Set tText = e.DisplayString()
-    Set:##class(${PKG}.Chat).IsAuthFailure(tText) tText = ..#TOKENEXPIRED
+    Set:##class(${PKG}.Chat).IsAuthFailure(tText) tText = ..#TOKENEXPIRED_" (provider said: "_tText_")"
     Quit {"reply": "", "tool": "", "sql": "", "columns": [], "rows": [], "rowCount": 0, "truncated": false, "error": (tText)}
 }
 
@@ -986,7 +988,8 @@ const GUARD_CASES = [
   { kind: "subquery-from", allowed: true, sql: `SELECT x.n FROM (SELECT COUNT(*) AS n FROM ${E}) x, ${S} s` },
   { kind: "subquery-from", allowed: false, sql: `SELECT * FROM (SELECT Name FROM %Dictionary.ClassDefinition) x` },
   { kind: "subquery-from", allowed: false, sql: `SELECT * FROM (SELECT IEN FROM ${E}) s, VISTA.NEW_PERSON200` },
-  { kind: "subquery-where", allowed: true, sql: `SELECT IEN FROM ${E} WHERE IEN IN (SELECT EQUIPMENT_ID FROM VISTA.CMR6914_1)` },
+  { kind: "subquery-where", allowed: true, sql: `SELECT IEN FROM ${E} WHERE IEN IN (SELECT EQUIPMENT_INV_6914 FROM VISTA.SUB_RESPONSIBLE_SHOP6914_04 WHERE CRITICALITY > 3)` },
+  { kind: "subquery-where", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN IN (SELECT EQUIPMENT_ID FROM VISTA.CMR6914_1)` },
   { kind: "subquery-where", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN IN (SELECT ID FROM %Dictionary.ClassDefinition)` },
   { kind: "subquery-where", allowed: false, sql: `SELECT IEN FROM ${E} WHERE EXISTS (SELECT 1 FROM ${S} s JOIN Security.Users u ON 1=1)` },
   { kind: "subquery-where", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN IN (SELECT IEN FROM ${S} s, VISTA.NEW_PERSON200 n)` },
@@ -1059,6 +1062,15 @@ const GUARD_CASES = [
   { kind: "charset", allowed: true, sql: `SELECT MFGR__EQUIPMENT_NAME || ' ' || MODEL FROM ${E}` },
   { kind: "charset", allowed: true, sql: `SELECT IEN FROM ${E} WHERE MFGR__EQUIPMENT_NAME = 'caf\u00E9 \u2014 \uFF26\uFF32\uFF2F\uFF2D @#^?'` },
   { kind: "charset", allowed: true, sql: `SELECT IEN\r\nFROM ${E}\r\nWHERE IEN <= 10 AND IEN >= 1 AND IEN <> 5 AND IEN * 2 / 2 + 1 - 1 > 0` },
+  // files with personal data (discovery's personal-data rule keeps them off the allow-list); names still come
+  // from the allow-listed tables' own name columns
+  { kind: "personal-data", allowed: false, sql: "SELECT * FROM VISTA.ENG_EMPLOYEE6929" },
+  { kind: "personal-data", allowed: false, sql: "SELECT NAME, TAX_IDSSN FROM VISTA.VENDOR440" },
+  { kind: "personal-data", allowed: false, sql: `SELECT e.IEN, v.VENDOR_PHONE_NUMBER FROM ${E} e JOIN VISTA.VENDOR440 v ON v.IEN = e.VENDOR_POINTER` },
+  { kind: "personal-data", allowed: false, sql: `SELECT e.IEN, c.PHONE_RESP_OFFICIAL FROM ${E} e, VISTA.CMR6914_1 c WHERE c.IEN = e.CMR` },
+  { kind: "personal-data", allowed: false, sql: "SELECT SSN FROM VISTA.NEW_PERSON200" },
+  { kind: "personal-data", allowed: true, sql: `SELECT IEN, VENDOR_POINTER_NAME, CMR_NAME FROM ${E}` },
+  { kind: "personal-data", allowed: true, sql: "SELECT TECHNICIAN_NAME, RESPONSIBLE_SHOP_ENGINEERING_SECTION FROM VISTA.SUB_RESPONSIBLE_SHOP6914_04" },
   // CTEs
   { kind: "cte", allowed: false, sql: `WITH x AS (SELECT 1 FROM ${E}) SELECT * FROM x` },
   { kind: "cte", allowed: false, sql: `WITH x AS (SELECT IEN FROM ${E}) SELECT IEN FROM ${E}` },

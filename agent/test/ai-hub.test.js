@@ -231,7 +231,7 @@ test("GUARD_CASES is a regression suite covering every bypass class, with allowe
   assert.equal(new Set(GUARD_CASES.map(c => c.sql)).size, GUARD_CASES.length, "no duplicate cases");
   const kinds = ["charset", "number-run", "name-boundary", "plain", "case", "statement", "forbidden-word", "into", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "schema-less", "quoted", "dots", "implicit-join", "function", "cte"];
   for (const k of kinds) assert.ok(GUARD_CASES.some(c => c.kind === k), `kind ${k}`);
-  for (const k of ["charset", "number-run", "name-boundary", "plain", "case", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "function"]) {
+  for (const k of ["charset", "number-run", "name-boundary", "plain", "case", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "function", "personal-data"]) {
     assert.ok(GUARD_CASES.some(c => c.kind === k && c.allowed) && GUARD_CASES.some(c => c.kind === k && !c.allowed), `kind ${k} has both allowed and rejected cases`);
   }
   const has = (re, allowed = false) => assert.ok(GUARD_CASES.some(c => re.test(c.sql) && c.allowed === allowed), String(re));
@@ -323,4 +323,52 @@ test("every postcondition is one expression (a space ends it in ObjectScript)", 
 test("nothing generated holds a host, an account or a credential", () => {
   // \b_SYSTEM\b: legitimate 6914 column names (PARENT_SYSTEM, UTILITY_SYSTEMS6918_1) contain "_SYSTEM" (Task 1 ruling)
   for (const c of classes()) assert.doesNotMatch(c.text, /password\s*=|172\.17\.|\b_SYSTEM\b|bearer_token"\s*:\s*"[^"(]|localhost|https?:\/\/(?!www\.intersystems\.com)/i, c.name);
+});
+
+// ── Final review C2: personal-data tables ─────────────────────────────────────
+test("GUARD_CASES: the personnel and vendor files are rejected, and every allowed case reads only allow-listed tables", () => {
+  const rejected = sql => GUARD_CASES.some(c => c.sql === sql && c.allowed === false);
+  assert.ok(rejected("SELECT * FROM VISTA.ENG_EMPLOYEE6929"), "SELECT * FROM VISTA.ENG_EMPLOYEE6929 is a rejected case");
+  assert.ok(GUARD_CASES.some(c => /VISTA\.VENDOR440\b/.test(c.sql) && c.allowed === false), "a VENDOR440 query is a rejected case");
+  for (const c of GUARD_CASES.filter(c => c.allowed)) {
+    for (const [t] of c.sql.toUpperCase().matchAll(/VISTA\.[A-Z0-9_]+/g)) {
+      assert.ok(inventory.allowList.includes(t), `allowed case reads ${t}, which is not allow-listed: ${c.sql}`);
+    }
+  }
+});
+
+test("the agent's schema guide never names an excluded table", () => {
+  const t = byName(classes())["EquipmentAI.Agent"];
+  for (const q of Object.keys(inventory.excluded || {})) {
+    assert.ok(!t.includes(q), `${q} appears in the agent instructions`);
+    assert.ok(!t.includes(q.replace(/^VISTA\./, "")), `${q} appears in the agent instructions`);
+  }
+  for (const q of ["VISTA.ENG_EMPLOYEE6929", "VISTA.VENDOR440", "VISTA.NEW_PERSON200", "VISTA.CMR6914_1"]) assert.ok(inventory.excluded[q], `${q} is recorded as excluded`);
+  assert.doesNotMatch(t, /HOME_PHONE|TAX_IDSSN|\bSSN\b|WAGE/);
+});
+
+// ── Final review I5 / M6: how the agent writes its answer ─────────────────────
+test("the agent leads with the count and a plain-text summary, never a markdown table or a repeat of the rows", () => {
+  const t = byName(classes())["EquipmentAI.Agent"];
+  assert.doesNotMatch(t, /markdown table/i, "the app shows the reply as plain text");
+  assert.match(t, /lead with the count or total/i);
+  assert.match(t, /plain text/i);
+  assert.match(t, /shows the rows as a table/i);
+  assert.match(t, /do not repeat (them|the rows)/i);
+  assert.match(t, /no markdown/i);
+});
+
+test("the agent is told how FileMan dates are stored and to present them readably", () => {
+  const t = byName(classes())["EquipmentAI.Agent"];
+  assert.match(t, /stored as FileMan dates/i);
+  assert.match(t, /YYYY-MM-DD/);
+  assert.match(t, /never show the raw FileMan number/i);
+});
+
+// ── Final review (trivial): the token-expired message keeps the provider's own words ──
+test("an auth failure shows the fixed token message followed by the provider's original error text", () => {
+  const list = byName(classes());
+  for (const n of ["EquipmentAI.Chat", "EquipmentAI.REST.Dispatch"]) {
+    assert.match(list[n], /\.\.#TOKENEXPIRED_" \(provider said: "_tText_"\)"/, `${n} appends the original text`);
+  }
 });

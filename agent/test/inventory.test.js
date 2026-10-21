@@ -155,3 +155,82 @@ test("inventory-fields.json: no secrets or internal host patterns in file", { sk
   // trigger the check — only standalone _SYSTEM (the IRIS system account) is blocked.
   assert.doesNotMatch(raw, /\b_SYSTEM\b/i,     "no standalone _SYSTEM credential reference");
 });
+
+// ─── Personal data (final review C2): excluded by content, not by file name ────
+const { personalColumns } = require("../discover-inventory");
+
+// The finding's patterns, independent of the implementation: a test that the committed allow-list
+// holds no table with a personal-data column.
+const PERSONAL_NAME = /(^|_)SSN|SSN(_|$)|TAX_?ID|(^|_)HOME(_|$)|(^|_)DOB(_|$)|DATE_OF_BIRTH|WAGE|SALAR|HOURLY/;
+
+const PERSONAL_FIXTURE_COLUMNS = [
+  { TABLE_NAME: "EQUIPMENT_INV_6914", COLUMN_NAME: "IEN",            DATA_TYPE: "varchar" },
+  { TABLE_NAME: "STAFF6929",          COLUMN_NAME: "IEN",            DATA_TYPE: "varchar" },
+  { TABLE_NAME: "STAFF6929",          COLUMN_NAME: "NAME",           DATA_TYPE: "varchar" },
+  { TABLE_NAME: "STAFF6929",          COLUMN_NAME: "HOME_PHONE",     DATA_TYPE: "varchar" },
+  { TABLE_NAME: "STAFF6929",          COLUMN_NAME: "WAGE",           DATA_TYPE: "numeric" },
+  { TABLE_NAME: "SUPPLIER440",        COLUMN_NAME: "IEN",            DATA_TYPE: "varchar" },
+  { TABLE_NAME: "SUPPLIER440",        COLUMN_NAME: "TAX_IDSSN",      DATA_TYPE: "varchar" },
+  { TABLE_NAME: "ROSTER6914_1",       COLUMN_NAME: "IEN",            DATA_TYPE: "varchar" },
+  { TABLE_NAME: "ROSTER6914_1",       COLUMN_NAME: "PHONE_RESP_OFFICIAL", DATA_TYPE: "varchar" },
+  { TABLE_NAME: "MAKER6912",          COLUMN_NAME: "IEN",            DATA_TYPE: "varchar" },
+  { TABLE_NAME: "MAKER6912",          COLUMN_NAME: "PHONE",          DATA_TYPE: "varchar" },
+  { TABLE_NAME: "MAKER6912",          COLUMN_NAME: "STREET",         DATA_TYPE: "varchar" },
+  { TABLE_NAME: "WORK_ORDER_6920",    COLUMN_NAME: "IEN",            DATA_TYPE: "varchar" },
+  { TABLE_NAME: "WORK_ORDER_6920",    COLUMN_NAME: "PHONE",          DATA_TYPE: "varchar" },
+];
+const PERSONAL_FIXTURE_DD = {
+  EQUIPMENT_INV_6914: { file: "6914", fields: {} },
+  STAFF6929:   { file: "6929", fields: { HOME_PHONE: { fieldNum: "4", ddName: "HOME PHONE", type: "FREE TEXT", description: "Employee's home telephone number." } } },
+  SUPPLIER440: { file: "440",  fields: {} },
+  ROSTER6914_1: { file: "6914.1", fields: { PHONE_RESP_OFFICIAL: { fieldNum: "3", ddName: "PHONE (RESP OFFICIAL)", type: "FREE TEXT", description: "" } } },
+  MAKER6912:   { file: "6912", fields: { PHONE: { fieldNum: "5", ddName: "PHONE", type: "FREE TEXT", description: "Commercial telephone number (including area code)." },
+                                         STREET: { fieldNum: "2", ddName: "STREET", type: "FREE TEXT", description: "Street address to which correspondence could be directed." } } },
+  WORK_ORDER_6920: { file: "6920", allowList: false, keep: true, reason: "not an inventory file",
+                     fields: { PHONE: { fieldNum: "9", ddName: "PHONE", type: "FREE TEXT", description: "Telephone number or extension of the individual requesting the work." } } },
+};
+
+test("personalColumns: SSN, tax id, home, birth date, wage and a person's phone are personal; a company's phone is not", () => {
+  const cols = names => names.map(([column, ddName = column, meaning = ""]) => ({ column, ddName, meaning }));
+  const hit = list => personalColumns(cols(list)).map(c => c.column);
+  assert.deepEqual(hit([["SSN"], ["TAX_IDSSN"], ["SSNTAX_ID_INDICATOR"], ["PHONE_HOME"], ["HOME_STREET_ADDRESS"], ["DOB"], ["DATE_OF_BIRTH"], ["WAGE"], ["HOURLYRATE"], ["ANNUAL_SALARY"]]),
+    ["SSN", "TAX_IDSSN", "SSNTAX_ID_INDICATOR", "PHONE_HOME", "HOME_STREET_ADDRESS", "DOB", "DATE_OF_BIRTH", "WAGE", "HOURLYRATE", "ANNUAL_SALARY"]);
+  assert.deepEqual(hit([["PHONE_RESP_OFFICIAL", "PHONE (RESP OFFICIAL)"], ["HOSP_TELE_EXT_", "HOSP.TELE.EXT.", "Telephone extension on which this employee may be reached."],
+                        ["CITY", "CITY", "This is the city of the permanent address of the new person."]]),
+    ["PHONE_RESP_OFFICIAL", "HOSP_TELE_EXT_", "CITY"]);
+  assert.deepEqual(hit([["PHONE", "PHONE", "Commercial telephone number (including area code)."], ["STREET", "STREET", "Street address to which correspondence could be directed."],
+                        ["CLASSNAME"], ["MFGR__EQUIPMENT_NAME"], ["DLA_ADDRESS", "DLA ADDRESS", "This field restricts the selection to DLA addresses only."]]), []);
+});
+
+test("inventoryFields: a table with personal data is never allow-listed, is dropped, and its reason is recorded", () => {
+  const r = inventoryFields({ columns: PERSONAL_FIXTURE_COLUMNS, dd: PERSONAL_FIXTURE_DD });
+  assert.deepEqual(r.allowList, ["VISTA.EQUIPMENT_INV_6914", "VISTA.MAKER6912"]);
+  for (const t of ["STAFF6929", "SUPPLIER440", "ROSTER6914_1"]) {
+    assert.ok(!r.tables[t], `${t} is not described at all`);
+    assert.ok(!Object.keys(r.evidence).some(k => k.startsWith(t + ".")), `${t} has no evidence lines`);
+    assert.match(r.excluded["VISTA." + t], /personal data/, `${t} has a reason`);
+  }
+  assert.match(r.excluded["VISTA.STAFF6929"], /HOME_PHONE/);
+  assert.match(r.excluded["VISTA.STAFF6929"], /WAGE/);
+  assert.match(r.excluded["VISTA.SUPPLIER440"], /TAX_IDSSN/);
+  assert.match(r.excluded["VISTA.ROSTER6914_1"], /PHONE_RESP_OFFICIAL/);
+  // a table a quick-access template reads stays described, but is still not allow-listed
+  assert.ok(r.tables.WORK_ORDER_6920, "WORK_ORDER_6920 is kept for the JCAHO template");
+  assert.match(r.excluded["VISTA.WORK_ORDER_6920"], /not an inventory file/);
+  assert.match(r.excluded["VISTA.WORK_ORDER_6920"], /personal data[^\n]*PHONE/);
+});
+
+test("inventory-fields.json: no allow-listed table has a personal-data column", { skip: skipIfMissing }, () => {
+  const inv = JSON.parse(fs.readFileSync(INV_PATH, "utf8"));
+  for (const q of inv.allowList) {
+    const t = inv.tables[q.replace(/^VISTA\./, "")];
+    assert.ok(t, `${q} is described`);
+    for (const c of t.columns) assert.doesNotMatch(c.column, PERSONAL_NAME, `${q}.${c.column} is personal data`);
+    assert.deepEqual(personalColumns(t.columns).map(c => c.column), [], `${q} has no personal columns by the discovery rule`);
+  }
+  for (const q of ["VISTA.ENG_EMPLOYEE6929", "VISTA.VENDOR440", "VISTA.NEW_PERSON200", "VISTA.CMR6914_1"]) {
+    assert.ok(!inv.allowList.includes(q), `${q} is not allow-listed`);
+    assert.match(inv.excluded[q] || "", /personal data/, `${q} has a recorded reason`);
+  }
+  assert.ok(!inv.tables.ENG_EMPLOYEE6929 && !inv.tables.VENDOR440 && !inv.tables.NEW_PERSON200, "personal tables are not described");
+});

@@ -27,13 +27,15 @@ function canon(v) {
 const sha = v => crypto.createHash("sha256").update(canon(v)).digest("hex");
 
 // The API spec hashes only what it may depend on, so orchestrator decisions never make it look stale.
-// The orchestrator hash excludes aiQuestions so AI-layer decisions never make it look stale (one-way rule).
+// The orchestrator hash excludes aiQuestions and implemented.ai, so AI-layer decisions and a finished AI build never
+// make it look stale (one-way rule).
 // The AI hash adds the inventory because the spec depends on it.
 function inputHashes(layer, { graph, record, implemented, inventory }) {
   if (layer === "api") return { graph: sha(graph), decisions: sha(api.dataSlice(graph, record)), implemented: sha((implemented && implemented.api) || []) };
   if (layer === "orchestrator") {
     const { aiQuestions: _aq, ...recordWithout } = record;
-    return { graph: sha(graph), decisions: sha(recordWithout), implemented: sha(implemented) };
+    const { ai: _ai, ...implementedWithout } = implemented || {};
+    return { graph: sha(graph), decisions: sha(recordWithout), implemented: sha(implemented ? implementedWithout : implemented) };
   }
   // layer === "ai"
   return { graph: sha(graph), decisions: sha(record), implemented: sha(implemented), inventory: sha(inventory) };

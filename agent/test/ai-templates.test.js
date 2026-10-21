@@ -240,3 +240,64 @@ test("invalidParams: null inventory → empty array regardless of params", () =>
   const result = invalidParams(tpl("AIQ.AgingOutFY"), params, null);
   assert.deepEqual(result, []);
 });
+
+// ── Final review M4: money is a finite number ≥ 0 (or a plain decimal string) ──
+test("validateParams money: only finite numbers ≥ 0 and plain decimal strings", () => {
+  const t = tpl("AIQ.HighValueNoContract");
+  const check = threshold => validateParams(t, { threshold, valueColumn: "TOTAL_ASSET_VALUE", useStatuses: ["ALL"] }, inv).ok;
+  for (const good of [0, 50000, 1234.5, "50000", "50000.50", " 75000 "]) assert.equal(check(good), true, JSON.stringify(good));
+  for (const bad of ["", "   ", true, false, Infinity, -Infinity, NaN, "Infinity", -1, "-1", [50000], {}, "50,000", "1e309", "0x10", "50000; DROP"]) {
+    assert.equal(check(bad), false, `${typeof bad} ${String(bad)}`);
+  }
+});
+
+test("validateParams year: arrays and booleans are not years", () => {
+  const t = tpl("AIQ.AgingOutFY");
+  const check = fiscalYear => validateParams(t, { fiscalYear, capitalizedMeans: "INVESTMENT_CATEGORY = 1", useStatuses: ["ALL"] }, inv).ok;
+  for (const good of [2030, "2030"]) assert.equal(check(good), true, JSON.stringify(good));
+  for (const bad of [[2030], true, "", "2030.5", 2030.5, Infinity]) assert.equal(check(bad), false, JSON.stringify(bad));
+});
+
+// ── Final review M3: the template texts decide nothing ─────────────────────────
+test("template texts are neutral: no built-in 'active use', and ['ALL'] work-order statuses mean any work order", () => {
+  const cap = tpl("AIQ.CapitalPlanningTotals");
+  assert.doesNotMatch(cap.defaultWording, /active|in use/i, "the use statuses are the developer's decision");
+  const wo = tpl("AIQ.JCAHOPendingInspection").params.find(p => p.key === "workOrderStatuses");
+  assert.doesNotMatch(wo.describe, /open/i, "ALL also matches completed and disapproved work orders");
+  assert.match(wo.describe, /any work order/i);
+  assert.match(wo.describe, /whatever its status/i);
+});
+
+// ── Final review M6: quick-access results are readable ─────────────────────────
+const { fmDateIso, codeLabel } = require("../lib/ai-templates");
+test("AgingOutFY shows REPLACEMENT_DATE as an ISO date and the coded columns by their labels", () => {
+  const sql = sqlFor(tpl("AIQ.AgingOutFY"), { fiscalYear: 2030, capitalizedMeans: "INVESTMENT_CATEGORY = 1", useStatuses: ["ALL"] }, inv);
+  assert.ok(sql.includes(fmDateIso("REPLACEMENT_DATE")), "the date is converted");
+  assert.match(sql, /END AS REPLACEMENT_DATE/);
+  for (const c of ["USE_STATUS", "INVESTMENT_CATEGORY", "TYPE_OF_ENTRY"]) assert.ok(sql.includes(codeLabel(inv, c)), c);
+  assert.match(sql, /WHEN '1' THEN 'IN USE'/);
+  assert.match(sql, /WHEN 'NX' THEN 'NON-EXPENDABLE EQPT'/);
+  // no raw coded or date column is selected on its own
+  const select = sql.split(/\nFROM /)[0];
+  assert.doesNotMatch(select, /, (USE_STATUS|INVESTMENT_CATEGORY|TYPE_OF_ENTRY|REPLACEMENT_DATE)\s*(,|$)/m);
+});
+
+test("the other quick-access lists show their codes by label too", () => {
+  const hv = sqlFor(tpl("AIQ.HighValueNoContract"), { threshold: 1000, valueColumn: "TOTAL_ASSET_VALUE", useStatuses: ["ALL"] }, inv);
+  assert.ok(hv.includes(codeLabel(inv, "SERVICE_CONTRACT")) && hv.includes(codeLabel(inv, "USE_STATUS")));
+  const jc = sqlFor(tpl("AIQ.JCAHOPendingInspection"), { workOrderStatusColumn: "STATUS", workOrderStatuses: ["ALL"], useStatuses: ["ALL"] }, inv);
+  assert.ok(jc.includes(codeLabel(inv, "JCAHO", "e.")) && jc.includes(codeLabel(inv, "USE_STATUS", "e.")));
+  const ct = sqlFor(tpl("AIQ.CapitalPlanningTotals"), { useStatuses: ["ALL"], valueColumns: ["TOTAL_ASSET_VALUE"], groupBy: "INVESTMENT_CATEGORY" }, inv);
+  assert.ok(ct.includes(codeLabel(inv, "INVESTMENT_CATEGORY")), "a coded group shows its label");
+  assert.match(ct, /GROUP BY INVESTMENT_CATEGORY/);
+});
+
+test("fmDateIso and codeLabel: a FileMan date as YYYY, YYYY-MM or YYYY-MM-DD; a code as its label", () => {
+  const d = fmDateIso("REPLACEMENT_DATE");
+  assert.match(d, /^CASE WHEN REPLACEMENT_DATE IS NULL/);
+  assert.match(d, /\+ 1700/);
+  assert.match(d, /END AS REPLACEMENT_DATE$/);
+  assert.equal(codeLabel(inv, "JCAHO"), "CASE JCAHO WHEN 'Y' THEN 'YES' WHEN 'N' THEN 'NO' ELSE JCAHO END AS JCAHO");
+  assert.equal(codeLabel(inv, "JCAHO", "e."), "CASE e.JCAHO WHEN 'Y' THEN 'YES' WHEN 'N' THEN 'NO' ELSE e.JCAHO END AS JCAHO");
+  assert.equal(codeLabel(inv, "MFGR__EQUIPMENT_NAME"), "MFGR__EQUIPMENT_NAME", "an uncoded column is selected as it is");
+});

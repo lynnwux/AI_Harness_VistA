@@ -170,7 +170,7 @@ async function main(paths = DEFAULT_PATHS) {
       if (failed.length || (smtp.user && login !== "stored")) throw new Error("could not store the bulletin's mail settings in IRIS: " + redact([...failed, login || ""].join(" ")));
       note(`mail settings stored as IRIS default settings${smtp.user ? " with a stored login" : ""}`);
     }
-    if (said("START") !== "ok" || !/:1\s*$/.test(said("STATE") || "")) throw new Error("the production did not start:\n" + redact((s.stdout || s.stderr || "").trim().slice(-800)));
+    if (said("START") !== "ok" || !/:1\s*$/.test(said("STATE") || "")) throw new Error("the production did not start:\n" + redact((s.stdout || s.stderr || "").trim()).slice(-800));   // redact before cutting: a cut secret leaves no part behind
     status.portalUrl = portalUrl(url, said("PORTAL")); save();
     note("in IRIS: " + (status.portalUrl || "the namespace has no default web app — open the Management Portal and switch to " + d.namespace));
 

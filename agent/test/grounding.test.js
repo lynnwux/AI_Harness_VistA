@@ -192,9 +192,9 @@ test("a reply that clearly names an AI question focuses its group via alias matc
     userMessage: "", record: { oqPolicy: {} }, currentId: null });
   assert.ok(r3.focus.includes("AIQ.JCAHOPendingInspection"), "JCAHOPendingInspection should be focused");
 
-  // AIQ.CapitalPlanningTotals — "capital", "planning", "totals", "active" (4+ matches)
+  // AIQ.CapitalPlanningTotals — "capital", "planning", "totals", "counts", "asset", "values" (4+ matches)
   const r4 = checkReply({ graph, index: ix,
-    reply: "Capital planning totals for active equipment in use.",
+    reply: "Capital planning totals: the equipment counts and asset values.",
     userMessage: "", record: { oqPolicy: {} }, currentId: null });
   assert.ok(r4.focus.includes("AIQ.CapitalPlanningTotals"), "CapitalPlanningTotals should be focused");
 });

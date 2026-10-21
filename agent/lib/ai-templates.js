@@ -54,6 +54,27 @@ function fyDates(fiscalYear) {
   return { start, end };
 }
 
+// A coded 6914 column shown by its label: CASE <col> WHEN '<code>' THEN '<label>' … ELSE <col> END AS <col>.
+// The codes come from the inventory (the data dictionary); a column without codes is selected as it is.
+function codeLabel(inventory, column, prefix = "") {
+  const col = prefix + column;
+  const codes = codesFor(inventory, "EQUIPMENT_INV_6914", column);
+  if (!codes.length) return col;
+  return `CASE ${col} ${codes.map(([c, l]) => `WHEN ${qsql(c)} THEN ${qsql(l)}`).join(" ")} ELSE ${col} END AS ${column}`;
+}
+
+// A FileMan date column shown readably: YYYY-MM-DD, or YYYY-MM / YYYY when the date has no day / month
+// (FileMan stores imprecise dates with 00 there). FileMan dates are YYYMMDD with YYY = year - 1700.
+function fmDateIso(column, prefix = "") {
+  const d = `CAST(${prefix}${column} AS INTEGER)`;
+  const s = `CAST(${d} AS VARCHAR(7))`;
+  const year = `CAST(FLOOR(${d} / 10000) + 1700 AS VARCHAR(4))`;
+  return `CASE WHEN ${prefix}${column} IS NULL OR ${prefix}${column} = '' THEN NULL`
+    + ` WHEN SUBSTRING(${s}, 4, 4) = '0000' THEN ${year}`
+    + ` WHEN SUBSTRING(${s}, 6, 2) = '00' THEN ${year} || '-' || SUBSTRING(${s}, 4, 2)`
+    + ` ELSE ${year} || '-' || SUBSTRING(${s}, 4, 2) || '-' || SUBSTRING(${s}, 6, 2) END AS ${column}`;
+}
+
 // Returns `USE_STATUS IN ('1','2',...)` or null when ALL.
 function useStatusClause(codes) {
   if (!codes || codes[0] === "ALL") return null;
@@ -90,7 +111,7 @@ const TEMPLATES = [
       },
     ],
     tables: ["EQUIPMENT_INV_6914"],
-    sql(params, _inventory) {
+    sql(params, inventory) {
       const { start, end } = fyDates(params.fiscalYear);
       const capCond = params.capitalizedMeans === "INVESTMENT_CATEGORY = 1"
         ? "INVESTMENT_CATEGORY = '1'"
@@ -103,8 +124,11 @@ const TEMPLATES = [
       ];
       if (statusCond) wheres.push(statusCond);
       return [
-        "SELECT IEN, MFGR__EQUIPMENT_NAME, EQUIPMENT_CATEGORY_NAME, SERVICE_POINTER_NAME,",
-        "       LOCATION_ROOM_NUMBER, REPLACEMENT_DATE, INVESTMENT_CATEGORY, TYPE_OF_ENTRY, USE_STATUS",
+        "SELECT IEN, MFGR__EQUIPMENT_NAME, EQUIPMENT_CATEGORY_NAME, SERVICE_POINTER_NAME, LOCATION_ROOM_NUMBER,",
+        `       ${fmDateIso("REPLACEMENT_DATE")},`,
+        `       ${codeLabel(inventory, "INVESTMENT_CATEGORY")},`,
+        `       ${codeLabel(inventory, "TYPE_OF_ENTRY")},`,
+        `       ${codeLabel(inventory, "USE_STATUS")}`,
         "FROM VISTA.EQUIPMENT_INV_6914",
         "WHERE " + wheres.join("\n  AND "),
       ].join("\n");
@@ -146,8 +170,9 @@ const TEMPLATES = [
       const wheres = [`${valueCol} >= ${threshold}`, noContract];
       if (statusCond) wheres.push(statusCond);
       return [
-        `SELECT IEN, MFGR__EQUIPMENT_NAME, EQUIPMENT_CATEGORY_NAME, SERVICE_POINTER_NAME,`,
-        `       LOCATION_ROOM_NUMBER, ${valueCol}, SERVICE_CONTRACT, USE_STATUS`,
+        `SELECT IEN, MFGR__EQUIPMENT_NAME, EQUIPMENT_CATEGORY_NAME, SERVICE_POINTER_NAME, LOCATION_ROOM_NUMBER, ${valueCol},`,
+        `       ${codeLabel(inventory, "SERVICE_CONTRACT")},`,
+        `       ${codeLabel(inventory, "USE_STATUS")}`,
         "FROM VISTA.EQUIPMENT_INV_6914",
         "WHERE " + wheres.join("\n  AND "),
       ].join("\n");
@@ -168,7 +193,7 @@ const TEMPLATES = [
         // column is dynamic: resolved at validation time from workOrderStatusColumn
         key: "workOrderStatuses",
         type: "codes",
-        describe: "Work-order status codes that count as pending (or [\"ALL\"] for any open work order)",
+        describe: "Work-order status codes that count as pending (or [\"ALL\"] for any work order on file, whatever its status)",
         table: "WORK_ORDER_6920",
         column: null,   // resolved against params.workOrderStatusColumn at validate time
       },
@@ -197,8 +222,9 @@ const TEMPLATES = [
       ];
       if (statusCond) wheres.push(statusCond);
       return [
-        "SELECT e.IEN, e.MFGR__EQUIPMENT_NAME, e.EQUIPMENT_CATEGORY_NAME, e.SERVICE_POINTER_NAME,",
-        "       e.LOCATION_ROOM_NUMBER, e.JCAHO, e.USE_STATUS",
+        "SELECT e.IEN, e.MFGR__EQUIPMENT_NAME, e.EQUIPMENT_CATEGORY_NAME, e.SERVICE_POINTER_NAME, e.LOCATION_ROOM_NUMBER,",
+        `       ${codeLabel(inventory, "JCAHO", "e.")},`,
+        `       ${codeLabel(inventory, "USE_STATUS", "e.")}`,
         "FROM VISTA.EQUIPMENT_INV_6914 e",
         "WHERE " + wheres.join("\n  AND "),
       ].join("\n");
@@ -207,7 +233,7 @@ const TEMPLATES = [
 
   {
     id: "AIQ.CapitalPlanningTotals",
-    defaultWording: "What are the capital-planning totals for equipment in active use?",
+    defaultWording: "What are the capital-planning totals — equipment counts and asset values?",
     params: [
       {
         key: "useStatuses",
@@ -239,7 +265,7 @@ const TEMPLATES = [
       const sums = params.valueColumns.map(vc => `SUM(${vc}) AS SUM_${vc}`).join(",\n       ");
       const groupCol = params.groupBy !== "none" ? params.groupBy : null;
       const selectParts = [];
-      if (groupCol) selectParts.push(groupCol);
+      if (groupCol) selectParts.push(codeLabel(inventory, groupCol));   // a coded group (INVESTMENT_CATEGORY) shows its label
       selectParts.push("COUNT(*) AS TOTAL_COUNT");
       selectParts.push(sums);
       selectParts.push(`COUNT(${capCond}) AS CAPITALIZED_COUNT`);
@@ -258,14 +284,22 @@ const TEMPLATES = [
 // ── Validation ────────────────────────────────────────────────────────────────
 
 // Validate one param's value; returns an array of error strings (empty = ok).
+// A number the developer stated: a finite JSON number, or a plain decimal string ("50000", "50000.50");
+// anything else (booleans, "", arrays, Infinity, "1e3", "50,000") is not a number here. null when it is not.
+function asNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && /^\s*-?\d+(\.\d+)?\s*$/.test(value)) return Number(value);
+  return null;
+}
+
 function validateOne(p, value, allParams, inventory) {
   if (p.type === "year") {
-    const n = Number(value);
-    if (!Number.isInteger(n) || n < 1990 || n > 2100)
+    const n = asNumber(value);
+    if (n === null || !Number.isInteger(n) || n < 1990 || n > 2100)
       return [`${p.key}: must be an integer between 1990 and 2100, got ${JSON.stringify(value)}`];
   } else if (p.type === "money") {
-    const n = Number(value);
-    if (isNaN(n) || n < 0)
+    const n = asNumber(value);
+    if (n === null || n < 0)
       return [`${p.key}: must be a number ≥ 0, got ${JSON.stringify(value)}`];
   } else if (p.type === "enum") {
     if (!p.options.includes(value))
@@ -339,4 +373,4 @@ function invalidParams(template, recordedParams, inventory) {
     });
 }
 
-module.exports = { TEMPLATES, validateParams, missingFor, sqlFor, validateOne, invalidParams };
+module.exports = { TEMPLATES, validateParams, missingFor, sqlFor, validateOne, invalidParams, codeLabel, fmDateIso };
