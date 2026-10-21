@@ -131,65 +131,111 @@ function countFrom(result) {
 }
 
 // Does reply contain n (integer) with or without thousands-separator commas, as a whole number?
-// "We have 1,295 items" matches 1295; "12950" does not match 1295.
+// "We have 1,295 items" matches 1295; "12950" does not match 1295; "295.7" does not match 295.
+// Guards against NaN and negative n (returns false).
 function countInReply(reply, n) {
-  const s = String(Math.round(Number(n)));
+  const num = Number(n);
+  if (!isFinite(num) || num < 0) return false;
+  const s = String(Math.round(num));
+  if (!/^\d+$/.test(s)) return false; // extra safety
   let pat = "";
   for (let i = 0; i < s.length; i++) {
     if (i > 0 && (s.length - i) % 3 === 0) pat += ",?";
     pat += s[i];
   }
-  return new RegExp("(?<!\\d)" + pat + "(?!\\d)").test(reply);
+  // (?!\.) prevents matching "295.7" as 295; (?!\d) prevents "12950" matching 1295.
+  return new RegExp("(?<!\\d)" + pat + "(?!\\d|\\.)").test(reply);
 }
 
-// Evaluate all three verification axes. Returns { ok, problems }.
-// quick[]: { id, chatbot (full result obj with rows/rowCount/truncated), direct (rows array) }
+// Evaluate all three verification axes. Returns { ok, problems, items }.
+// quick[]: { id, chatbot (full result obj with rows/rowCount/truncated/error?), direct (rows array) }
 // count:   { result (chatbot full result), reply (string), reference (number) } — null to skip
-// guard[]: { sql, allowed (bool), got (bool) }
+// guard[]: { sql, allowed (bool), got (bool), error? (string) }
+// rowCap:  the row cap the AI build uses (default 200)
+//
 // Comparison rules (ruling 4):
-//   Not truncated: compare as sets with sameRows (order-insensitive).
-//   Truncated:     compare chatbot.rowCount <= direct.length + subset check (each chatbot row in direct).
-function judgeAi({ quick = [], count = null, guard = [] }) {
+//   Not truncated: compare as sets with sameRows (order-insensitive, trimmed strings).
+//   Truncated:     chatbotRows.length must equal rowCap; direct.length must exceed rowCap;
+//                  multiset subset check (chatbot rows appear in direct with multiplicity — sorted merge).
+// Count rule: BOTH countFrom(result) === reference AND countInReply(reply, reference) must hold;
+//             a chatbot.error on the count result fails it.
+// items is the status.verification array (single source of truth — not duplicated in main()).
+function judgeAi({ quick = [], count = null, guard = [], rowCap = 200 }) {
   const problems = [];
+  const items = [];
 
   for (const q of quick) {
-    const chatbotRows = (q.chatbot && q.chatbot.rows) || [];
+    const chatErr = q.chatbot && q.chatbot.error;
+    if (chatErr) {
+      problems.push(`question ${q.id}: chatbot error — ${chatErr}`);
+      items.push({ question: q.id, chatbot: `error: ${String(chatErr).slice(0, 60)}`, vista: `${(q.direct || []).length} rows`, ok: false });
+      continue;
+    }
+    if (!Array.isArray(q.chatbot && q.chatbot.rows)) {
+      problems.push(`question ${q.id}: chatbot result has no rows array`);
+      items.push({ question: q.id, chatbot: "no rows array", vista: `${(q.direct || []).length} rows`, ok: false });
+      continue;
+    }
+    const chatbotRows = q.chatbot.rows;
     const directRows  = q.direct || [];
-    const truncated   = !!(q.chatbot && q.chatbot.truncated);
+    const truncated   = !!(q.chatbot.truncated);
     let ok;
     if (!truncated) {
       ok = sameRows(chatbotRows, directRows);
     } else {
-      // Truncated path: all 200 chatbot rows must be present in the full direct result.
-      const directNorm  = new Set(directRows.map(normalizeRow));
-      const allPresent  = chatbotRows.every(r => directNorm.has(normalizeRow(r)));
-      ok = chatbotRows.length <= directRows.length && allPresent;
+      // Strict truncated path:
+      // 1. chatbotRows.length must equal rowCap (it really hit the cap)
+      // 2. directRows.length must exceed rowCap (VistA really has more rows)
+      // 3. Multiset subset: every chatbot row appears at least as often in direct (sorted-merge).
+      if (chatbotRows.length !== rowCap || directRows.length <= rowCap) {
+        ok = false;
+      } else {
+        const chatSorted   = chatbotRows.map(normalizeRow).sort();
+        const directSorted = directRows.map(normalizeRow).sort();
+        let di = 0;
+        ok = chatSorted.every(nr => {
+          while (di < directSorted.length && directSorted[di] < nr) di++;
+          return di < directSorted.length && directSorted[di++] === nr;
+        });
+      }
     }
-    if (!ok) {
-      const cb = truncated
-        ? `${(q.chatbot && q.chatbot.rowCount) || chatbotRows.length} rows (truncated)`
-        : `${chatbotRows.length} rows`;
-      problems.push(`question ${q.id}: chatbot returned ${cb}, VistA returned ${directRows.length} rows`);
-    }
+    const cb    = truncated ? `${q.chatbot.rowCount || chatbotRows.length} rows (truncated)` : `${chatbotRows.length} rows`;
+    const vista = `${directRows.length} rows`;
+    if (!ok) problems.push(`question ${q.id}: chatbot returned ${cb}, VistA returned ${vista}`);
+    items.push({ question: q.id, chatbot: cb, vista, ok });
   }
 
   if (count) {
-    const n         = count.reference;
-    const chatCount = countFrom(count.result);
-    const replyOk   = n != null && countInReply(count.reply || "", n);
-    const countOk   = replyOk || (chatCount != null && n != null && String(chatCount).trim() === String(n).trim());
-    if (!countOk) {
-      problems.push(`count mismatch: chatbot="${String(count.reply || "").trim().slice(0, 80)}", VistA=${n}`);
+    const n       = count.reference;
+    const chatErr = count.result && count.result.error;
+    if (chatErr) {
+      problems.push(`count: chatbot error — ${chatErr}`);
+      items.push({ question: "count", chatbot: `error: ${String(chatErr).slice(0, 60)}`, vista: `${n}`, ok: false });
+    } else {
+      // Require BOTH: countFrom(result) matches reference AND countInReply(reply, reference).
+      const chatCount  = countFrom(count.result);
+      const countMatch = chatCount != null && n != null && String(chatCount).trim() === String(n).trim();
+      const replyOk    = n != null && countInReply(count.reply || "", n);
+      const countOk    = countMatch && replyOk;
+      const chatDesc   = String(count.reply || "").trim().slice(0, 80);
+      if (!countOk) problems.push(`count mismatch: chatbot="${chatDesc}", VistA=${n}`);
+      items.push({ question: "count", chatbot: chatDesc, vista: `${n}`, ok: countOk });
     }
   }
 
   for (const g of guard) {
-    if (g.got !== g.allowed) {
+    if (g.error) {
+      problems.push(`guard case "${String(g.sql).slice(0, 60)}": HTTP error — ${g.error}`);
+    } else if (g.got !== g.allowed) {
       problems.push(`guard case "${String(g.sql).slice(0, 60)}": expected allowed=${g.allowed}, got ${g.got}`);
     }
   }
+  if (guard.length) {
+    const guardFail = guard.filter(g => g.error || g.got !== g.allowed).length;
+    items.push({ question: "guard", chatbot: `${guard.length - guardFail}/${guard.length} passed`, vista: "expected", ok: guardFail === 0 });
+  }
 
-  return { ok: problems.length === 0, problems };
+  return { ok: problems.length === 0, problems, items };
 }
 
 // Check that every expected marker line came back with its success value.
@@ -314,29 +360,32 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
 
     const vademoUrl = (process.env.VADEMO_URL || "").replace(/\/+$/, "");
     if (!vademoUrl) throw new Error("VADEMO_URL is not set — add it to agent/.env");
+    if (!vuser) throw new Error("VADEMO_READ_USER or VADEMO_USER is not set — add it to agent/.env");
 
     const hubBase   = (url || "").replace(/\/+$/, "");
     const hubAuth   = "Basic " + Buffer.from(`${user}:${pass}`).toString("base64");
     const atAuth    = "Basic " + Buffer.from(`${vuser}:${vpass}`).toString("base64");
     const atUrl     = vademoUrl + VADEMO_PATH;
 
-    // POST to the hub; redact any secrets that might appear in error text.
+    // POST to the hub; throws on non-2xx.
     async function hubPost(p, body) {
       const r = await fetchFn(hubBase + p, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": hubAuth },
         body: JSON.stringify(body),
       });
+      if (!r.ok) throw new Error(redact(`hub request ${p} failed: HTTP ${r.status}`, secrets));
       return r.json();
     }
 
-    // POST direct SQL to VADEMO's Atelier endpoint; return content rows (array).
+    // POST direct SQL to VADEMO's Atelier endpoint; throws on non-2xx or SQL error.
     async function directQuery(sql) {
-      const r    = await fetchFn(atUrl, {
+      const r = await fetchFn(atUrl, {
         method:  "POST",
         headers: { "Content-Type": "application/json", "Authorization": atAuth },
         body:    JSON.stringify({ query: sql }),
       });
+      if (!r.ok) throw new Error(redact(`VADEMO request failed: HTTP ${r.status}`, secrets));
       const data = await r.json();
       if (data.status && data.status.errors && data.status.errors.length) {
         throw new Error(redact("VistA error: " + (data.status.errors[0].error || "unknown"), secrets));
@@ -344,81 +393,82 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
       return (data.result && data.result.content) || [];
     }
 
-    // 1. Quick questions: for each kept question, compare chatbot vs direct.
-    const sessionId = "verify-" + Date.now();
+    // 1. Quick questions: each uses a fresh session; compare chatbot vs direct.
     const quickInput = [];
-    for (const q of d.questions) {
-      const qId      = q.id.replace(/^AIQ\./, "");
-      const chatbot  = await hubPost(`/equipmentai/quick/${encodeURIComponent(qId)}`, { sessionId });
-      const direct   = await directQuery(q.sql);
+    for (let qi = 0; qi < d.questions.length; qi++) {
+      const q       = d.questions[qi];
+      const qId     = q.id.replace(/^AIQ\./, "");
+      const qSessId = "verify-q-" + Date.now() + "-" + qi;
+      const chatbot = await hubPost(`/equipmentai/quick/${encodeURIComponent(qId)}`, { sessionId: qSessId });
+      const direct  = await directQuery(q.sql);
       quickInput.push({ id: q.id, chatbot, direct });
-      const cb = chatbot.truncated ? `${chatbot.rowCount} rows (truncated)` : `${chatbot.rowCount} rows`;
+      const cb = (chatbot.truncated) ? `${chatbot.rowCount} rows (truncated)` : `${(chatbot.rows || []).length} rows`;
       safeNote(`quick ${q.id}: chatbot=${cb}, vista=${direct.length} rows`);
     }
 
     // 2. Count check: ask chat "How many pieces of equipment do we have?" — one retry on failure.
+    //    The direct reference must be exactly one row with one numeric value, otherwise throw.
     const countQ      = "How many pieces of equipment do we have?";
     const countRefSQL = "SELECT COUNT(*) AS n FROM VISTA.EQUIPMENT_INV_6914";
     let countChat     = await hubPost("/equipmentai/chat", { sessionId: "verify-count-" + Date.now(), message: countQ });
     const countDirect = await directQuery(countRefSQL);
-    const countRef    = countFrom({ rows: countDirect, rowCount: countDirect.length,
-                                    columns: countDirect.length ? Object.keys(countDirect[0]) : [] });
-    const countOkFirst = countRef != null && (
-      countInReply(countChat.reply || "", countRef) ||
-      String(countFrom(countChat)).trim() === String(countRef).trim()
-    );
-    if (!countOkFirst) {
-      // one retry with a fresh session
+    if (countDirect.length !== 1) throw new Error(`COUNT(*) reference returned ${countDirect.length} rows; expected exactly 1`);
+    const countRefKeys = Object.keys(countDirect[0]);
+    if (countRefKeys.length !== 1) throw new Error(`COUNT(*) reference row has ${countRefKeys.length} columns; expected exactly 1`);
+    const countRefNum = Number(String(countDirect[0][countRefKeys[0]]).trim());
+    if (isNaN(countRefNum)) throw new Error("COUNT(*) reference value is not numeric");
+    const countRef = countRefNum;
+
+    // Helper: is a count result OK? Requires BOTH: countFrom matches AND countInReply matches.
+    const countResultOk = chat =>
+      !chat.error &&
+      String(countFrom(chat)).trim() === String(countRef).trim() &&
+      countInReply(chat.reply || "", countRef);
+
+    if (!countResultOk(countChat)) {
+      // One retry with a fresh session.
       const retryChat = await hubPost("/equipmentai/chat", { sessionId: "verify-retry-" + Date.now(), message: countQ });
-      const retryOk   = countRef != null && (
-        countInReply(retryChat.reply || "", countRef) ||
-        String(countFrom(retryChat)).trim() === String(countRef).trim()
-      );
-      if (retryOk) countChat = retryChat;
+      if (countResultOk(retryChat)) countChat = retryChat;
     }
 
-    // 3. Guard cases: replay every GUARD_CASES entry through /guard.
+    // 3. Guard cases: replay every GUARD_CASES entry through /guard; capture HTTP errors as error entries.
     const guardInput = [];
     for (const gc of GUARD_CASES) {
-      const resp = await hubPost("/equipmentai/guard", { sql: gc.sql });
-      guardInput.push({ sql: gc.sql, allowed: gc.allowed, got: resp.ok === true });
+      let guardEntry;
+      try {
+        const r = await fetchFn(hubBase + "/equipmentai/guard", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", "Authorization": hubAuth },
+          body:    JSON.stringify({ sql: gc.sql }),
+        });
+        if (!r.ok) {
+          guardEntry = { sql: gc.sql, allowed: gc.allowed, got: false, error: `HTTP ${r.status}` };
+        } else {
+          const resp = await r.json();
+          if (typeof resp.ok !== "boolean") {
+            guardEntry = { sql: gc.sql, allowed: gc.allowed, got: false, error: "response.ok is not a boolean" };
+          } else if (!resp.ok && !resp.reason) {
+            guardEntry = { sql: gc.sql, allowed: gc.allowed, got: false, error: "rejected without a reason" };
+          } else {
+            guardEntry = { sql: gc.sql, allowed: gc.allowed, got: resp.ok };
+          }
+        }
+      } catch (e) {
+        guardEntry = { sql: gc.sql, allowed: gc.allowed, got: false, error: redact(e.message, secrets) };
+      }
+      guardInput.push(guardEntry);
     }
 
-    // Build status.verification (short human-readable entries).
-    const verificationRows = [];
-    for (const q of quickInput) {
-      const chatbotRows = (q.chatbot && q.chatbot.rows) || [];
-      const truncated   = !!(q.chatbot && q.chatbot.truncated);
-      const cb   = truncated ? `${(q.chatbot.rowCount || chatbotRows.length)} rows (truncated)` : `${chatbotRows.length} rows`;
-      const vista = `${q.direct.length} rows`;
-      const ok   = truncated
-        ? (chatbotRows.length <= q.direct.length && chatbotRows.every(r => { const dn = new Set(q.direct.map(normalizeRow)); return dn.has(normalizeRow(r)); }))
-        : sameRows(chatbotRows, q.direct);
-      verificationRows.push({ question: q.id, chatbot: cb, vista, ok });
-    }
-    // Count entry
-    const countOk = countRef != null && (
-      countInReply(countChat.reply || "", countRef) ||
-      String(countFrom(countChat)).trim() === String(countRef).trim()
-    );
-    verificationRows.push({
-      question: "count",
-      chatbot:  redact(String(countChat.reply || "(no reply)").slice(0, 80), secrets),
-      vista:    `${countRef}`,
-      ok:       countOk,
-    });
-    // Guard summary entry
-    const guardFail = guardInput.filter(g => g.got !== g.allowed).length;
-    verificationRows.push({ question: "guard", chatbot: `${GUARD_CASES.length - guardFail}/${GUARD_CASES.length} passed`, vista: "expected", ok: guardFail === 0 });
-
-    status.verification = verificationRows;
-    save();
-
+    // Judge — judgeAi is the single source of truth; items becomes status.verification.
     const judgeResult = judgeAi({
       quick:  quickInput,
-      count:  { result: countChat, reply: countChat.reply || "", reference: countRef },
+      count:  { result: countChat, reply: redact(countChat.reply || "", secrets), reference: countRef },
       guard:  guardInput,
+      rowCap: 200,
     });
+
+    status.verification = judgeResult.items;
+    save();
 
     if (!judgeResult.ok) {
       throw new Error("verification failed:\n" + judgeResult.problems.map(p => "  • " + p).join("\n"));

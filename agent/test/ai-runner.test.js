@@ -33,22 +33,25 @@ function setupAiSpecs(record) {
   fs.writeFileSync(paths.implemented, JSON.stringify(im));
   fs.writeFileSync(paths.inventory, JSON.stringify(inventory));
   writeSpecs(paths.specsDir, generate({ graph, record, implemented: im, inventory }), { graph, record, implemented: im, inventory });
-  return paths;
+  return { paths, dir };
 }
 
 test("readAiSpec refuses an incomplete AI spec", () => {
-  const paths = setupAiSpecs(rec({}));
-  assert.throws(() => readAiSpec(paths), /not complete/);
+  const { paths, dir } = setupAiSpecs(rec({}));
+  try { assert.throws(() => readAiSpec(paths), /not complete/); }
+  finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("readAiSpec refuses a stale AI spec", () => {
-  const paths = setupAiSpecs(rec({}));
-  // Change the decisions file without regenerating the spec — staleness check fires first
-  const d = JSON.parse(fs.readFileSync(paths.decisions, "utf8"));
-  d.dec = d.dec || {};
-  d.dec["OQ.WorkOrderPolicy"] = "Required input";
-  fs.writeFileSync(paths.decisions, JSON.stringify(d));
-  assert.throws(() => readAiSpec(paths), /stale/);
+  const { paths, dir } = setupAiSpecs(rec({}));
+  try {
+    // Change the decisions file without regenerating the spec — staleness check fires first
+    const d = JSON.parse(fs.readFileSync(paths.decisions, "utf8"));
+    d.dec = d.dec || {};
+    d.dec["OQ.WorkOrderPolicy"] = "Required input";
+    fs.writeFileSync(paths.decisions, JSON.stringify(d));
+    assert.throws(() => readAiSpec(paths), /stale/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("aiSettingsScript uses the read-only credentials when given", () => {
@@ -184,7 +187,7 @@ const allKept = {
 function setupCompleteAiSpecs() {
   const r = rec({});
   r.aiQuestions = allKept;
-  return setupAiSpecs(r);
+  return setupAiSpecs(r); // returns { paths, dir }
 }
 
 // Capture the real agent/ paths state before any main() test runs — used by the guard test below.
@@ -200,7 +203,7 @@ const beforeProdEntries   = fs.existsSync(REAL_PROD_DIR)
   : new Set();
 
 test("main() settings step fails and names a missing marker when irisSession output is incomplete", async () => {
-  const paths = setupCompleteAiSpecs();
+  const { paths, dir: specsTmpDir } = setupCompleteAiSpecs();
 
   // Create a minimal fake INTERCLAW_SCRIPTS directory with lib/iris.py present
   const scriptsDir = fs.mkdtempSync(path.join(os.tmpdir(), "fake-scripts-"));
@@ -259,46 +262,10 @@ test("main() settings step fails and names a missing marker when irisSession out
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
-    fs.rmSync(tmpDir,      { recursive: true, force: true });
-    fs.rmSync(scriptsDir,  { recursive: true, force: true });
+    fs.rmSync(tmpDir,       { recursive: true, force: true });
+    fs.rmSync(scriptsDir,   { recursive: true, force: true });
+    fs.rmSync(specsTmpDir,  { recursive: true, force: true });
   }
-});
-
-test("guard: main() integration tests do not write to agent/ai-status.json, agent/implemented.json, or agent/_production/", () => {
-  // Confirms all main() tests used injected temp paths and left the real agent/ paths untouched.
-  if (beforeStatusContent === null) {
-    assert.ok(
-      !fs.existsSync(REAL_STATUS_FILE),
-      "agent/ai-status.json must not exist after tests — main() must use the injected _statusFile path"
-    );
-  } else {
-    assert.equal(
-      fs.readFileSync(REAL_STATUS_FILE, "utf8"), beforeStatusContent,
-      "agent/ai-status.json must be unchanged after tests — main() must use the injected _statusFile path"
-    );
-  }
-
-  // implemented.json guard
-  if (beforeImplContent === null) {
-    assert.ok(
-      !fs.existsSync(REAL_IMPLEMENTED_FILE),
-      "agent/implemented.json must not exist after tests — main() must use paths.implemented (injected temp path)"
-    );
-  } else {
-    assert.equal(
-      fs.readFileSync(REAL_IMPLEMENTED_FILE, "utf8"), beforeImplContent,
-      "agent/implemented.json must be unchanged after tests — main() must use paths.implemented (injected temp path)"
-    );
-  }
-
-  const afterProdEntries = fs.existsSync(REAL_PROD_DIR)
-    ? new Set(fs.readdirSync(REAL_PROD_DIR))
-    : new Set();
-  const newEntries = [...afterProdEntries].filter(e => !beforeProdEntries.has(e));
-  assert.deepEqual(
-    newEntries, [],
-    "no new entries must appear in agent/_production/ after tests — main() must use the injected _productionDir path"
-  );
 });
 
 // ── sameRows ──────────────────────────────────────────────────────────────────
@@ -431,15 +398,15 @@ test("judgeAi: count mismatch → one problem", () => {
   assert.match(result.problems[0], /count mismatch/);
 });
 
-test("judgeAi: count ok by reply match even when countFrom differs", () => {
-  // reply mentions 295, reference is 295 → ok
+test("judgeAi: count requires BOTH — reply-only (countFrom=0, reference=295, reply mentions 295) fails", () => {
+  // BOTH required: countFrom=0 ≠ 295, so this must fail even though the reply mentions 295.
   const result = judgeAi({
     quick: [],
     count: { result: { rows: [], columns: [], rowCount: 0 }, reply: "We have 295 items.", reference: 295 },
     guard: [],
   });
-  assert.ok(result.ok);
-  assert.deepEqual(result.problems, []);
+  assert.ok(!result.ok, "countFrom=0 ≠ reference=295 → fail even though reply matches");
+  assert.ok(result.problems.some(p => /count mismatch/.test(p)));
 });
 
 test("judgeAi: guard mismatches → one problem per failing case", () => {
@@ -457,60 +424,196 @@ test("judgeAi: guard mismatches → one problem per failing case", () => {
   assert.match(result.problems[0], /DELETE 1/);
 });
 
-test("judgeAi: truncated quick result — subset check", () => {
-  const chatbotRows = [{ ien: "1" }, { ien: "2" }];
-  const directRows  = [{ ien: "1" }, { ien: "2" }, { ien: "3" }];
+test("judgeAi: truncated quick result — all chatbot rows in direct (rowCap-aware)", () => {
+  const CAP = 3;
+  const chatbotRows = [{ ien: "1" }, { ien: "2" }, { ien: "3" }]; // length === CAP
+  const directRows  = [{ ien: "1" }, { ien: "2" }, { ien: "3" }, { ien: "4" }]; // > CAP
   const result = judgeAi({
-    quick: [{ id: "AIQ.Big", chatbot: { rows: chatbotRows, rowCount: 2, truncated: true }, direct: directRows }],
-    count: null,
-    guard: [],
+    quick: [{ id: "AIQ.Big", chatbot: { rows: chatbotRows, rowCount: CAP, truncated: true }, direct: directRows }],
+    count: null, guard: [], rowCap: CAP,
   });
-  assert.ok(result.ok, "chatbot rows are a subset of direct rows → ok");
+  assert.ok(result.ok, "chatbot rows are a subset of direct and counts are correct → ok");
 });
 
 test("judgeAi: truncated quick result — subset fails if chatbot row not in direct", () => {
-  const chatbotRows = [{ ien: "1" }, { ien: "99" }];
-  const directRows  = [{ ien: "1" }, { ien: "2" }, { ien: "3" }];
+  const CAP = 3;
+  const chatbotRows = [{ ien: "1" }, { ien: "2" }, { ien: "99" }]; // ien=99 not in direct
+  const directRows  = [{ ien: "1" }, { ien: "2" }, { ien: "3" }, { ien: "4" }]; // > CAP
   const result = judgeAi({
-    quick: [{ id: "AIQ.Big", chatbot: { rows: chatbotRows, rowCount: 2, truncated: true }, direct: directRows }],
-    count: null,
-    guard: [],
+    quick: [{ id: "AIQ.Big", chatbot: { rows: chatbotRows, rowCount: CAP, truncated: true }, direct: directRows }],
+    count: null, guard: [], rowCap: CAP,
   });
   assert.ok(!result.ok, "ien=99 is not in direct rows → fail");
   assert.equal(result.problems.length, 1);
 });
 
-// ── main() verification step ──────────────────────────────────────────────────
+// ── Finding 1: chatbot error must fail ────────────────────────────────────────
 
-function makeVerifyFetch({ failQuestionId = null } = {}) {
+test("judgeAi: chatbot.error property → problem (never passes as a match)", () => {
+  // Probe from Finding 1
+  const result = judgeAi({
+    quick: [{ id: "AIQ.Test", chatbot: { error: "VistA unreachable", rows: [], rowCount: 0, truncated: false }, direct: [] }],
+    count: null, guard: [],
+  });
+  assert.ok(!result.ok, "chatbot.error must fail the question");
+  assert.ok(result.problems.some(p => /chatbot error/.test(p)), `problem must mention 'chatbot error'; got: ${result.problems}`);
+});
+
+test("judgeAi: chatbot rows not an array → problem", () => {
+  const result = judgeAi({
+    quick: [{ id: "AIQ.Test", chatbot: { rows: null, rowCount: 0, truncated: false }, direct: [] }],
+    count: null, guard: [],
+  });
+  assert.ok(!result.ok);
+});
+
+test("judgeAi: count with chatbot error → problem (empty direct rows (reference=0) must not pass)", () => {
+  // Probe: count:{result:{error:"x",rows:[],rowCount:0},reply:"",reference:0} → ok:true BEFORE fix
+  const result = judgeAi({
+    quick: [],
+    count: { result: { error: "x", rows: [], rowCount: 0, columns: [] }, reply: "", reference: 0 },
+    guard: [],
+  });
+  assert.ok(!result.ok, "chatbot error on count must fail");
+});
+
+// ── Finding 2: count requires BOTH replyOk AND countMatch ─────────────────────
+
+test("countInReply: does not match a decimal like 295.7", () => {
+  assert.ok(!countInReply("We have 295.7 items", 295), "295.7 must not match 295");
+});
+
+test("countInReply: guards against NaN/negative n", () => {
+  assert.ok(!countInReply("NaN items", NaN));
+  assert.ok(!countInReply("-295 items", -295));
+});
+
+test("judgeAi: count requires BOTH replyOk AND countMatch — reply-only match fails", () => {
+  // Reply says "295" but rows say {n:300}: countFrom=300 ≠ 295 → should fail (BOTH required)
+  const result = judgeAi({
+    quick: [],
+    count: { result: { rows: [{ n: 300 }], columns: ["n"], rowCount: 1 }, reply: "We have 295 pieces.", reference: 295 },
+    guard: [],
+  });
+  assert.ok(!result.ok, "replyOk=true but countFrom mismatch → must fail with BOTH required");
+  assert.match(result.problems[0], /count mismatch/);
+});
+
+test("judgeAi: count requires BOTH replyOk AND countMatch — rows-only match fails", () => {
+  // Rows say {n:295} matching reference but reply says "300 items": replyOk=false → fail
+  const result = judgeAi({
+    quick: [],
+    count: { result: { rows: [{ n: 295 }], columns: ["n"], rowCount: 1 }, reply: "We have 300 pieces.", reference: 295 },
+    guard: [],
+  });
+  assert.ok(!result.ok, "countFrom matches but reply mismatch → must fail with BOTH required");
+  assert.match(result.problems[0], /count mismatch/);
+});
+
+// ── Finding 3: truncation strict checks ───────────────────────────────────────
+
+test("judgeAi: truncated — chatbotRows.length !== rowCap → fail", () => {
+  const CAP = 200;
+  const chatbotRows = [{ ien: "1" }, { ien: "2" }]; // 2 ≠ 200
+  const directRows  = Array.from({ length: 201 }, (_, i) => ({ ien: String(i) }));
+  const result = judgeAi({
+    quick: [{ id: "AIQ.Big", chatbot: { rows: chatbotRows, rowCount: 2, truncated: true }, direct: directRows }],
+    count: null, guard: [], rowCap: CAP,
+  });
+  assert.ok(!result.ok, "chatbotRows.length=2 ≠ rowCap=200 → fail");
+});
+
+test("judgeAi: truncated — direct.length ≤ rowCap → fail (chatbot shouldn't be truncated)", () => {
+  const CAP = 200;
+  const chatbotRows = Array.from({ length: 200 }, (_, i) => ({ ien: String(i) }));
+  const directRows  = Array.from({ length: 150 }, (_, i) => ({ ien: String(i) }));
+  const result = judgeAi({
+    quick: [{ id: "AIQ.Big", chatbot: { rows: chatbotRows, rowCount: 200, truncated: true }, direct: directRows }],
+    count: null, guard: [], rowCap: CAP,
+  });
+  assert.ok(!result.ok, "direct.length=150 ≤ rowCap=200 with truncated=true → fail");
+});
+
+test("judgeAi: truncated — duplicate chatbot rows fool Set but fail multiset check", () => {
+  // chatbot: ien=1 appears twice; direct: ien=1 appears once only
+  const CAP = 3;
+  const chatbotRows = [{ ien: "1" }, { ien: "1" }, { ien: "2" }]; // ien=1 duplicated
+  const directRows  = [{ ien: "1" }, { ien: "2" }, { ien: "3" }, { ien: "4" }]; // ien=1 once
+  const result = judgeAi({
+    quick: [{ id: "AIQ.Big", chatbot: { rows: chatbotRows, rowCount: CAP, truncated: true }, direct: directRows }],
+    count: null, guard: [], rowCap: CAP,
+  });
+  assert.ok(!result.ok, "ien=1 twice in chatbot but once in direct → multiset fail");
+});
+
+// ── Finding 4: guard HTTP errors ──────────────────────────────────────────────
+
+test("judgeAi: guard entry with error field → problem (fails the run)", () => {
+  const result = judgeAi({
+    quick: [],
+    count: null,
+    guard: [
+      { sql: "SELECT 1", allowed: true, got: true },
+      { sql: "FAIL", allowed: false, error: "HTTP 400" },
+    ],
+  });
+  assert.ok(!result.ok, "guard entry with error must fail");
+  assert.ok(result.problems.some(p => /HTTP 400/.test(p)), `expected HTTP 400 in problems; got: ${result.problems}`);
+});
+
+// ── Finding 7: additional main() failure tests ────────────────────────────────
+
+// main() verification step ────────────────────────────────────────────────────
+
+// Real non-empty rows shared by chatbot quick and direct Atelier for the success case.
+// Both sides return identical rows so sameRows() passes.
+const FAKE_QUICK_ROWS = [{ IEN: "1", MFGR__EQUIPMENT_NAME: "Monitor A" }, { IEN: "2", MFGR__EQUIPMENT_NAME: "Bed B" }];
+
+function makeVerifyFetch({ failQuestionId = null, chatbotError = false, vademoHttpError = false, countReplyWrong = false, guardMismatch = false } = {}) {
   return async (url, opts) => {
     const body = JSON.parse((opts && opts.body) || "{}");
 
     if (/\/equipmentai\/quick\//.test(url)) {
       const id = url.split("/equipmentai/quick/").pop().split("?")[0];
-      const shouldFail = failQuestionId && id === failQuestionId;
-      const rows = shouldFail ? [{ ien: "999" }] : [];
-      return { json: () => Promise.resolve({ reply: "OK", tool: id, sql: "", columns: Object.keys(rows[0] || {}), rows, rowCount: rows.length, truncated: false }) };
+      if (chatbotError) {
+        return { ok: true, json: () => Promise.resolve({ error: "VistA could not be reached", rows: [], rowCount: 0, truncated: false }) };
+      }
+      if (failQuestionId && id === failQuestionId) {
+        // Different rows from direct — clear mismatch
+        return { ok: true, json: () => Promise.resolve({ reply: "OK", tool: id, sql: "", columns: ["IEN"], rows: [{ IEN: "999" }], rowCount: 1, truncated: false }) };
+      }
+      return { ok: true, json: () => Promise.resolve({ reply: "OK", tool: id, sql: "", columns: Object.keys(FAKE_QUICK_ROWS[0]), rows: FAKE_QUICK_ROWS, rowCount: FAKE_QUICK_ROWS.length, truncated: false }) };
     }
 
     if (/\/equipmentai\/chat/.test(url)) {
-      return { json: () => Promise.resolve({ reply: "We have 295 pieces of equipment.", tool: "RunQuery", sql: "SELECT COUNT(*) AS n FROM VISTA.EQUIPMENT_INV_6914", columns: ["n"], rows: [{ n: 295 }], rowCount: 1, truncated: false }) };
+      if (countReplyWrong) {
+        return { ok: true, json: () => Promise.resolve({ reply: "We have 300 pieces of equipment.", tool: "RunQuery", sql: "", columns: ["n"], rows: [{ n: 300 }], rowCount: 1, truncated: false }) };
+      }
+      return { ok: true, json: () => Promise.resolve({ reply: "We have 295 pieces of equipment.", tool: "RunQuery", sql: "", columns: ["n"], rows: [{ n: 295 }], rowCount: 1, truncated: false }) };
     }
 
     if (/\/equipmentai\/guard/.test(url)) {
+      if (guardMismatch) {
+        // Return the WRONG ok for every case to force a failure
+        const gc = GUARD_CASES.find(c => c.sql === body.sql);
+        const ok = gc ? !gc.allowed : true; // deliberately inverted
+        return { ok: true, json: () => Promise.resolve({ ok, reason: ok ? "" : "rejected" }) };
+      }
       const gc = GUARD_CASES.find(c => c.sql === body.sql);
       const ok = gc ? gc.allowed : false;
-      return { json: () => Promise.resolve({ ok, reason: ok ? "" : "rejected" }) };
+      return { ok: true, json: () => Promise.resolve({ ok, reason: ok ? "" : "rejected" }) };
     }
 
     if (/\/api\/atelier\//.test(url)) {
-      const sql = (body.query || "").trim();
-      // Only match the specific count-reference SQL: single-column COUNT(*) AS n
-      if (/^SELECT\s+COUNT\(\*\)\s+AS\s+n\s+FROM/i.test(sql)) {
-        return { json: () => Promise.resolve({ result: { content: [{ n: 295 }] }, status: { errors: [] } }) };
+      if (vademoHttpError) {
+        return { ok: false, status: 500, json: () => Promise.resolve({ error: "Internal Server Error" }) };
       }
-      // Quick question SQL: return empty rows (matches chatbot, which also returns 0 rows)
-      return { json: () => Promise.resolve({ result: { content: [] }, status: { errors: [] } }) };
+      const sql = (body.query || "").trim();
+      if (/^SELECT\s+COUNT\(\*\)\s+AS\s+n\s+FROM/i.test(sql)) {
+        return { ok: true, json: () => Promise.resolve({ result: { content: [{ n: 295 }] }, status: { errors: [] } }) };
+      }
+      // Quick question direct: return same rows as chatbot
+      return { ok: true, json: () => Promise.resolve({ result: { content: FAKE_QUICK_ROWS }, status: { errors: [] } }) };
     }
 
     throw new Error("Unexpected URL in makeVerifyFetch: " + url);
@@ -556,28 +659,22 @@ function makeVerifyMainDeps(paths, overrides = {}) {
   };
 }
 
-test("main() verification: success writes implemented.ai verified=true and status.verification", async () => {
-  const paths = setupCompleteAiSpecs();
-  const { tmpDir, scriptsDir, deps, envKeys, envVals } = makeVerifyMainDeps(paths);
+// Run main() with a temp spec dir + temp output dir; reads all results BEFORE cleanup.
+// Returns { status, implContent } — files are deleted in the finally block.
+async function runMain(pathsObj, fetchOverride) {
+  const { paths, dir: specsDir } = pathsObj;
+  const { tmpDir, scriptsDir, deps, envKeys, envVals } = makeVerifyMainDeps(paths,
+    fetchOverride ? { _fetch: fetchOverride } : {});
   const savedEnv      = Object.fromEntries(envKeys.map(k => [k, process.env[k]]));
   const savedExitCode = process.exitCode;
   Object.assign(process.env, envVals);
-
   try {
     await main(paths, deps);
-
-    const status = JSON.parse(fs.readFileSync(deps._statusFile, "utf8"));
-    assert.equal(status.state, "done", `expected state=done, got: ${status.state}\nerror: ${status.error}`);
-    assert.ok(Array.isArray(status.verification), "status must have a verification array");
-    assert.ok(status.verification.length > 0, "verification must have at least one entry");
-    assert.ok(status.verification.every(e => "question" in e && "chatbot" in e && "vista" in e && "ok" in e),
-      "each verification entry must have question, chatbot, vista, ok");
-
-    const impl = JSON.parse(fs.readFileSync(paths.implemented, "utf8"));
-    assert.ok(impl.ai, "implemented.json must have an ai key");
-    assert.equal(impl.ai.built, true);
-    assert.equal(impl.ai.verified, true);
-    assert.ok(impl.ai.verifiedAt, "verifiedAt must be set");
+    // Read all results BEFORE cleanup so callers don't depend on deleted files.
+    const statusFile = deps._statusFile;
+    const status     = fs.existsSync(statusFile) ? JSON.parse(fs.readFileSync(statusFile, "utf8")) : null;
+    const implContent = fs.existsSync(paths.implemented) ? fs.readFileSync(paths.implemented, "utf8") : null;
+    return { status, implContent };
   } finally {
     process.exitCode = savedExitCode;
     for (const [k, v] of Object.entries(savedEnv)) {
@@ -585,38 +682,84 @@ test("main() verification: success writes implemented.ai verified=true and statu
     }
     fs.rmSync(tmpDir,       { recursive: true, force: true });
     fs.rmSync(scriptsDir,   { recursive: true, force: true });
+    fs.rmSync(specsDir,     { recursive: true, force: true });
   }
+}
+
+test("main() verification: success writes implemented.ai verified=true and status.verification", async () => {
+  const pathsObj = setupCompleteAiSpecs();
+  const { status, implContent } = await runMain(pathsObj, makeVerifyFetch());
+
+  assert.equal(status.state, "done", `expected state=done; error: ${status.error}`);
+  assert.ok(Array.isArray(status.verification), "status must have a verification array");
+  assert.ok(status.verification.length > 0, "verification must have at least one entry");
+  assert.ok(status.verification.every(e => "question" in e && "chatbot" in e && "vista" in e && "ok" in e),
+    "each verification entry must have question, chatbot, vista, ok");
+
+  const impl = JSON.parse(implContent);
+  assert.ok(impl.ai, "implemented.json must have an ai key");
+  assert.equal(impl.ai.built, true);
+  assert.equal(impl.ai.verified, true);
+  assert.ok(impl.ai.verifiedAt, "verifiedAt must be set");
 });
 
-test("main() verification: mismatch sets state=error, does not write implemented.ai", async () => {
-  const paths = setupCompleteAiSpecs();
-  // Fail the first question: chatbot returns [{ ien: "999" }], direct returns []
-  const d = JSON.parse(fs.readFileSync(path.join(paths.specsDir, "ai.json"), "utf8"));
+test("main() verification: row mismatch → error, implemented.json content unchanged", async () => {
+  const pathsObj = setupCompleteAiSpecs();
+  // Capture the initial implemented.json content before runMain deletes the spec dir
+  const implBefore = fs.readFileSync(pathsObj.paths.implemented, "utf8");
+  // Read the first question id before runMain
+  const d = JSON.parse(fs.readFileSync(path.join(pathsObj.paths.specsDir, "ai.json"), "utf8"));
   const firstId = d.detail.questions[0].id.replace(/^AIQ\./, "");
-  const { tmpDir, scriptsDir, deps, envKeys, envVals } = makeVerifyMainDeps(paths, {
-    _fetch: makeVerifyFetch({ failQuestionId: firstId }),
-  });
-  const savedEnv      = Object.fromEntries(envKeys.map(k => [k, process.env[k]]));
-  const savedExitCode = process.exitCode;
-  Object.assign(process.env, envVals);
 
-  try {
-    await main(paths, deps);
+  const { status, implContent } = await runMain(pathsObj, makeVerifyFetch({ failQuestionId: firstId }));
 
-    const status = JSON.parse(fs.readFileSync(deps._statusFile, "utf8"));
-    assert.equal(status.state, "error", `expected error state; got: ${status.state}`);
-    assert.ok(status.error, "must have an error message");
+  assert.equal(status.state, "error", `expected error state; got: ${status.state}`);
+  assert.ok(status.error, "must have an error message");
+  // implemented.json must be byte-identical to pre-run state on failure
+  assert.equal(implContent, implBefore,
+    "implemented.json must be byte-identical to pre-run state on failure");
+});
 
-    // implemented.ai must not be written (or verified must be false)
-    const impl = JSON.parse(fs.readFileSync(paths.implemented, "utf8"));
-    assert.ok(!impl.ai || impl.ai.verified !== true,
-      "implemented.ai must not be verified=true when verification fails");
-  } finally {
-    process.exitCode = savedExitCode;
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) delete process.env[k]; else process.env[k] = v;
-    }
-    fs.rmSync(tmpDir,       { recursive: true, force: true });
-    fs.rmSync(scriptsDir,   { recursive: true, force: true });
+test("main() verification: chatbot error response → error state", async () => {
+  const { status } = await runMain(setupCompleteAiSpecs(), makeVerifyFetch({ chatbotError: true }));
+  assert.equal(status.state, "error", `expected error for chatbot error; got: ${status.state}`);
+});
+
+test("main() verification: VADEMO HTTP error → error state", async () => {
+  const { status } = await runMain(setupCompleteAiSpecs(), makeVerifyFetch({ vademoHttpError: true }));
+  assert.equal(status.state, "error", `expected error for VADEMO HTTP error; got: ${status.state}`);
+});
+
+test("main() verification: count reply mismatch → error state", async () => {
+  const { status } = await runMain(setupCompleteAiSpecs(), makeVerifyFetch({ countReplyWrong: true }));
+  assert.equal(status.state, "error", `expected error for count mismatch; got: ${status.state}`);
+});
+
+test("main() verification: guard mismatch → error state", async () => {
+  const { status } = await runMain(setupCompleteAiSpecs(), makeVerifyFetch({ guardMismatch: true }));
+  assert.equal(status.state, "error", `expected error for guard mismatch; got: ${status.state}`);
+});
+
+// ── Guard: untouched-files assertion — must run AFTER all main() tests ─────────────────────────
+test("guard: all main() tests left agent/ai-status.json and agent/implemented.json untouched", () => {
+  if (beforeStatusContent === null) {
+    assert.ok(!fs.existsSync(REAL_STATUS_FILE),
+      "agent/ai-status.json must not exist after tests — main() must use the injected _statusFile path");
+  } else {
+    assert.equal(fs.readFileSync(REAL_STATUS_FILE, "utf8"), beforeStatusContent,
+      "agent/ai-status.json must be unchanged after tests — main() must use the injected _statusFile path");
   }
+
+  if (beforeImplContent === null) {
+    assert.ok(!fs.existsSync(REAL_IMPLEMENTED_FILE),
+      "agent/implemented.json must not exist after tests — main() must use paths.implemented (injected temp path)");
+  } else {
+    assert.equal(fs.readFileSync(REAL_IMPLEMENTED_FILE, "utf8"), beforeImplContent,
+      "agent/implemented.json must be unchanged after tests — main() must use paths.implemented (injected temp path)");
+  }
+
+  const afterProdEntries = fs.existsSync(REAL_PROD_DIR) ? new Set(fs.readdirSync(REAL_PROD_DIR)) : new Set();
+  const newEntries = [...afterProdEntries].filter(e => !beforeProdEntries.has(e));
+  assert.deepEqual(newEntries, [],
+    "no new entries must appear in agent/_production/ after tests — main() must use the injected _productionDir path");
 });

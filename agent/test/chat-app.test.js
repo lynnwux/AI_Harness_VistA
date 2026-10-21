@@ -200,24 +200,25 @@ test("main() calls _buildChatApp with the spec's questions and ends Deployed —
     const fakeBuildChat  = async (questions, _outDir) => { capturedQuestions = questions; };
 
     // Minimal success fake for the Task-8 verification step (no real HTTP calls).
+    const FAKE_ROWS = [{ IEN: "1", NAME: "Ventilator" }, { IEN: "2", NAME: "Pump" }];
     const fakeFetch = async (url, opts) => {
       const body = JSON.parse((opts && opts.body) || "{}");
       if (/\/equipmentai\/quick\//.test(url)) {
-        return { json: () => Promise.resolve({ reply: "OK", tool: "test", sql: "", columns: [], rows: [], rowCount: 0, truncated: false }) };
+        return { ok: true, json: () => Promise.resolve({ reply: "2 results", tool: "RunQuery", sql: "", columns: ["IEN","NAME"], rows: FAKE_ROWS, rowCount: 2, truncated: false }) };
       }
       if (/\/equipmentai\/chat/.test(url)) {
-        return { json: () => Promise.resolve({ reply: "We have 295 pieces of equipment.", tool: "RunQuery", sql: "", columns: ["n"], rows: [{ n: 295 }], rowCount: 1, truncated: false }) };
+        return { ok: true, json: () => Promise.resolve({ reply: "We have 295 pieces of equipment.", tool: "RunQuery", sql: "", columns: ["n"], rows: [{ n: 295 }], rowCount: 1, truncated: false }) };
       }
       if (/\/equipmentai\/guard/.test(url)) {
         const gc = GUARD_CASES.find(c => c.sql === body.sql);
-        return { json: () => Promise.resolve({ ok: gc ? gc.allowed : false, reason: "" }) };
+        return { ok: true, json: () => Promise.resolve({ ok: gc ? gc.allowed : false, reason: gc && !gc.allowed ? "blocked" : "" }) };
       }
       if (/\/api\/atelier\//.test(url)) {
         const sql = (body.query || "").trim();
         if (/^SELECT\s+COUNT\(\*\)\s+AS\s+n\s+FROM/i.test(sql)) {
-          return { json: () => Promise.resolve({ result: { content: [{ n: 295 }] }, status: { errors: [] } }) };
+          return { ok: true, json: () => Promise.resolve({ result: { content: [{ n: 295 }] }, status: { errors: [] } }) };
         }
-        return { json: () => Promise.resolve({ result: { content: [] }, status: { errors: [] } }) };
+        return { ok: true, json: () => Promise.resolve({ result: { content: FAKE_ROWS }, status: { errors: [] } }) };
       }
       throw new Error("Unexpected URL in chat-app test fakeFetch: " + url);
     };
