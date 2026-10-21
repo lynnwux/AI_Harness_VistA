@@ -69,10 +69,17 @@ function inventoryFields({ columns, dd }) {
 
       if (fm && fm.pointsTo) {
         entry.pointsTo = fm.pointsTo;
-        // Look for a co-located "…_NAME" column produced by fm2class
-        const nameCol = colName + "_NAME";
-        if (colNamesByTable.get(tableName) && colNamesByTable.get(tableName).has(nameCol)) {
-          entry.nameColumn = nameCol;
+        // Find the fm2class-projected display column for this pointer.
+        // Pattern: any column starting with "<COL>_" that has no FileMan field
+        // mapping (i.e., it is a Calculated/ReadOnly companion, not a real field).
+        // Examples: EQUIPMENT_CATEGORY → EQUIPMENT_CATEGORY_NAME
+        //           LOCATION          → LOCATION_ROOM_NUMBER
+        //           EQUIPMENT_ID      → EQUIPMENT_ID_ENTRY_NUMBER
+        const tableColSet = colNamesByTable.get(tableName);
+        if (tableColSet) {
+          const prefix  = colName + "_";
+          const nameCol = [...tableColSet].find(c => c.startsWith(prefix) && !fields[c]);
+          if (nameCol) entry.nameColumn = nameCol;
         }
       }
 
@@ -204,8 +211,15 @@ async function main() {
 
   // Full relevant set: 6914 family + external pointer targets + 6920
   const relevantTables = new Set([...tables6914, ...ptrTables, "WORK_ORDER_6920"]);
-  // 6920 is included in tables but excluded from allowList
-  const noAllowList = new Set(["WORK_ORDER_6920"]);
+
+  // Tables excluded from allowList (kept in `tables` for schema reference but
+  // the general SQL path must not query them):
+  //   WORK_ORDER_6920   — not an inventory file; included only for its equipment-
+  //                       pointer / status metadata needed by the AI layer.
+  //   NEW_PERSON200     — VistA's personnel file (personal data); 6914's own
+  //                       *_NAME columns already surface people's names without
+  //                       requiring a direct query of this file.
+  const noAllowList = new Set(["WORK_ORDER_6920", "NEW_PERSON200"]);
 
   console.log("Relevant tables (" + relevantTables.size + "):",
     [...relevantTables].sort().join(", "));

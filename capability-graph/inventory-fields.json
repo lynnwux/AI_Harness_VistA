@@ -1,5 +1,5 @@
 {
-  "discoveredAt": "2026-10-21T01:16:35.389Z",
+  "discoveredAt": "2026-10-21T01:25:31.499Z",
   "source": "VADEMO VISTA-DIEGO",
   "tables": {
     "BUDGET_OBJECT_CODE420_2": {
@@ -167,7 +167,8 @@
           "ddName": "FSC CODE",
           "type": "POINTER TO",
           "meaning": "Federal supply classification code.  Normally the first four digits of the category stock number.",
-          "pointsTo": "441.2"
+          "pointsTo": "441.2",
+          "nameColumn": "FSC_CODE_NUMBER"
         },
         {
           "column": "FSC_CODE_NUMBER",
@@ -759,7 +760,8 @@
           "ddName": "SHOP",
           "type": "POINTER TO",
           "meaning": "Engineering shop to which this employee is assigned.",
-          "pointsTo": "6922"
+          "pointsTo": "6922",
+          "nameColumn": "SHOP_ENGINEERING_SECTION"
         },
         {
           "column": "SHOP_ENGINEERING_SECTION",
@@ -1108,7 +1110,8 @@
           "ddName": "KEY",
           "type": "POINTER TO",
           "meaning": "Lock/key combination in use for this space.",
-          "pointsTo": "6927"
+          "pointsTo": "6927",
+          "nameColumn": "KEY_KEY"
         },
         {
           "column": "KEY_KEY",
@@ -1441,7 +1444,8 @@
           "ddName": "ACQUISITION SOURCE",
           "type": "POINTER TO",
           "meaning": "Source of acquisition for this piece of equipment.",
-          "pointsTo": "420.8"
+          "pointsTo": "420.8",
+          "nameColumn": "ACQUISITION_SOURCE_CODE"
         },
         {
           "column": "ACQUISITION_SOURCE_CODE",
@@ -1470,7 +1474,8 @@
           "ddName": "ADMINISTRATION/OFFICE",
           "type": "POINTER TO",
           "meaning": "An accounting classification.",
-          "pointsTo": "6914.7"
+          "pointsTo": "6914.7",
+          "nameColumn": "ADMINISTRATIONOFFICE_ADMINOFFICE_CODE"
         },
         {
           "column": "ADMINISTRATIONOFFICE_ADMINOFFICE_CODE",
@@ -1492,7 +1497,8 @@
           "ddName": "BUDGET OBJECT CODE",
           "type": "POINTER TO",
           "meaning": "An accounting classification.",
-          "pointsTo": "6914.4"
+          "pointsTo": "6914.4",
+          "nameColumn": "BUDGET_OBJECT_CODE_CAPITALIZED_BUDGET_OBJECT_CODE"
         },
         {
           "column": "BUDGET_OBJECT_CODE_CAPITALIZED_BUDGET_OBJECT_CODE",
@@ -1614,7 +1620,8 @@
           "ddName": "DISPOSITION METHOD",
           "type": "POINTER TO",
           "meaning": "The means by which Materiel Management finally disposes of a piece of equipment that has been 'turned in'.",
-          "pointsTo": "6914.8"
+          "pointsTo": "6914.8",
+          "nameColumn": "DISPOSITION_METHOD_METHOD"
         },
         {
           "column": "DISPOSITION_METHOD_METHOD",
@@ -1710,7 +1717,8 @@
           "ddName": "*FEDERAL SUPPLY CLASSIFICATION",
           "type": "POINTER TO",
           "meaning": "Federal supply classification. Please enter the FSC that most closely categorizes this item. NOTE: This field is not used and it will be deleted by a future version.",
-          "pointsTo": "441.2"
+          "pointsTo": "441.2",
+          "nameColumn": "FEDERAL_SUPPLY_CLASSIFICATION_NUMBER"
         },
         {
           "column": "FEDERAL_SUPPLY_CLASSIFICATION_NUMBER",
@@ -1739,7 +1747,8 @@
           "ddName": "FUND",
           "type": "POINTER TO",
           "meaning": "The Fund Code (from the Treasury Symbol) under which this equipment was procured.",
-          "pointsTo": "6914.6"
+          "pointsTo": "6914.6",
+          "nameColumn": "FUND_NX_FUND_CODE"
         },
         {
           "column": "FUND_CONTROL_POINT",
@@ -1834,7 +1843,8 @@
           "ddName": "LOCATION",
           "type": "POINTER TO",
           "meaning": "Physical location of this item at the facility. For equipment being tracked by RTLS, the location is populated by the AEMS-MERS RTLS interface.",
-          "pointsTo": "6928"
+          "pointsTo": "6928",
+          "nameColumn": "LOCATION_ROOM_NUMBER"
         },
         {
           "column": "LOCATION_ROOM_NUMBER",
@@ -1866,7 +1876,8 @@
           "ddName": "MANUFACTURER",
           "type": "POINTER TO",
           "meaning": "Firm that actually manufactured this equipment, not necessarily the company from which it was purchased.",
-          "pointsTo": "6912"
+          "pointsTo": "6912",
+          "nameColumn": "MANUFACTURER_MFGDIV"
         },
         {
           "column": "MANUFACTURER_MFGDIV",
@@ -1946,7 +1957,8 @@
           "ddName": "PARENT SYSTEM",
           "type": "POINTER TO",
           "meaning": "If Item A is a component of Item B, then the PARENT field of Item A should contain the CONTROL NUMBER of Item B. If Item B is, in turn, a component of an even larger Item C; then the PARENT field of Item B should contain the CONTROL NUMBER of Item C, and so on. Inventory items with no entry in the PARENT field are either free standing devices or major systems with one or more levels of components beneath them. An item must already be in the EQUIPMENT file before it can be named as the PARENT of another item.",
-          "pointsTo": "6914"
+          "pointsTo": "6914",
+          "nameColumn": "PARENT_SYSTEM_ENTRY_NUMBER"
         },
         {
           "column": "PARENT_SYSTEM_ENTRY_NUMBER",
@@ -2026,7 +2038,8 @@
           "ddName": "REPLACING (ENTRY NUMBER)",
           "type": "POINTER TO",
           "meaning": "If this item was acquired as REPLACEMENT EQUIPMENT, then the old ENTRY NUMBER of the item which it replaced should appear in this field.",
-          "pointsTo": "6914"
+          "pointsTo": "6914",
+          "nameColumn": "REPLACING_ENTRY_NUMBER_ENTRY_NUMBER"
         },
         {
           "column": "REPLACING_ENTRY_NUMBER_ENTRY_NUMBER",
@@ -2137,7 +2150,8 @@
           "ddName": "STANDARD GENERAL LEDGER",
           "type": "POINTER TO",
           "meaning": "In accordance with the VA administrative accounting system. Only a limited number of Standard General Ledger Accounts are appropriate for use with non-expendable equipment.",
-          "pointsTo": "6914.3"
+          "pointsTo": "6914.3",
+          "nameColumn": "STANDARD_GENERAL_LEDGER_ACCOUNT"
         },
         {
           "column": "STANDARD_GENERAL_LEDGER_ACCOUNT",
@@ -2304,7 +2318,8 @@
           "ddName": "Y2K ASSIGNED SHOP",
           "type": "POINTER TO",
           "meaning": "The ENGINEERING SECTION that has been assigned responsibility for making this device Y2K compliant. This is the section to which the Y2K work order will be assigned. If this field is not populated then Y2K work orders will be assigned to the RESPONSIBLE SHOP (first entry) if one exists. If their is neither a Y2K ASSIGNED SHOP nor a RESPONSIBLE SHOP, then the Y2K work order will be assigned to the primary biomedical engineering section.",
-          "pointsTo": "6922"
+          "pointsTo": "6922",
+          "nameColumn": "Y2K_ASSIGNED_SHOP_ENGINEERING_SECTION"
         },
         {
           "column": "Y2K_ASSIGNED_SHOP_ENGINEERING_SECTION",
@@ -2344,7 +2359,8 @@
           "ddName": "Y2K COMPLIANCE WORK ORDER (POINTER)",
           "type": "POINTER TO",
           "meaning": "Whenever a Y2K work order is created (in routine ENY2K5) this field (and its regular cross-reference) in the Equipment File is populated via hard code. THIS FIELD SHOULD NEVER BE DELETED AS LONG AS Y2K IS AN ISSUE.  To avert possible confusion, no Y2K work order number will ever be assigned to more than one piece of equipment. In like manner, no piece of equipment will ever have more than one Y2K work order number. If more than one shop needs to work on the same piece of equipment for Y2K compliance, then the work order will be assigned to the primary shop and other shops will charge their time and materials to this primary work order.  If a Y2K work order is closed inappropriately, it can always be re-opened and corrected via the Edit Work Order option [ENWOEDIT].",
-          "pointsTo": "6920"
+          "pointsTo": "6920",
+          "nameColumn": "Y2K_COMPLIANCE_WORK_ORDER_POINTER_WORK_ORDER_"
         },
         {
           "column": "Y2K_COMPLIANCE_WORK_ORDER_POINTER_WORK_ORDER_",
@@ -2509,7 +2525,8 @@
           "ddName": "GROUP",
           "type": "POINTER TO",
           "meaning": "This is a pointer to the file of FSC group categories.",
-          "pointsTo": "441.3"
+          "pointsTo": "441.3",
+          "nameColumn": "GROUP3_NUMBER"
         },
         {
           "column": "GROUP3_NUMBER",
@@ -2646,7 +2663,8 @@
           "ddName": "ADMINISTRATIVE/OFFICE",
           "type": "POINTER TO",
           "meaning": "Administrative/Office (A/O) for the EIL. If a value is entered here then FA Documents whose CMR value starts with the EIL are required to use this A/O. This field should be left blank if there is more than one appropriate A/O code for the EIL.",
-          "pointsTo": "6914.7"
+          "pointsTo": "6914.7",
+          "nameColumn": "ADMINISTRATIVEOFFICE_ADMINOFFICE_CODE"
         },
         {
           "column": "ADMINISTRATIVEOFFICE_ADMINOFFICE_CODE",
@@ -3602,7 +3620,8 @@
           "ddName": "NAME COMPONENTS",
           "type": "POINTER TO",
           "meaning": "Answer with the entry in the NAME COMPONENTS file that contains the components of the person's name.",
-          "pointsTo": "20"
+          "pointsTo": "20",
+          "nameColumn": "NAME_COMPONENTS_FILE"
         },
         {
           "column": "NAME_COMPONENTS_FILE",
@@ -3707,7 +3726,8 @@
           "ddName": "PAID EMPLOYEE",
           "type": "POINTER TO",
           "meaning": "This field is a pointer to the PAID EMPLOYEE (#450) file.",
-          "pointsTo": "450"
+          "pointsTo": "450",
+          "nameColumn": "PAID_EMPLOYEE_EMPLOYEE_NAME"
         },
         {
           "column": "PAID_EMPLOYEE_EMPLOYEE_NAME",
@@ -4756,7 +4776,8 @@
           "ddName": "CORRESPONDING SGL",
           "type": "POINTER TO",
           "meaning": "Standard General Ledger Account corresponding to this Budget Object Code.",
-          "pointsTo": "6914.3"
+          "pointsTo": "6914.3",
+          "nameColumn": "CORRESPONDING_SGL_ACCOUNT"
         },
         {
           "column": "CORRESPONDING_SGL_ACCOUNT",
@@ -5612,7 +5633,8 @@
           "ddName": "PROCEDURE",
           "type": "POINTER TO",
           "meaning": "Enter the abbreviation (4 to 10 characters) of the PROCEDURE to be followed in performing this category of PMI on this device. The title (as well as the abreviation) of the PM PROCEDURE will appear on PM worksheets for reference. If disk space permits, the actual procedure itself may be entered in the TEXT field of the PM PROCEDURES file (Number 6914.2) and printed on demand. In any event, the procedure should be on file and readily accessible to the technician performing the work.",
-          "pointsTo": "6914.2"
+          "pointsTo": "6914.2",
+          "nameColumn": "PROCEDURE4_PM_REFERENCE"
         },
         {
           "column": "PROCEDURE4_PM_REFERENCE",
@@ -5782,7 +5804,8 @@
           "ddName": "RESPONSIBLE SHOP",
           "type": "POINTER TO",
           "meaning": "",
-          "pointsTo": "6922"
+          "pointsTo": "6922",
+          "nameColumn": "RESPONSIBLE_SHOP_ENGINEERING_SECTION"
         },
         {
           "column": "RESPONSIBLE_SHOP_ENGINEERING_SECTION",
@@ -6292,7 +6315,8 @@
           "ddName": "FEDERAL SOURCE",
           "type": "POINTER TO",
           "meaning": "This is the federal source.",
-          "pointsTo": "420.8"
+          "pointsTo": "420.8",
+          "nameColumn": "FEDERAL_SOURCE_CODE"
         },
         {
           "column": "FEDERAL_SOURCE_CODE",
@@ -6936,7 +6960,8 @@
           "ddName": "EQUIPMENT ID#",
           "type": "POINTER TO",
           "meaning": "Entry in the Equipment File (#6914) to which this work order is to be charged.",
-          "pointsTo": "6914"
+          "pointsTo": "6914",
+          "nameColumn": "EQUIPMENT_ID_ENTRY_NUMBER"
         },
         {
           "column": "EQUIPMENT_ID_ENTRY_NUMBER",
@@ -6972,7 +6997,8 @@
           "ddName": "LOCATION",
           "type": "POINTER TO",
           "meaning": "Physical location where work is to be performed.",
-          "pointsTo": "6928"
+          "pointsTo": "6928",
+          "nameColumn": "LOCATION_ROOM_NUMBER"
         },
         {
           "column": "LOCATION_ROOM_NUMBER",
@@ -6987,7 +7013,8 @@
           "ddName": "MANUFACTURER",
           "type": "POINTER TO",
           "meaning": "Manufacturer of affected equipment.",
-          "pointsTo": "6912"
+          "pointsTo": "6912",
+          "nameColumn": "MANUFACTURER_MFGDIV"
         },
         {
           "column": "MANUFACTURER_MFGDIV",
@@ -7060,7 +7087,8 @@
           "ddName": "PARTS ORDERED ON ACC.#",
           "type": "POINTER TO",
           "meaning": "The Control Point Activity Transaction for parts or services required to complete this task.",
-          "pointsTo": "410"
+          "pointsTo": "410",
+          "nameColumn": "PARTS_ORDERED_ON_ACC__TRANSACTION_NUMBER"
         },
         {
           "column": "PARTS_ORDERED_ON_ACC__TRANSACTION_NUMBER",
@@ -7217,7 +7245,8 @@
           "ddName": "SHOP",
           "type": "POINTER TO",
           "meaning": "The Engineering Section to which the Work Order is assigned.",
-          "pointsTo": "6922"
+          "pointsTo": "6922",
+          "nameColumn": "SHOP_ENGINEERING_SECTION"
         },
         {
           "column": "SHOP_ENGINEERING_SECTION",
@@ -7354,7 +7383,6 @@
     "VISTA.FEDERAL_SUPPLY_CLASSIFICATION441_2",
     "VISTA.MANUFACTURER_LIST_FILE6912",
     "VISTA.NATIONAL_EIL6914_9",
-    "VISTA.NEW_PERSON200",
     "VISTA.NX_AO6914_7",
     "VISTA.NX_BOC6914_4",
     "VISTA.NX_DISPOSITION_METHOD6914_8",

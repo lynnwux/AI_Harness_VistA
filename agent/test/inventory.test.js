@@ -7,15 +7,17 @@ const path   = require("path");
 const { inventoryFields } = require("../discover-inventory");
 
 // ─── Fixture for pure-function tests ──────────────────────────────────────────
-// Two-table fixture: 6914 with a pointer col (EQUIPMENT_CATEGORY → 6911),
-// its name col (EQUIPMENT_CATEGORY_NAME), a set-of-codes (JCAHO), and 6911.
+// Three-pointer fixture: EQUIPMENT_CATEGORY → 6911 (nameCol = …_NAME),
+// LOCATION → 6928 (nameCol = LOCATION_ROOM_NUMBER, not …_NAME), JCAHO (codes).
 const COLUMNS_FIXTURE = [
-  { TABLE_NAME: "EQUIPMENT_INV_6914",    COLUMN_NAME: "IEN",                    DATA_TYPE: "varchar" },
-  { TABLE_NAME: "EQUIPMENT_INV_6914",    COLUMN_NAME: "EQUIPMENT_CATEGORY",     DATA_TYPE: "varchar" },
+  { TABLE_NAME: "EQUIPMENT_INV_6914",    COLUMN_NAME: "IEN",                     DATA_TYPE: "varchar" },
+  { TABLE_NAME: "EQUIPMENT_INV_6914",    COLUMN_NAME: "EQUIPMENT_CATEGORY",      DATA_TYPE: "varchar" },
   { TABLE_NAME: "EQUIPMENT_INV_6914",    COLUMN_NAME: "EQUIPMENT_CATEGORY_NAME", DATA_TYPE: "varchar" },
-  { TABLE_NAME: "EQUIPMENT_INV_6914",    COLUMN_NAME: "JCAHO",                  DATA_TYPE: "varchar" },
-  { TABLE_NAME: "EQUIPMENT_CATEGORY6911", COLUMN_NAME: "IEN",                   DATA_TYPE: "varchar" },
-  { TABLE_NAME: "EQUIPMENT_CATEGORY6911", COLUMN_NAME: "NAME",                  DATA_TYPE: "varchar" },
+  { TABLE_NAME: "EQUIPMENT_INV_6914",    COLUMN_NAME: "JCAHO",                   DATA_TYPE: "varchar" },
+  { TABLE_NAME: "EQUIPMENT_INV_6914",    COLUMN_NAME: "LOCATION",                DATA_TYPE: "varchar" },
+  { TABLE_NAME: "EQUIPMENT_INV_6914",    COLUMN_NAME: "LOCATION_ROOM_NUMBER",    DATA_TYPE: "varchar" },
+  { TABLE_NAME: "EQUIPMENT_CATEGORY6911", COLUMN_NAME: "IEN",                    DATA_TYPE: "varchar" },
+  { TABLE_NAME: "EQUIPMENT_CATEGORY6911", COLUMN_NAME: "NAME",                   DATA_TYPE: "varchar" },
 ];
 
 const DD_FIXTURE = {
@@ -33,6 +35,13 @@ const DD_FIXTURE = {
         type: "SET OF CODES", codes: [["Y", "YES"], ["N", "NO"]],
         description: "JCAHO regulated item flag.",
       },
+      LOCATION: {
+        fieldNum: "24", ddName: "LOCATION",
+        type: "POINTER TO", pointsTo: "6928",
+        description: "Room where equipment is located.",
+      },
+      // LOCATION_ROOM_NUMBER is NOT in fields — it is a Calculated/ReadOnly
+      // companion column produced by fm2class, so nameColumn detection picks it up.
     },
   },
   EQUIPMENT_CATEGORY6911: {
@@ -44,14 +53,24 @@ const DD_FIXTURE = {
   },
 };
 
-test("inventoryFields: EQUIPMENT_CATEGORY gets pointsTo and nameColumn", () => {
+// ─── Pure-function tests ───────────────────────────────────────────────────────
+
+test("inventoryFields: EQUIPMENT_CATEGORY gets pointsTo and nameColumn (_NAME suffix)", () => {
   const result = inventoryFields({ columns: COLUMNS_FIXTURE, dd: DD_FIXTURE });
   const t6914  = result.tables.EQUIPMENT_INV_6914;
   assert.ok(t6914, "EQUIPMENT_INV_6914 table present");
   const col = t6914.columns.find(c => c.column === "EQUIPMENT_CATEGORY");
   assert.ok(col, "EQUIPMENT_CATEGORY column present");
-  assert.equal(col.pointsTo, "6911",                    "pointsTo file 6911");
+  assert.equal(col.pointsTo,   "6911",                    "pointsTo file 6911");
   assert.equal(col.nameColumn, "EQUIPMENT_CATEGORY_NAME", "nameColumn is EQUIPMENT_CATEGORY_NAME");
+});
+
+test("inventoryFields: LOCATION gets nameColumn LOCATION_ROOM_NUMBER (non-_NAME suffix)", () => {
+  const result = inventoryFields({ columns: COLUMNS_FIXTURE, dd: DD_FIXTURE });
+  const col = result.tables.EQUIPMENT_INV_6914.columns.find(c => c.column === "LOCATION");
+  assert.ok(col, "LOCATION column present");
+  assert.equal(col.pointsTo,   "6928",               "pointsTo file 6928");
+  assert.equal(col.nameColumn, "LOCATION_ROOM_NUMBER", "nameColumn is LOCATION_ROOM_NUMBER");
 });
 
 test("inventoryFields: JCAHO column gets codes array", () => {
@@ -107,10 +126,25 @@ test("inventory-fields.json: WORK_ORDER_6920 STATUS column has codes", { skip: s
   assert.ok(Array.isArray(statusCol.codes) && statusCol.codes.length > 0, "STATUS has codes");
 });
 
-test("inventory-fields.json: allowList includes 6914 and excludes 6920", { skip: skipIfMissing }, () => {
+test("inventory-fields.json: allowList includes 6914 and excludes 6920 and NEW_PERSON200", { skip: skipIfMissing }, () => {
   const inv = JSON.parse(fs.readFileSync(INV_PATH, "utf8"));
   assert.ok(inv.allowList.includes("VISTA.EQUIPMENT_INV_6914"),    "VISTA.EQUIPMENT_INV_6914 in allowList");
   assert.ok(!inv.allowList.includes("VISTA.WORK_ORDER_6920"),      "VISTA.WORK_ORDER_6920 not in allowList");
+  assert.ok(!inv.allowList.includes("VISTA.NEW_PERSON200"),        "VISTA.NEW_PERSON200 not in allowList");
+});
+
+test("inventory-fields.json: EQUIPMENT_CATEGORY nameColumn is EQUIPMENT_CATEGORY_NAME", { skip: skipIfMissing }, () => {
+  const inv = JSON.parse(fs.readFileSync(INV_PATH, "utf8"));
+  const col = inv.tables.EQUIPMENT_INV_6914.columns.find(c => c.column === "EQUIPMENT_CATEGORY");
+  assert.ok(col, "EQUIPMENT_CATEGORY present");
+  assert.equal(col.nameColumn, "EQUIPMENT_CATEGORY_NAME", "nameColumn");
+});
+
+test("inventory-fields.json: LOCATION nameColumn is LOCATION_ROOM_NUMBER", { skip: skipIfMissing }, () => {
+  const inv = JSON.parse(fs.readFileSync(INV_PATH, "utf8"));
+  const col = inv.tables.EQUIPMENT_INV_6914.columns.find(c => c.column === "LOCATION");
+  assert.ok(col, "LOCATION present");
+  assert.equal(col.nameColumn, "LOCATION_ROOM_NUMBER", "nameColumn is LOCATION_ROOM_NUMBER");
 });
 
 test("inventory-fields.json: no secrets or internal host patterns in file", { skip: skipIfMissing }, () => {
