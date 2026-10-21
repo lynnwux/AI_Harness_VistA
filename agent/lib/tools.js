@@ -86,7 +86,7 @@ function getState(graph, decisions, extra = {}) {
     capability: c.name, summary,
     blocking: (c.openQuestions || []).filter(q => isBlocking(record, q.id)).map(q => q.id),
     resolutions: Object.fromEntries((c.openQuestions || []).map(q => [q.id, { mode: record.dec[q.id], policy: record.oqPolicy[q.id] || null, bindings: record.ruleBindings[q.id] === undefined ? null : record.ruleBindings[q.id] }])),
-    sideEffects: [...o.detail.built.map(e => ({ ...e, built: true })), ...o.detail.deferred.map(e => ({ ...e, built: false })), ...o.detail.notBuilt.map(e => ({ ...e, built: false }))],
+    sideEffects: [...o.detail.built.map(e => ({ ...e, built: true })), ...o.detail.stubs.map(e => ({ ...e, built: false })), ...o.detail.notBuilt.map(e => ({ ...e, built: false }))],
     missing: o.missing, needs: o.needs,
     requestContract: specs.api.request,
     mandatory: (c.sideEffects || []).filter(isMandatory).map(s => s.id),

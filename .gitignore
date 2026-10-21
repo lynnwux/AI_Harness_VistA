@@ -1,11 +1,13 @@
 # dependencies & build output
 node_modules/
 agent/_build/
+agent/_production/
 prototype/build/
 
 # runtime state and logs (regenerated)
 agent/server.log
 agent/build-status.json
+agent/production-status.json
 agent/build-decisions.json
 agent/decisions.backup-*.json
 agent/*.corrupt-*.json
@@ -20,6 +22,8 @@ Thumbs.db
 
 # local secrets — never commit (template: agent/.env.example)
 .env
+# local server entry for the interclaw IRIS scripts (written by the production build from agent/.env)
+agent/interclaw-servers.json
 
 # local git worktrees
 .claude/worktrees/

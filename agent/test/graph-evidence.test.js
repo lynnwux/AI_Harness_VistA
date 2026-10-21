@@ -50,8 +50,19 @@ test("the bulletin carries the legacy message template from BULLETIN file 3.6", 
   assert.match(t.recipients, /CLICKAAH/);
 });
 
+test("each bulletin placeholder says where its value comes from, so the production can fill it", () => {
+  const p = n => c.sideEffects.find(s => s.id === "SIDE.Bulletin").messageTemplate.params.find(x => x.n === n);
+  assert.equal(p(1).source, "ien");
+  assert.equal(p(2).source, "operatorIdentity");
+  assert.deepEqual([p(3).field, p(4).field, p(5).field, p(6).field], ["3", "6", "21", "60"]);
+  assert.deepEqual([p(4).pointer, p(5).pointer], [true, true]);
+  assert.deepEqual(p(7).capitalizedNX, [{ field: "7", equals: "NX" }, { field: "34", equals: "1" }]);
+  assert.deepEqual(p(7).text, { capitalized: "Item is capitalized NX.", notCapitalized: "Item is NOT capitalized NX.", reported: "It was reported to FAP.", notReported: "It was NOT reported to FAP." });
+});
+
 test("the implemented-services file has the expected shape", () => {
   const im = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "implemented.json"), "utf8"));
   assert.deepEqual(im.api.map(s => s.id), ["write:6914", "read:next-ien", "read:lookup"]);
-  assert.deepEqual(im.orchestrator, { built: false, verified: false });
+  assert.equal(typeof im.orchestrator.built, "boolean");   // the production build sets these
+  assert.equal(typeof im.orchestrator.verified, "boolean");
 });

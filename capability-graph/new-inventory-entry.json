@@ -2001,36 +2001,46 @@
             "params": [
               {
                 "n": 1,
-                "value": "the equipment IEN (ENTRY NUMBER, fld .01)"
+                "value": "the equipment IEN (ENTRY NUMBER, fld .01)",
+                "source": "ien"
               },
               {
                 "n": 2,
                 "value": "the entering user's name — NEW PERSON (file 200) .01 for DUZ",
-                "dependsOn": "operatorIdentity"
+                "dependsOn": "operatorIdentity",
+                "source": "operatorIdentity"
               },
               {
                 "n": 3,
-                "value": "MFGR. EQUIPMENT NAME (fld 3, node 0 piece 2)"
+                "value": "MFGR. EQUIPMENT NAME (fld 3, node 0 piece 2)",
+                "field": "3"
               },
               {
                 "n": 4,
                 "value": "the EQUIPMENT CATEGORY name (fld 6 → file 6911)",
-                "ifBlank": "MISSING"
+                "ifBlank": "MISSING",
+                "field": "6",
+                "pointer": true
               },
               {
                 "n": 5,
                 "value": "the SERVICE POINTER name (fld 21, node 3 piece 2 → file 49)",
-                "ifBlank": "MISSING"
+                "ifBlank": "MISSING",
+                "field": "21",
+                "pointer": true
               },
               {
                 "n": 6,
                 "value": "STATION NUMBER (fld 60), else the site default (file 6910 fld 1)",
-                "ifBlank": "MISSING"
+                "ifBlank": "MISSING",
+                "field": "60"
               },
               {
                 "n": 7,
                 "value": "ENEQ3 lines 92–96: 'Item is [NOT] capitalized NX.' (capitalized NX = TYPE OF ENTRY = NX and INVESTMENT CATEGORY = 1); for capitalized NX items adds 'It was [NOT] reported to FAP.' from $$CHKFA^ENFAUTL (an FA document exists)",
-                "dependsOn": "SIDE.FinancialAsset"
+                "dependsOn": "SIDE.FinancialAsset",
+                "capitalizedNX": [{ "field": "7", "equals": "NX" }, { "field": "34", "equals": "1" }],
+                "text": { "capitalized": "Item is capitalized NX.", "notCapitalized": "Item is NOT capitalized NX.", "reported": "It was reported to FAP.", "notReported": "It was NOT reported to FAP." }
               }
             ],
             "recipients": "members of mail group 'EN NEW EQUIPMENT <station>' if it has any, otherwise 'EN NEW EQUIPMENT' (CHKMGRP), plus the members of the groups listed on the bulletin itself (XMB lines 12–16): CLICKAAH. Nothing is sent if neither EN group qualifies."

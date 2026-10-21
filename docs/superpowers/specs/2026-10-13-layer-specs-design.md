@@ -177,6 +177,22 @@ service; otherwise it is **unmet** and shown as *"requires Phase 1 work — not 
 and server-populated fields not omitted): a rule may only use data the orchestrator actually
 receives. A word that has no field there is itself an unmet need.
 
+### 4.5 Amendment (2026-10-15): the first production is built stub-first
+
+The user's direction: build the production now and settle the implementation details later.
+
+- **Real operations** are the mandatory side effects only (today: the bulletin). Every other
+  decided side effect is a **stub**: a Business Operation registered in the production, not wired,
+  carrying its decision (or Defer reason) and legacy evidence.
+- **What blocks the build:** an undecided open question, a mandatory item left Dropped in an older
+  record, and the real operations' build details. A notification's only build detail is its
+  `recipients`; it defaults to `via: iris`, `channel: email`, content = the legacy message template,
+  each overridable in the record.
+- **What no longer blocks:** field bindings, target details and Phase 1 needs for stubs. Each stub
+  lists them as *"Later, to wire this stub"* — including a binding to a field the API contract no
+  longer carries. The §4.4 table above describes what wiring a stub will take, not this build.
+- Stage order becomes: decide → the real operations' details → ready → (built and verified) → AI.
+
 ---
 
 ## 5. Data shapes

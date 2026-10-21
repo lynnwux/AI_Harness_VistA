@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Decide — Legacy Capability → Development Spec</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23141b24'/%3E%3Cpath d='M9 16 22 9M9 16 22 23' stroke='%233d9cf5' stroke-width='2.5' stroke-linecap='round'/%3E%3Ccircle cx='9' cy='16' r='4.5' fill='%233d9cf5'/%3E%3Ccircle cx='23' cy='9' r='4.5' fill='%237ee787'/%3E%3Ccircle cx='23' cy='23' r='3.8' fill='%2326303d' stroke='%233d9cf5' stroke-width='1.5'/%3E%3C/svg%3E">
 <style>
   :root{
     --bg:#0d1117; --panel:#141b24; --panel2:#1b2430; --edge:#26303d;
@@ -155,7 +156,7 @@
 <div class="stage">
   <div class="pane left chatpane">
     <div class="pane-title">Guided decision session <span class="prog" id="prog"></span></div>
-    <div class="voicebar"><button class="btn" id="voiceBtn" title="Speak assistant messages aloud">🔊 Voice</button><select class="vsel" id="voiceSel" title="Choose a voice"></select></div>
+    <div class="voicebar"><button class="btn" id="voiceBtn" title="Read assistant messages aloud">🔇 Voice off</button><select class="vsel" id="voiceSel" title="Choose a voice"></select></div>
     <div class="agenda" id="agenda"></div>
     <div class="chat-msgs" id="chatMsgs"></div>
     <div class="chat-in"><input id="chatInp" placeholder="Answer, ask, or instruct…" autocomplete="off"><button id="chatSend">Send</button></div>
@@ -169,6 +170,8 @@
       <button class="btn" id="dlBtn" title="Download this layer's spec">⬇ Download</button>
       <button class="btn primary" id="buildBtn" title="Regenerate the API layer (Angular app) from the API spec and open it">🔨 Build</button>
       <button class="btn" id="killBtn" title="Cancel the running build and reset the environment for the next one" disabled>⏹ Stop</button>
+      <button class="btn" id="irisBtn" title="Open the built production in the IRIS Management Portal" style="display:none">🔗 Open in IRIS</button>
+      <button class="btn primary" id="prodBtn" title="Generate the IRIS production from the orchestrator spec, deploy it and verify it with one dry-run request">🔨 Build production</button>
     </div>
     <div class="doc" id="doc"></div>
   </div>
@@ -178,7 +181,12 @@
 const cap = g => g.capabilities[0];
 const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const TARGET = "RegisterEquipment";
-let G = null, SPECS = null, TAB = "orchestrator";
+let G = null, SPECS = null, TAB = "orchestrator", PORTAL = null;
+// the last successful production build's Management Portal page, if any
+async function loadPortal(){
+  try{ const s=await (await fetch("/api/build/production/status",{cache:"no-store"})).json(); PORTAL = s.state==="done" ? s.portalUrl||null : PORTAL; }catch(e){}
+  renderRight();
+}
 
 async function loadSpecs(){
   try{ const r=await fetch("/api/specs",{cache:"no-store"}); SPECS=await r.json(); }
@@ -220,6 +228,10 @@ function renderRight(){
   const onApi = TAB==="api";
   document.getElementById("buildBtn").style.display = onApi ? "" : "none";
   document.getElementById("killBtn").style.display = onApi ? "" : "none";
+  const prod=document.getElementById("prodBtn"), oDone=SPECS&&SPECS.layers&&SPECS.layers.orchestrator.complete;
+  prod.style.display = TAB==="orchestrator" ? "" : "none";
+  document.getElementById("irisBtn").style.display = TAB==="orchestrator" && PORTAL ? "" : "none";
+  if(!prod.dataset.busy){ prod.disabled=!oDone; prod.title=oDone?"Generate the IRIS production from the orchestrator spec, deploy it and verify it with one dry-run request":"Finish the orchestrator spec's missing items in the chat first"; }
   const doc=document.getElementById("doc");
   if(!SPECS||!SPECS.layers){ doc.innerHTML=`<div class="specerr">${esc((SPECS&&SPECS.error)||"Specs not available")}</div>`; return; }
   const banner = (SPECS.notice ? `<div class="specerr">⚠ ${esc(SPECS.notice)}</div>` : "")
@@ -250,7 +262,7 @@ function capabilityOverview(){
   paras.push(`**What we're building: \`${TARGET}\`** — the modern version of the legacy **${w.name}** option (routine \`${c.entryPoint?c.entryPoint.dispatch:""}\`, FileMan file ${file}).`+(menu?` Discovered by tracing ${menu}.`:""));
   if(c.summary) paras.push(c.summary);
   paras.push(`In plain terms: a clerk fills a **${screens}-screen form (${fields} fields)**; on save the record is created in file ${file} with its serial-number duplicate check preserved. The entry also triggers **${beh.length} downstream side effects** — ${sfx}.`);
-  paras.push(`We'll turn this into a build spec targeting **Angular → REST → IRIS Interop → AI Hub** (it renders live on the right). Most of the capability is coded and carries over automatically; the legacy leaves **${oqs.length} decisions to a human**, plus how each side effect is wired. Let's settle those.`);
+  paras.push(`The right pane shows the spec for each layer — **API** (REST service on VistA + Angular app) · **Orchestrator** (IRIS Interoperability production) · **AI** (AI Hub) — and it renders live. **What you decide in this chat is what gets built:** every decision is recorded, the specs regenerate on the spot, and each build reads its layer's spec. Most of the capability is coded in the legacy and carries over; the legacy leaves **${oqs.length} decisions to a human**, plus how each side effect is wired. Let's settle those.`);
   return paras.join("\n\n");
 }
 
@@ -262,7 +274,7 @@ let chatHistory=[];
 function fmtMsg(s){ return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>"); }
 
 /* ---------- text-to-speech (Web Speech API) ---------- */
-let voiceOn = ('speechSynthesis' in window);
+let voiceOn = false;   // off until the user turns it on with the Voice button
 function stripForSpeech(t){
   return String(t)
     .replace(/```[\s\S]*?```/g," (code) ")
@@ -287,13 +299,14 @@ function loadVoices(){
   voices=(window.speechSynthesis?speechSynthesis.getVoices():[])||[];
   const sel=document.getElementById("voiceSel"); if(!sel) return;
   if(!voices.length){ sel.innerHTML='<option>loading voices…</option>'; return; }
-  const ranked=voices.map((v,i)=>({v,i,s:scoreVoice(v)})).sort((a,b)=>b.s-a.s);
+  const english=voices.filter(v=>/^en/i.test(v.lang));
+  const ranked=(english.length?english:voices).map((v,i)=>({v,i,s:scoreVoice(v)})).sort((a,b)=>b.s-a.s).slice(0,4);
   const saved=localStorage.getItem("decideVoice");
-  chosenVoice = (saved && voices.find(v=>v.name===saved)) || ranked[0].v;
+  chosenVoice = (ranked.find(({v})=>v.name===saved)||ranked[0]).v;
   sel.innerHTML=ranked.map(({v})=>`<option value="${esc(v.name)}" ${v.name===chosenVoice.name?"selected":""}>${esc(v.name)}${/natural|neural|online|google/i.test(v.name)?" ★":""}</option>`).join("");
 }
-function speak(text, el){
-  if(!voiceOn || !('speechSynthesis' in window)) return;
+function speak(text, el, force){
+  if((!voiceOn && !force) || !('speechSynthesis' in window)) return;
   try{
     speechSynthesis.cancel();
     if(speakingEl) speakingEl.classList.remove("speaking");
@@ -309,7 +322,7 @@ function addMsg(role,text,cls){
   if(role==="assistant"&&!cls){
     d.innerHTML=fmtMsg(text);
     const rb=document.createElement("button"); rb.className="ttsbtn"; rb.title="Play aloud"; rb.textContent="🔊";
-    rb.onclick=()=>speak(text,d); d.appendChild(rb);
+    rb.onclick=()=>speak(text,d,true); d.appendChild(rb);
     if(voiceOn) speak(text,d);
   } else { d.textContent=text; }
   box.appendChild(d); box.scrollTop=box.scrollHeight; return d;
@@ -351,15 +364,16 @@ function wireChat(){
   document.getElementById("chatInp").addEventListener("keydown",e=>{ if(e.key==="Enter") sendChat(); });
   const vb=document.getElementById("voiceBtn");
   if(!('speechSynthesis' in window)){ vb.disabled=true; vb.textContent="🔇 (no TTS)"; voiceOn=false; return; }
-  vb.onclick=()=>{ voiceOn=!voiceOn; if(!voiceOn){ speechSynthesis.cancel(); if(speakingEl)speakingEl.classList.remove("speaking"); } vb.textContent=voiceOn?"🔊 Voice":"🔇 Muted"; vb.classList.toggle("primary",voiceOn); };
-  vb.classList.toggle("primary",voiceOn);
+  const showVoice=()=>{ vb.textContent=voiceOn?"🔊 Voice on":"🔇 Voice off"; vb.title=voiceOn?"Stop reading assistant messages aloud":"Read assistant messages aloud"; vb.classList.toggle("primary",voiceOn); };
+  vb.onclick=()=>{ voiceOn=!voiceOn; if(!voiceOn){ speechSynthesis.cancel(); if(speakingEl)speakingEl.classList.remove("speaking"); } showVoice(); };
+  showVoice();
   loadVoices();
   try{ speechSynthesis.addEventListener("voiceschanged",loadVoices); }catch(e){}
   if(speechSynthesis.onvoiceschanged!==undefined) speechSynthesis.onvoiceschanged=loadVoices;
   // getVoices() is async in some browsers — retry until the list populates
   let vtries=0; const viv=setInterval(()=>{ loadVoices(); if(voices.length || ++vtries>12) clearInterval(viv); },300);
   const sel=document.getElementById("voiceSel");
-  sel.onchange=()=>{ chosenVoice=voices.find(v=>v.name===sel.value)||chosenVoice; if(chosenVoice) localStorage.setItem("decideVoice",chosenVoice.name); speak("Voice set to "+ (chosenVoice?chosenVoice.name:"default")+".", null); };
+  sel.onchange=()=>{ chosenVoice=voices.find(v=>v.name===sel.value)||chosenVoice; if(chosenVoice) localStorage.setItem("decideVoice",chosenVoice.name); speak("Voice set to "+ (chosenVoice?chosenVoice.name:"default")+".", null, true); };
 }
 document.getElementById("dlBtn").onclick=()=>{
   if(!SPECS||!SPECS.layers) return;
@@ -395,6 +409,41 @@ document.getElementById("buildBtn").onclick=async ()=>{
     poll();
   }catch(e){ upd("⚠ Build failed: "+esc(e.message)); reset(); }
 };
+document.getElementById("prodBtn").onclick=async ()=>{
+  const btn=document.getElementById("prodBtn"), label="🔨 Build production";
+  const reset=()=>{ btn.textContent=label; delete btn.dataset.busy; btn.disabled=false; loadSpecs(); };
+  btn.textContent="🔨 Building…"; btn.disabled=true; btn.dataset.busy="1";
+  const boxEl=document.getElementById("chatMsgs");
+  const bubble=document.createElement("div"); bubble.className="cmsg assistant"; boxEl.appendChild(bubble);
+  const upd=(html)=>{ bubble.innerHTML=html; boxEl.scrollTop=boxEl.scrollHeight; };
+  const pre=(t)=>`<pre style="margin-top:6px;max-height:220px;overflow:auto;background:#0a0e14;border:1px solid var(--edge);border-radius:6px;padding:8px;font-size:11px;white-space:pre-wrap">${esc(t)}</pre>`;
+  try{
+    const r=await fetch("/api/build/production",{method:"POST"}); const res=await r.json();
+    if(res.running){ upd("A production build is already running — streaming its progress…"); }
+    else if(!res.started){ upd("⚠ The production build did not start: "+esc(res.error||"unknown")+(res.missing?pre(res.missing.join("\n")):"")); reset(); return; }
+    else upd("<b>🔨 Building the IRIS production from the orchestrator spec…</b>");
+    const poll=async ()=>{
+      let s; try{ s=await (await fetch("/api/build/production/status",{cache:"no-store"})).json(); }catch(e){ setTimeout(poll,3000); return; }
+      const log=(s.log||[]).join("\n");
+      if(s.state==="done"){
+        const b=s.bulletin; PORTAL=s.portalUrl||null;
+        const sent=s.result&&s.result.outcomes&&s.result.outcomes.bulletin==="sent";
+        upd((sent
+            ? "<b>✅ Production running and verified — the bulletin email was sent.</b> Nothing was filed in VistA (that write is still dry-run); the stubs stayed unwired."
+              + (s.mail?` <a href="${esc(s.mail.link)}" target="_blank" rel="noopener" style="color:var(--accent)">📧 Open the delivered email</a>`:"")
+            : "<b>✅ Production running and verified (dry-run).</b> Nothing was filed in VistA and no email was sent; the stubs stayed unwired.")
+          + (PORTAL?` <a href="${esc(PORTAL)}" target="_blank" rel="noopener" style="color:var(--accent)">🔗 Open it in IRIS</a>`:"")
+          + (b?"<div style='margin-top:6px'>The bulletin it "+(sent?"sent":"composed")+" (to "+esc(b.Recipients)+"):</div>"+pre(b.Subject+"\n\n"+b.Body):"")
+          + pre(log)); reset(); return;
+      }
+      if(s.state==="error"){ upd("<b>✗ Production build failed:</b> "+esc(s.error||"")+pre(log)); reset(); return; }
+      upd("<b>🔨 Building the production…</b> "+esc(s.step||s.state||"")+pre(log));
+      setTimeout(poll,2000);
+    };
+    poll();
+  }catch(e){ upd("⚠ Production build failed: "+esc(e.message)); reset(); }
+};
+document.getElementById("irisBtn").onclick=()=>{ if(PORTAL) window.open(PORTAL,"_blank","noopener"); };
 document.getElementById("killBtn").onclick=async ()=>{
   const kill=document.getElementById("killBtn"); kill.disabled=true; kill.textContent="⏹ Stopping…";
   try{ await fetch("/api/build/cancel",{method:"POST"}); }catch(e){}
@@ -407,9 +456,9 @@ document.getElementById("killBtn").onclick=async ()=>{
   catch(e){ document.getElementById("doc").innerHTML='<div class="specerr">Could not load the capability graph — run the workbench server and open http://localhost:8899/capability-graph/decide.html</div>'; return; }
   document.getElementById("hdrSub").textContent = G.workflow.name + " → " + TARGET;
   wireTabs(); wireChat();
-  await loadSpecs();
+  await loadSpecs(); loadPortal();
   addMsg("assistant", capabilityOverview());
-  addMsg("assistant","**Where we are — ✅ Phase 1 is built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/) and the write path is proven end-to-end against VADEMO file 6914.\n\nThe right pane now has one spec per layer — **API · Orchestrator · AI**. We're working on the **Orchestrator** layer (the IRIS production); **AI** comes after the production is built and verified.");
+  addMsg("assistant","**Where we are — ✅ Phase 1 is built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/) and the write path is proven end-to-end against VADEMO file 6914.\n\nWe're working on the **Orchestrator** layer (the IRIS production) now; **AI** comes after the production is built and verified.");
   const o = SPECS&&SPECS.layers ? SPECS.layers.orchestrator : null;
   const pend = o ? o.missing.filter(m=>m.kind==="decide") : [];
   addMsg("assistant", !o ? "⚠ The layer specs could not be generated — see the right pane."

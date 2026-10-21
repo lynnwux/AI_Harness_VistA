@@ -1,36 +1,68 @@
 "use strict";
 // Orchestrator layer spec: the IRIS production. Uses the API layer by reference and lists what it
 // needs from it — it never changes the API layer.
-const { cap, isBlocking, isBuilt, isMandatory, requiredTargetKeys, describeKey } = require("../rules");
+// Stub-first: the mandatory side effects are real operations; every other decided side effect is a stub
+// (registered in the production, not wired) carrying what wiring it later will take. A stub never blocks the build.
+const { cap, isBlocking, isMandatory, requiredTargetKeys, buildTargetKeys, buildDefaults, describeKey } = require("../rules");
 const { requestContract } = require("./api");
 
 const CONTAINER = "iris-ai-hub", NAMESPACE = "INTEROP";
 const has = (implemented, id) => ((implemented && implemented.api) || []).some(s => s.id === id);
+const filled = v => String(v == null ? "" : v).trim() !== "";
 
-function needsFor(se, record, implemented) {
+function needsFor(se, target, implemented) {
   const out = [];
   if (se.writes) {
     const service = "write:" + se.writes.file;
     out.push({ for: se.id, service, what: `write file ${se.writes.file} for ${se.name} — proposed in the API spec from \`${se.call}\``, from: "api", met: has(implemented, service) });
   }
-  if ((record.targets[se.id] || {}).via === "vista" && !se.writes) {
+  if (target.via === "vista" && !se.writes) {
     const service = "call:" + se.call;
     out.push({ for: se.id, service, what: `run \`${se.call}\` on VistA for ${se.name}`, from: "api", met: has(implemented, service) });
   }
   return out;
 }
 
+// What a side effect is in this build: a real operation, a stub, or not built (and why).
+function standing(se, record, oqs) {
+  if (isMandatory(se)) return { as: "real" };
+  if (record.dec[se.id] === "Drop") return { as: "notBuilt", reason: "dropped — not carried forward" };
+  const q = se.openQuestion;
+  if (q && isBlocking(record, q)) return { as: "notBuilt", reason: `waiting on the decision: ${oqs.find(x => x.id === q).decisionPoint}` };
+  if (q && record.dec[q] === "Defer") return { as: "stub", reason: record.oqPolicy[q] };
+  if ((record.scope[se.id] || "Build now") === "Defer") return { as: "stub", reason: "deferred to a later phase" };
+  return { as: "stub", reason: null };
+}
+
 // What a legacy message template depends on, from the graph's params[].dependsOn — surfaced, never decided.
 function templateNotes(se, graph, record) {
   const t = se.messageTemplate; if (!t) return [];
-  return t.params.filter(p => p.dependsOn).map(p => {
+  const oqs = cap(graph).openQuestions || [];
+  return t.params.filter(p => p.dependsOn || p.pointer).map(p => {
+    if (p.pointer) return `\`|${p.n}|\`: the request carries the pointer's IEN, not its name — until a name lookup is wired, the email shows the IEN`;
     if (p.dependsOn === "operatorIdentity") return `\`|${p.n}|\`: no operator identity reaches the pipeline yet, so this would name the service account, not the clerk`;
     const dep = cap(graph).sideEffects.find(x => x.id === p.dependsOn);
     if (!dep) return `\`|${p.n}|\` depends on ${p.dependsOn}`;
-    return isBuilt(dep, record)
-      ? `\`|${p.n}|\` reports the outcome of ${dep.name} — run the bulletin after that step, as the legacy does`
-      : `\`|${p.n}|\` reports the outcome of ${dep.name}, which is not built in this phase — it would always report that step as not done`;
+    const st = standing(dep, record, oqs).as;
+    if (st === "real") return `\`|${p.n}|\` reports the outcome of ${dep.name} — run the bulletin after that step, as the legacy does`;
+    if (st === "stub") return `\`|${p.n}|\` reports the outcome of ${dep.name}, which is a stub in this build — it would always report that step as not done`;
+    return `\`|${p.n}|\` reports the outcome of ${dep.name}, which is not built in this phase — it would always report that step as not done`;
   });
+}
+
+// What wiring a stub later will take — listed for the developer, never blocking.
+function laterFor(se, record, rule, contract, implemented) {
+  const L = [];
+  if (rule && rule.mode === "Business rule" && rule.bindings === null) L.push("bind the policy's data words to fields of the API request contract");
+  for (const [w, f] of Object.entries((rule && rule.bindings) || {})) {
+    if (!contract.has(String(f))) L.push(`"${w}" is bound to fld ${f}, which the API request contract no longer carries`);
+  }
+  if (rule && rule.mode === "Required input") L.push(`operator prompt on the front end: "${rule.promptText}" (Phase 1 — \`prompt:${rule.id}\`)`);
+  const target = record.targets[se.id] || {};
+  const open = requiredTargetKeys(se, record).filter(k => !filled(target[k]));
+  if (open.length) L.push(`target details: ${open.join(", ")}`);
+  needsFor(se, target, implemented).filter(n => !n.met).forEach(n => L.push(`${n.what} (Phase 1 — \`${n.service}\`)`));
+  return L;
 }
 
 function buildOrchestratorSpec(graph, record, implemented) {
@@ -41,53 +73,40 @@ function buildOrchestratorSpec(graph, record, implemented) {
     if (isBlocking(record, q.id)) { missing.push({ id: q.id, kind: "decide", what: `decide: ${q.decisionPoint}` }); continue; }
     const mode = record.dec[q.id];
     if (mode === "Defer") continue;
-    const bindings = record.ruleBindings[q.id] === undefined ? null : record.ruleBindings[q.id];
-    // a rule whose side effects are all out of this build (e.g. deferred by build scope) asks for nothing now
-    const gated = (c.sideEffects || []).filter(s => s.openQuestion === q.id);
-    const idle = gated.length > 0 && !gated.some(s => isBuilt(s, record));
-    rules.push({ id: q.id, decisionPoint: q.decisionPoint, mode, policy: record.oqPolicy[q.id], bindings, idle });
-    if (idle) continue;
-    if (bindings === null) missing.push({ id: q.id, kind: "binding", what: `bind the data words in the policy for "${q.decisionPoint}" to fields of the API request contract` });
-    // a binding to a field the API contract no longer carries is data the orchestrator will not receive
-    for (const [word, f] of Object.entries(bindings || {})) {
-      if (!contract.has(String(f))) needs.push({ for: q.id, service: "field:" + f, what: `"${word}" in the policy for "${q.decisionPoint}" is bound to fld ${f}, which the API request contract no longer carries`, from: "api", met: false });
-    }
-    if (mode === "Required input") {
-      const service = "prompt:" + q.id;
-      needs.push({ for: q.id, service, what: `operator prompt on the front end: "${q.promptText}"`, from: "api", met: has(implemented, service) });
-    }
+    rules.push({ id: q.id, decisionPoint: q.decisionPoint, mode, policy: record.oqPolicy[q.id], bindings: record.ruleBindings[q.id] === undefined ? null : record.ruleBindings[q.id], promptText: q.promptText });
   }
   const coded = (c.businessRules || []).filter(r => record.dec[r.id] !== "Drop")
     .map(r => ({ id: r.id, name: r.name, disposition: record.dec[r.id] || "Preserve", condition: r.condition, effect: r.effect }));
-  const built = [], deferred = [], notBuilt = [];
+  const built = [], stubs = [], notBuilt = [];
   for (const se of c.sideEffects || []) {
-    const entry = { id: se.id, name: se.name, call: se.call, disposition: record.dec[se.id], mandatory: isMandatory(se), gatedBy: se.openQuestion || null, evidence: se.legacyEvidence || [], target: record.targets[se.id] || {}, template: se.messageTemplate || null, templateNotes: [] };
-    if (!isBuilt(se, record)) {
-      const q = se.openQuestion;
-      if (record.dec[se.id] === "Drop") { notBuilt.push({ ...entry, reason: "dropped — not carried forward" }); continue; }
-      if (q && isBlocking(record, q)) { notBuilt.push({ ...entry, reason: `waiting on the decision: ${oqs.find(x => x.id === q).decisionPoint}` }); continue; }
-      // a Defer is a decision: an unwired stub, no target details, no needs — it never blocks Phase 2
-      deferred.push({ ...entry, stub: true, reason: q && record.dec[q] === "Defer" ? record.oqPolicy[q] : "deferred to a later phase" });
+    const st = standing(se, record, oqs);
+    const entry = { id: se.id, name: se.name, call: se.call, disposition: record.dec[se.id], mandatory: isMandatory(se), gatedBy: se.openQuestion || null, evidence: se.legacyEvidence || [], template: se.messageTemplate || null, templateNotes: [] };
+    if (st.as === "notBuilt") { notBuilt.push({ ...entry, target: record.targets[se.id] || {}, reason: st.reason }); continue; }
+    if (st.as === "stub") {
+      const rule = rules.find(r => r.id === se.openQuestion) || null;
+      stubs.push({ ...entry, target: record.targets[se.id] || {}, stub: true, reason: st.reason, decision: rule, later: laterFor(se, record, rule, contract, implemented) });
       continue;
     }
-    if (isMandatory(se) && record.dec[se.id] === "Drop") missing.push({ id: se.id, kind: "decide", what: `decide how ${se.name} is implemented — it is mandatory, so the Drop in the record cannot apply` });
+    // a real operation: recorded details over this build's defaults
+    const defaults = buildDefaults(se, record), recorded = record.targets[se.id] || {};
+    const target = { ...defaults, ...Object.fromEntries(Object.entries(recorded).filter(([, v]) => filled(v))) };
+    if (record.dec[se.id] === "Drop") missing.push({ id: se.id, kind: "decide", what: `decide how ${se.name} is implemented — it is mandatory, so the Drop in the record cannot apply` });
     if (!se.targetKind && record.dec[se.id] !== "Integration") missing.push({ id: se.id, kind: "evidence", what: `${se.name}: legacy evidence not yet recorded in the graph` });
-    for (const key of requiredTargetKeys(se, record)) {
-      if (!String(entry.target[key] || "").trim()) missing.push({ id: se.id, kind: "target", key, what: `${se.name}: ${describeKey(se, record, key)}` });
+    for (const key of buildTargetKeys(se, record)) {
+      if (!filled(target[key])) missing.push({ id: se.id, kind: "target", key, what: `${se.name}: ${describeKey(se, record, key)}` });
     }
-    needs.push(...needsFor(se, record, implemented));
-    entry.templateNotes = templateNotes(se, graph, record);
-    built.push(entry);
+    needs.push(...needsFor(se, target, implemented));
+    built.push({ ...entry, target, defaults: Object.keys(defaults).filter(k => !filled(recorded[k])), templateNotes: templateNotes(se, graph, record) });
   }
   const security = (c.security || []).filter(s => record.dec[s.id] !== "Drop").map(s => ({ id: s.id, key: s.key, gates: s.gates, disposition: record.dec[s.id] }));
   return {
     layer: "orchestrator",
-    builds: [`IRIS Interoperability production in container \`${CONTAINER}\`, namespace \`${NAMESPACE}\``, "a front door, an orchestrator, and one operation per built side effect — every outbound operation dry-run until enabled"],
-    owns: ["the production's front-door request/response: the 6914 create request (see the API spec) plus a per-side-effect outcome (fired | skipped | dry-run | degraded)", "the rules below"],
+    builds: [`IRIS Interoperability production in container \`${CONTAINER}\`, namespace \`${NAMESPACE}\``, "a front door, an orchestrator, one real operation per mandatory side effect and one stub operation per other decided side effect — every outbound operation dry-run until enabled"],
+    owns: ["the production's front-door request/response: the 6914 create request (see the API spec) plus a per-side-effect outcome (fired | skipped | dry-run | stub | degraded)", "the rules below"],
     uses: ["API: `POST /equipment` — the 6914 create contract"],
     needs, missing,
     complete: missing.length === 0 && needs.every(n => n.met),
-    detail: { container: CONTAINER, namespace: NAMESPACE, rules, coded, built, deferred, notBuilt, security, request: requestContract(graph, record) },
+    detail: { container: CONTAINER, namespace: NAMESPACE, rules, coded, built, stubs, notBuilt, security, request: requestContract(graph, record) },
   };
 }
 
@@ -103,15 +122,14 @@ function renderOrchestrator(graph, record, spec) {
   L.push("## Owns"); spec.owns.forEach(o => L.push(`- ${o}`)); L.push("");
   L.push("## Uses (by reference — see the API spec)"); spec.uses.forEach(u => L.push(`- ${u}`)); L.push("");
   L.push("## Needs from lower layers");
-  if (!spec.needs.length) L.push("- none");
+  if (!spec.needs.length) L.push("- none for this build");
   spec.needs.forEach(n => L.push(`- ${n.met ? "✅ met" : "⛔ **unmet — requires Phase 1 work, not decidable here**"}: ${n.what} (\`${n.service}\`)`));
   L.push("");
   L.push("## Rules");
   L.push("### From resolved open questions");
   if (!d.rules.length) L.push("- none");
   d.rules.forEach(r => {
-    const b = r.idle && r.bindings === null ? "its side effect is not built in this phase — no bindings needed now"
-      : r.bindings === null ? "▢ field bindings"
+    const b = r.bindings === null ? "field bindings: later, when its stub is wired"
       : Object.keys(r.bindings).length ? "fields: " + Object.entries(r.bindings).map(([w, f]) => `${w} → fld ${f} ${fieldName(f)}`).join("; ")
       : "fields: none (the policy uses no data)";
     L.push(`- **${r.decisionPoint}** — ${r.mode}: "${r.policy}" · ${b}`);
@@ -120,13 +138,12 @@ function renderOrchestrator(graph, record, spec) {
   if (!d.coded.length) L.push("- none");
   d.coded.forEach(r => L.push(`- **${r.name}** (${r.disposition}): \`${r.condition}\` → ${r.effect}`));
   L.push("");
-  L.push("## Side effects — built");
+  L.push("## Side effects — real operations");
   if (!d.built.length) L.push("- none");
   d.built.forEach(e => {
     const se = cap(graph).sideEffects.find(x => x.id === e.id);
-    const rule = d.rules.find(r => r.id === e.gatedBy);
     L.push(`### ${e.name}${e.mandatory ? " — mandatory" : ""}`);
-    L.push(`- Decision: ${e.disposition}${e.mandatory ? " · always built (the legacy calls it unconditionally)" : rule ? ` · gate: ${rule.mode} "${rule.policy}"` : ""}`);
+    L.push(`- Decision: ${e.disposition}${e.mandatory ? " · always built (the legacy calls it unconditionally)" : ""}`);
     L.push("- Legacy evidence:");
     if (!e.evidence.length) L.push("  - ▢ not yet recorded");
     e.evidence.forEach(x => L.push(`  - \`${x.routine}\` ${x.line}: ${x.says}`));
@@ -141,20 +158,23 @@ function renderOrchestrator(graph, record, spec) {
       e.templateNotes.forEach(n => L.push(`  - ⚠ ${n}`));
     }
     L.push("- Target details:");
-    const req = requiredTargetKeys(se, record);
-    req.concat(Object.keys(e.target).filter(k => !req.includes(k))).forEach(k => {
+    const ask = buildTargetKeys(se, record);
+    [...new Set([...requiredTargetKeys(se, record), ...ask, ...Object.keys(e.target)])].forEach(k => {
       const v = e.target[k];
-      L.push(v ? `  - ${k}: ${v}` : `  - ▢ ${k} — ${describeKey(se, record, k)}`);
+      if (filled(v)) L.push(`  - ${k}: ${v}${e.defaults.includes(k) ? " (default)" : ""}`);
+      else if (ask.includes(k)) L.push(`  - ▢ ${k} — ${describeKey(se, record, k)}`);
     });
     L.push("- Dry-run: on until enabled");
   });
   L.push("");
-  L.push("## Deferred — stub only, not wired");
-  L.push("Each gets a stub Business Operation in the production — registered, never called — carrying its legacy evidence and the reason below. No target details are needed, so deferring never blocks this build.");
-  if (!d.deferred.length) L.push("- none");
-  d.deferred.forEach(e => {
-    L.push(`- **${e.name}** — ${e.reason}`);
+  L.push("## Stubs — registered in the production, not wired");
+  L.push("Each is a Business Operation registered in the production that does nothing yet. It carries the decision and its legacy evidence; wiring it is later work and never blocks this build.");
+  if (!d.stubs.length) L.push("- none");
+  d.stubs.forEach(e => {
+    const why = e.decision ? `${e.decision.mode}: "${e.decision.policy}"` : `deferred — ${e.reason}`;
+    L.push(`- **${e.name}** — ${why}`);
     e.evidence.forEach(x => L.push(`  - \`${x.routine}\` ${x.line}: ${x.says}`));
+    L.push(`  - Later, to wire this stub: ${e.later.length ? e.later.join("; ") : "nothing recorded yet"}`);
   });
   L.push("");
   L.push("## Not built");

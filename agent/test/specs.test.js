@@ -42,17 +42,13 @@ test("writeSpecs writes json and markdown for all three layers", () => {
   assert.match(md.ai, /^# AI layer spec/);
 });
 
-test("stage walks decide → binding → target → needs → ready → ai", () => {
+test("stage walks decide → the bulletin's recipients → ready → ai", () => {
   assert.equal(stage(generate(inputs(rec())), IM).step, "decide");
-  const d = { dec: { "OQ.WorkOrderPolicy": "Business rule" }, oqPolicy: { "OQ.WorkOrderPolicy": "if TYPE OF ENTRY = NX", "OQ.PMEnrollmentPolicy": "later", "OQ.FAConfirmation": "later" } };
-  assert.equal(stage(generate(inputs(rec(d))), IM).step, "binding");
-  const b = { ...d, ruleBindings: { "OQ.WorkOrderPolicy": { "TYPE OF ENTRY": "7" } } };
-  assert.equal(stage(generate(inputs(rec(b))), IM).step, "target");
-  const t = { ...b, targets: { "SIDE.WorkOrder": { via: "vista", writePath: "x", fields: "x", operatorValues: "x" }, "SIDE.Bulletin": { via: "iris", channel: "x", recipients: "x", content: "x" } } };
-  const st = stage(generate(inputs(rec(t))), IM);
-  assert.equal(st.step, "needs"); assert.equal(st.next.service, "write:6920");
-  const im = { ...IM, api: [...IM.api, { id: "write:6920", endpoint: "POST /work-orders", what: "x" }] };
-  assert.equal(stage(generate(inputs(rec(t), im)), im).step, "ready");
-  const done = { ...im, orchestrator: { built: true, verified: true } };
+  const d = { dec: { "OQ.WorkOrderPolicy": "Business rule" }, oqPolicy: { "OQ.WorkOrderPolicy": "a rule", "OQ.PMEnrollmentPolicy": "later", "OQ.FAConfirmation": "later" } };
+  const st = stage(generate(inputs(rec(d))), IM);
+  assert.equal(st.step, "target"); assert.equal(st.next.id, "SIDE.Bulletin"); assert.equal(st.next.key, "recipients");
+  const t = { ...d, targets: { "SIDE.Bulletin": { recipients: "x" } } };
+  assert.equal(stage(generate(inputs(rec(t))), IM).step, "ready");
+  const done = { ...IM, orchestrator: { built: true, verified: true } };
   assert.equal(stage(generate(inputs(rec(t), done)), done).layer, "ai");
 });

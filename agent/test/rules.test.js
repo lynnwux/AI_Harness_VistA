@@ -29,3 +29,9 @@ test("target keys follow the graph's targetKind, or the external set when the di
   assert.ok(R.allowedTargetKeys(se("SIDE.PMSchedule"), asIntegration).includes("settings"));
   assert.equal(R.describeKey(se("SIDE.Bulletin"), rec(), "via"), "where the work is performed (vista | iris | external)");
 });
+
+test("for this stub-first build a notification asks only for its recipients; the rest defaults to an email from IRIS", () => {
+  assert.deepEqual(R.buildTargetKeys(se("SIDE.Bulletin"), rec()), ["recipients"]);
+  assert.deepEqual(Object.keys(R.buildDefaults(se("SIDE.Bulletin"), rec())), ["via", "channel", "content"]);
+  assert.deepEqual(R.buildTargetKeys(se("SIDE.WorkOrder"), rec()), ["via", "writePath", "fields", "operatorValues"]);
+});

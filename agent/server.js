@@ -53,14 +53,16 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
       "",
       "DEPENDENCIES POINT ONE WAY. A decision in a higher layer never changes a lower layer. The API layer is legacy discovery plus a REST service proposal, and it is built and verified. Form feedback is an API-layer decision (setDisposition Include/Omit); tell the user to click 🔨 Build on the API tab to regenerate the app. If an orchestrator decision needs something the API layer does not provide, report it as an UNMET NEED that requires Phase 1 work — never treat it as satisfied.",
       "",
-      "WORK FROM THE MISSING LIST, one item at a time. The current stage and the next item are below. Order: decide the open questions → bind each resolved rule's data words to fields → record target details for each built side effect → report unmet needs (Phase 1 work, not decidable here) → only when nothing is missing and every need is met, say the orchestrator spec is complete and ready for the production build. Never start or offer the AI layer until the production has been built and verified.",
+      "THIS PRODUCTION IS BUILT STUB-FIRST. The mandatory side effects are real operations; every other decided side effect is a stub — a Business Operation registered in the production, not wired — that carries the decision and its legacy evidence. Wiring a stub (field bindings, target details, Phase 1 services) is LATER work, listed under each stub in the spec: do not ask for it now unless the developer raises it.",
       "",
-      "For each open question explain the three resolution modes before asking, because they produce different architecture:",
+      "WORK FROM THE MISSING LIST, one item at a time. The current stage and the next item are below. Order: decide the open questions → confirm the details of each real operation → when nothing is missing, say the orchestrator spec is complete and ready for the production build. Never start or offer the AI layer until the production has been built and verified.",
+      "",
+      "For each open question explain the three resolution modes before asking, because they produce different architecture once its stub is wired:",
       "  · 'Business rule' = the orchestrator decides automatically from data, no prompt at entry time. Needs a stated rule — a condition on the item's data, in the developer's own words.",
-      "  · 'Required input' = the operator is asked at entry time. The front-end prompt is an API-layer need, so it shows as an unmet need until Phase 1 provides it.",
-      "  · 'Defer' = not built in this phase: the production gets a stub operation that is registered but never called. It NEVER blocks Phase 2. Record the developer's reason as the policy.",
+      "  · 'Required input' = the operator is asked at entry time. The front-end prompt is Phase 1 work, listed as later work for its stub.",
+      "  · 'Defer' = the developer is not deciding yet: the stub carries the developer's reason instead of a rule. It NEVER blocks the build. Record the reason as the policy.",
       "",
-      "LEGACY-FIRST, THEN MODERNIZE — the core loop for every item (open question, field binding, target detail). Do NOT open with a menu and do NOT treat keeping the legacy as the default:",
+      "LEGACY-FIRST, THEN MODERNIZE — the core loop for every item (an open question, or a detail of a real operation). Do NOT open with a menu and do NOT treat keeping the legacy as the default:",
       "  1. SHOW what the legacy actually does — quote the evidence (getState → sideEffects[].evidence, or the node's meta.evidence) and state its determinacy.",
       "  2. EXPLAIN it in plain language, decomposing compound conditions into parts that can be judged separately.",
       "  3. ASK how the developer wants to modernize each part — keep, change, relocate to another layer, or drop — with a recommendation and reasoning.",
@@ -70,9 +72,8 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
       "Never present any outcome as already decided, never bring in a condition, threshold, or decision the developer has not stated in THIS conversation, and never move a condition between rules unless the developer says so.",
       "Tooling limit to be honest about: rule dispositions are only Preserve/Inline/Drop, so a 'modernized' rule has no exact disposition. Record the closest one AND state the modification in words.",
       "",
-      "FIELD BINDINGS: list candidate fields from getState.requestContract with their DD names, let the developer choose, and record with bindRuleTerms. A word with no field in the contract is an unmet need.",
-      "NOTIFICATIONS: start the content and recipients details from the legacy message template (getState → sideEffects[].template) — show the subject, body and placeholders verbatim, then ask what to keep or change — and raise every ⚠ note in sideEffects[].templateNotes before recording.",
-      "TARGET DETAILS: record with setTarget — it never changes the disposition. To make a side effect an external integration, first setDisposition(id,'Integration'). Never ask for or record passwords, tokens, or other secrets — those are Management Portal settings.",
+      "NOTIFICATIONS (a real operation): show the legacy message template verbatim (getState → sideEffects[].template — subject, body, placeholders) and the defaults this build uses (sideEffects[].target, keys listed in sideEffects[].defaults: sent as an email from IRIS with that template as its content, dry-run until enabled), raise every ⚠ note in sideEffects[].templateNotes, then ask where to send it. Record the answer with setTarget (recipients); record channel or content only if the developer changes them. The mail server and its login are Management Portal settings — never ask for them.",
+      "FIELD BINDINGS and TARGET DETAILS for a stub are later work — only if the developer asks: list candidate fields from getState.requestContract with their DD names and record with bindRuleTerms; record target details with setTarget, which never changes the disposition. To make a side effect an external integration, first setDisposition(id,'Integration'). Never ask for or record passwords, tokens, or other secrets — those are Management Portal settings.",
       `MANDATORY in the production (discovery: the legacy calls these unconditionally): ${st.mandatory.join(", ") || "none"}. Never offer Drop or Defer for these and never ask the operator about them; the developer decides only HOW each is implemented.`,
       "",
       "STATUS AND SUMMARIES COME FROM THE RECORD, NOT FROM MEMORY. Before you summarise decisions or claim any status, call getState and report only what it returns; restate a recorded policy verbatim. If a tool result says something is still blocking or refused, say so. If what is recorded differs from what the developer told you, point out the difference and ask them to correct it.",
@@ -87,6 +88,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
       "Current capability: " + st.capability,
       "Current stage: " + JSON.stringify(st.stage),
       "Missing items: " + JSON.stringify(st.missing),
+      "Stubs in this build (registered, not wired): " + (st.sideEffects.filter(e => e.stub).map(e => e.name).join(", ") || "none yet"),
       "Needs from lower layers: " + JSON.stringify(st.needs),
       "Elements & current decisions: " + JSON.stringify(st.summary),
       "Currently blocking open questions: " + JSON.stringify(st.blocking),
@@ -138,6 +140,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent } = {}) {
 
   registerVistaRoutes(app);
   registerBuildRoutes(app, regenerate, serially);
+  registerProductionRoutes(app, regenerate, serially, () => state.specs);
   app.use(express.static(ROOT));
 
   regenerate();
@@ -305,6 +308,37 @@ function registerBuildRoutes(app, regenerate, serially) {
       else { try { process.kill(-pid, "SIGKILL"); } catch (e) { try { buildProc.kill("SIGKILL"); } catch (e2) {} } }
     } catch (e) { return res.status(500).json({ cancelled: false, error: String(e.message || e) }); }
     res.json({ cancelled: true });
+  });
+}
+
+const { STATUS_FILE: PRODUCTION_STATUS } = require("./production-runner");
+let productionProc = null;
+function registerProductionRoutes(app, regenerate, serially, specs) {
+  app.post("/api/build/production", (_req, res) => serially(() => {
+    if (productionProc) return res.json({ started: false, running: true, note: "a production build is already running" });
+    const g = regenerate();
+    if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
+    const o = specs().orchestrator;
+    if (!o.complete) return res.status(409).json({ started: false, error: "the orchestrator spec is not complete — finish its missing items in the Decide chat first", missing: o.missing.map(m => m.what) });
+    fs.writeFileSync(PRODUCTION_STATUS, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], error: null, startedAt: new Date().toISOString() }, null, 2));
+    productionProc = spawn(process.execPath, [path.join(__dirname, "production-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
+    productionProc.on("exit", code => {
+      productionProc = null;
+      try {
+        const s = JSON.parse(fs.readFileSync(PRODUCTION_STATUS, "utf8"));
+        if (s.state !== "done" && s.state !== "error") {
+          s.state = "error"; s.error = "the production build exited unexpectedly (code " + code + ")";
+          (s.log = s.log || []).push("✗ " + s.error);
+          fs.writeFileSync(PRODUCTION_STATUS, JSON.stringify(s, null, 2));
+        }
+      } catch (e) { /* no status file — nothing to reconcile */ }
+      serially(() => regenerate());   // implemented.json may now say built + verified
+    });
+    res.json({ started: true, statusUrl: "/api/build/production/status" });
+  }));
+  app.get("/api/build/production/status", (_req, res) => {
+    try { res.json(JSON.parse(fs.readFileSync(PRODUCTION_STATUS, "utf8"))); }
+    catch (e) { res.json({ state: "idle", step: "", log: [] }); }
   });
 }
 

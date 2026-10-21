@@ -78,6 +78,17 @@ test("the chat's instructions carry the method and the record, never a past outc
   } finally { t.srv.close(); }
 });
 
+test("the chat's instructions build stub-first: only the real operations' details are asked, stub wiring is later", async () => {
+  const t = await setup();
+  try {
+    const p = t.systemPrompt();
+    assert.match(p, /STUB-FIRST/);
+    assert.match(p, /then ask where to send it/);
+    assert.match(p, /^Stubs in this build \(registered, not wired\): /m);
+    assert.doesNotMatch(p, /bind each resolved rule's data words to fields → record target details for each built side effect/);
+  } finally { t.srv.close(); }
+});
+
 test("the grounding check ignores what a rejected draft recorded, and the retry starts from the record as it was", async () => {
   let calls = 0, seenOnRetry = "unset";
   const fake = async (_m, _h, ctx) => {
@@ -158,5 +169,17 @@ test("regenerate re-reads the graph, so an edited graph never leaves builds stuc
     t.regenerate();
     const spec = JSON.parse(fs.readFileSync(path.join(t.paths.specsDir, "api.json"), "utf8"));
     assert.deepEqual(spec.inputs, inputHashes("api", loadInputs(t.paths)));
+  } finally { t.srv.close(); }
+});
+
+test("the production build refuses an orchestrator spec that is not complete, and starts nothing", async () => {
+  const t = await setup();
+  try {
+    const r = await fetch(t.base + "/api/build/production", { method: "POST" });
+    assert.equal(r.status, 409);
+    const body = await r.json();
+    assert.equal(body.started, false);
+    assert.match(body.error, /not complete/);
+    assert.ok(body.missing.length > 0);
   } finally { t.srv.close(); }
 });
