@@ -172,6 +172,8 @@
       <button class="btn" id="killBtn" title="Cancel the running build and reset the environment for the next one" disabled>⏹ Stop</button>
       <button class="btn" id="irisBtn" title="Open the built production in the IRIS Management Portal" style="display:none">🔗 Open in IRIS</button>
       <button class="btn primary" id="prodBtn" title="Generate the IRIS production from the orchestrator spec, deploy it and verify it with one dry-run request">🔨 Build production</button>
+      <button class="btn primary" id="aiBtn" title="Generate the AI layer from the AI spec, deploy it to IRIS and verify it against VistA" style="display:none">🔨 Build AI</button>
+      <button class="btn" id="chatAppBtn" title="Open the chat app" style="display:none">💬 Open chat app</button>
     </div>
     <div class="doc" id="doc"></div>
   </div>
@@ -182,9 +184,15 @@ const cap = g => g.capabilities[0];
 const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const TARGET = "RegisterEquipment";
 let G = null, SPECS = null, TAB = "orchestrator", PORTAL = null;
+let AI_CHAT_URL = null, AI_BUILT = false;
 // the last successful production build's Management Portal page, if any
 async function loadPortal(){
   try{ const s=await (await fetch("/api/build/production/status",{cache:"no-store"})).json(); PORTAL = s.state==="done" ? s.portalUrl||null : PORTAL; }catch(e){}
+  renderRight();
+}
+// the last successful AI build's chat URL, if any
+async function loadAiStatus(){
+  try{ const s=await (await fetch("/api/build/ai/status",{cache:"no-store"})).json(); if(s.state==="done"){ AI_CHAT_URL=s.chatUrl||"/prototype/chat/"; AI_BUILT=true; } }catch(e){}
   renderRight();
 }
 
@@ -232,6 +240,11 @@ function renderRight(){
   prod.style.display = TAB==="orchestrator" ? "" : "none";
   document.getElementById("irisBtn").style.display = TAB==="orchestrator" && PORTAL ? "" : "none";
   if(!prod.dataset.busy){ prod.disabled=!oDone; prod.title=oDone?"Generate the IRIS production from the orchestrator spec, deploy it and verify it with one dry-run request":"Finish the orchestrator spec's missing items in the chat first"; }
+  const aiBtn=document.getElementById("aiBtn"), chatAppBtn=document.getElementById("chatAppBtn");
+  const aDone=SPECS&&SPECS.layers&&SPECS.layers.ai&&SPECS.layers.ai.complete;
+  aiBtn.style.display = TAB==="ai" ? "" : "none";
+  chatAppBtn.style.display = TAB==="ai" && AI_BUILT ? "" : "none";
+  if(!aiBtn.dataset.busy){ aiBtn.disabled=!aDone; aiBtn.title=aDone?"Generate the AI layer from the AI spec, deploy it to IRIS and verify it against VistA":"Finish the AI spec's missing items in the Decide chat first"; }
   const doc=document.getElementById("doc");
   if(!SPECS||!SPECS.layers){ doc.innerHTML=`<div class="specerr">${esc((SPECS&&SPECS.error)||"Specs not available")}</div>`; return; }
   const banner = (SPECS.notice ? `<div class="specerr">⚠ ${esc(SPECS.notice)}</div>` : "")
@@ -246,7 +259,7 @@ function updateAgenda(){
   el.innerHTML =
     `<span>API <b>${a.owns.built.length}</b> services built · ${a.owns.proposed.length} proposed</span>`
     + `<span>Orchestrator ${o.complete?'<span class="rdy">✓ ready to build</span>':`<b>${o.missing.length}</b> items missing${unmet?` · <span class="blk">${unmet} unmet need${unmet>1?"s":""}</span>`:""}`}</span>`
-    + `<span>AI <b>not started</b></span>`;
+    + (()=>{ const ai=SPECS.layers.ai; return `<span>AI ${AI_BUILT?'<span class="rdy">built ✓</span>':ai.complete?'<span class="rdy">ready to build</span>':`<b>${(ai.missing||[]).length}</b> items missing`}</span>`; })();
 }
 /* natural-language explanation of the capability graph — the orientation before deciding */
 function capabilityOverview(){
@@ -444,6 +457,40 @@ document.getElementById("prodBtn").onclick=async ()=>{
   }catch(e){ upd("⚠ Production build failed: "+esc(e.message)); reset(); }
 };
 document.getElementById("irisBtn").onclick=()=>{ if(PORTAL) window.open(PORTAL,"_blank","noopener"); };
+document.getElementById("chatAppBtn").onclick=()=>{ if(AI_CHAT_URL) window.open(AI_CHAT_URL,"_blank","noopener"); };
+document.getElementById("aiBtn").onclick=async ()=>{
+  const btn=document.getElementById("aiBtn"), label="🔨 Build AI";
+  const reset=()=>{ btn.textContent=label; delete btn.dataset.busy; btn.disabled=false; loadSpecs(); };
+  btn.textContent="🔨 Building…"; btn.disabled=true; btn.dataset.busy="1";
+  const boxEl=document.getElementById("chatMsgs");
+  const bubble=document.createElement("div"); bubble.className="cmsg assistant"; boxEl.appendChild(bubble);
+  const upd=(html)=>{ bubble.innerHTML=html; boxEl.scrollTop=boxEl.scrollHeight; };
+  const pre=(t)=>`<pre style="margin-top:6px;max-height:220px;overflow:auto;background:#0a0e14;border:1px solid var(--edge);border-radius:6px;padding:8px;font-size:11px;white-space:pre-wrap">${esc(t)}</pre>`;
+  const vtbl=(verification)=>{
+    if(!verification||!verification.length) return "";
+    const rows=verification.map(v=>`<tr><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.question)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.chatbot)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.vista)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge);color:${v.ok?"var(--accent2)":"var(--question)"}">${v.ok?"✓":"✗"}</td></tr>`).join("");
+    return `<table style="margin-top:8px;border-collapse:collapse;font-size:11px;width:100%"><thead><tr><th style="text-align:left;padding:3px 8px;color:var(--dim)">Question</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">Chatbot</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">VistA</th><th style="text-align:left;padding:3px 8px;color:var(--dim)"></th></tr></thead><tbody>${rows}</tbody></table>`;
+  };
+  try{
+    const r=await fetch("/api/build/ai",{method:"POST"}); const res=await r.json();
+    if(res.running){ upd("An AI build is already running — streaming its progress…"); }
+    else if(!res.started){ upd("⚠ The AI build did not start: "+esc(res.error||"unknown")+(res.missing?pre(res.missing.join("\n")):"")); reset(); return; }
+    else upd("<b>🔨 Building the AI layer from the AI spec…</b>");
+    const poll=async ()=>{
+      let s; try{ s=await (await fetch("/api/build/ai/status",{cache:"no-store"})).json(); }catch(e){ setTimeout(poll,3000); return; }
+      const log=(s.log||[]).join("\n");
+      if(s.state==="done"){
+        AI_CHAT_URL=s.chatUrl||"/prototype/chat/"; AI_BUILT=true;
+        upd("<b>✅ AI layer built and verified.</b>"+vtbl(s.verification)+` <a href="${esc(AI_CHAT_URL)}" target="_blank" rel="noopener" style="color:var(--accent)">💬 Open the chat app</a>`+pre(log));
+        renderRight(); reset(); return;
+      }
+      if(s.state==="error"){ upd("<b>✗ AI build failed:</b> "+esc(s.error||"")+vtbl(s.verification)+pre(log)); reset(); return; }
+      upd("<b>🔨 Building the AI layer…</b> "+esc(s.step||s.state||"")+pre(log));
+      setTimeout(poll,2000);
+    };
+    poll();
+  }catch(e){ upd("⚠ AI build failed: "+esc(e.message)); reset(); }
+};
 document.getElementById("killBtn").onclick=async ()=>{
   const kill=document.getElementById("killBtn"); kill.disabled=true; kill.textContent="⏹ Stopping…";
   try{ await fetch("/api/build/cancel",{method:"POST"}); }catch(e){}
@@ -456,7 +503,7 @@ document.getElementById("killBtn").onclick=async ()=>{
   catch(e){ document.getElementById("doc").innerHTML='<div class="specerr">Could not load the capability graph — run the workbench server and open http://localhost:8899/capability-graph/decide.html</div>'; return; }
   document.getElementById("hdrSub").textContent = G.workflow.name + " → " + TARGET;
   wireTabs(); wireChat();
-  await loadSpecs(); loadPortal();
+  await loadSpecs(); loadPortal(); loadAiStatus();
   addMsg("assistant", capabilityOverview());
   addMsg("assistant","**Where we are — ✅ Phase 1 is built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/) and the write path is proven end-to-end against VADEMO file 6914.\n\nWe're working on the **Orchestrator** layer (the IRIS production) now; **AI** comes after the production is built and verified.");
   const o = SPECS&&SPECS.layers ? SPECS.layers.orchestrator : null;
