@@ -182,6 +182,15 @@
 <script>
 const cap = g => g.capabilities[0];
 const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+// Validate a server-supplied chat URL: must start with "/" (not "//") and contain
+// no quotes, backslashes, angle brackets, whitespace or control characters.
+// Falls back to the given fallback (or "/prototype/chat/") for anything else,
+// blocking javascript: URIs, protocol-relative URLs and attribute injection.
+function safeChatUrl(url, fallback){
+  const s = String(url == null ? "" : url);
+  if(/^\/(?!\/)/.test(s) && !/["'`\\<>\s\x00-\x1f]/.test(s)) return s;
+  return fallback || "/prototype/chat/";
+}
 const TARGET = "RegisterEquipment";
 let G = null, SPECS = null, TAB = "orchestrator", PORTAL = null;
 let AI_CHAT_URL = null, AI_BUILT = false;
@@ -192,7 +201,7 @@ async function loadPortal(){
 }
 // the last successful AI build's chat URL, if any
 async function loadAiStatus(){
-  try{ const s=await (await fetch("/api/build/ai/status",{cache:"no-store"})).json(); if(s.state==="done"){ AI_CHAT_URL=s.chatUrl||"/prototype/chat/"; AI_BUILT=true; } }catch(e){}
+  try{ const s=await (await fetch("/api/build/ai/status",{cache:"no-store"})).json(); if(s.state==="done"){ AI_CHAT_URL=safeChatUrl(s.chatUrl,"/prototype/chat/"); AI_BUILT=true; } }catch(e){}
   renderRight();
 }
 
@@ -259,7 +268,7 @@ function updateAgenda(){
   el.innerHTML =
     `<span>API <b>${a.owns.built.length}</b> services built · ${a.owns.proposed.length} proposed</span>`
     + `<span>Orchestrator ${o.complete?'<span class="rdy">✓ ready to build</span>':`<b>${o.missing.length}</b> items missing${unmet?` · <span class="blk">${unmet} unmet need${unmet>1?"s":""}</span>`:""}`}</span>`
-    + (()=>{ const ai=SPECS.layers.ai; return `<span>AI ${AI_BUILT?'<span class="rdy">built ✓</span>':ai.complete?'<span class="rdy">ready to build</span>':`<b>${(ai.missing||[]).length}</b> items missing`}</span>`; })();
+    + (()=>{ const ai=SPECS.layers.ai; return ai?`<span>AI ${AI_BUILT?'<span class="rdy">built ✓</span>':ai.complete?'<span class="rdy">ready to build</span>':`<b>${(ai.missing||[]).length}</b> items missing`}</span>`:'<span>AI <b>not available</b></span>'; })();
 }
 /* natural-language explanation of the capability graph — the orientation before deciding */
 function capabilityOverview(){
@@ -469,7 +478,7 @@ document.getElementById("aiBtn").onclick=async ()=>{
   const vtbl=(verification)=>{
     if(!verification||!verification.length) return "";
     const rows=verification.map(v=>`<tr><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.question)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.chatbot)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.vista)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge);color:${v.ok?"var(--accent2)":"var(--question)"}">${v.ok?"✓":"✗"}</td></tr>`).join("");
-    return `<table style="margin-top:8px;border-collapse:collapse;font-size:11px;width:100%"><thead><tr><th style="text-align:left;padding:3px 8px;color:var(--dim)">Question</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">Chatbot</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">VistA</th><th style="text-align:left;padding:3px 8px;color:var(--dim)"></th></tr></thead><tbody>${rows}</tbody></table>`;
+    return `<table style="margin-top:8px;border-collapse:collapse;font-size:11px;width:100%"><thead><tr><th style="text-align:left;padding:3px 8px;color:var(--dim)">Question</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">Chatbot</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">VistA</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">✓/✗</th></tr></thead><tbody>${rows}</tbody></table>`;
   };
   try{
     const r=await fetch("/api/build/ai",{method:"POST"}); const res=await r.json();
@@ -480,8 +489,16 @@ document.getElementById("aiBtn").onclick=async ()=>{
       let s; try{ s=await (await fetch("/api/build/ai/status",{cache:"no-store"})).json(); }catch(e){ setTimeout(poll,3000); return; }
       const log=(s.log||[]).join("\n");
       if(s.state==="done"){
-        AI_CHAT_URL=s.chatUrl||"/prototype/chat/"; AI_BUILT=true;
-        upd("<b>✅ AI layer built and verified.</b>"+vtbl(s.verification)+` <a href="${esc(AI_CHAT_URL)}" target="_blank" rel="noopener" style="color:var(--accent)">💬 Open the chat app</a>`+pre(log));
+        AI_CHAT_URL=safeChatUrl(s.chatUrl,"/prototype/chat/"); AI_BUILT=true;
+        // Build the anchor with DOM APIs — href assignment is browser-validated,
+        // preventing any residual XSS even if safeChatUrl were somehow bypassed.
+        const chatA=document.createElement("a");
+        chatA.href=AI_CHAT_URL; chatA.target="_blank"; chatA.rel="noopener";
+        chatA.style.color="var(--accent)"; chatA.textContent="💬 Open the chat app";
+        bubble.innerHTML="<b>✅ AI layer built and verified.</b>"+vtbl(s.verification)+" ";
+        bubble.appendChild(chatA);
+        bubble.insertAdjacentHTML("beforeend",pre(log));
+        boxEl.scrollTop=boxEl.scrollHeight;
         renderRight(); reset(); return;
       }
       if(s.state==="error"){ upd("<b>✗ AI build failed:</b> "+esc(s.error||"")+vtbl(s.verification)+pre(log)); reset(); return; }
