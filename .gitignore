@@ -27,3 +27,6 @@ agent/interclaw-servers.json
 
 # local git worktrees
 .claude/worktrees/
+
+# subagent-driven development scratch (ledgers, briefs, review packages)
+.superpowers/
