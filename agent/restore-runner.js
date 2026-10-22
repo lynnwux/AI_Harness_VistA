@@ -6,6 +6,8 @@ const fs = require("fs");
 const path = require("path");
 const { LAYERS, KNOWN_GOOD_ROOT, readKnownGood } = require("./lib/known-good");
 const { SERVER, serverEntry, docPath, redact, irisSession, irisScript } = require("./lib/iris-deploy");
+const { vademoFromEnv } = require("./lib/vademo");
+const { deployRestService, HARNESS_DIR } = require("./lib/rest-service");
 const { sessionScript, smtpSettings } = require("./production-runner");
 const { aiSettingsScript, checkSettingsMarkers } = require("./ai-runner");
 
@@ -35,6 +37,7 @@ async function restoreAll({
   root = KNOWN_GOOD_ROOT, statusFile = STATUS_FILE, configFile = path.join(__dirname, "interclaw-servers.json"),
   apiOut = path.join(ROOT, "prototype", "build"), chatOut = path.join(ROOT, "prototype", "chat"),
   env = process.env, irisScriptImpl = irisScript, irisSessionImpl = irisSession,
+  vademoImpl = () => vademoFromEnv(env),
 } = {}) {
   const secrets = SECRET_KEYS.map(k => env[k]).filter(Boolean);
   const hide = t => redact(String(t), secrets);
@@ -56,7 +59,14 @@ async function restoreAll({
   };
 
   const restore = {
-    api: kg => { replaceDir(kg.dirs.site, apiOut); note("  entry form files copied back to /prototype/build/"); },
+    api: async kg => {
+      const src = kg.dirs.rest || HARNESS_DIR;
+      if (!kg.dirs.rest) note("  this copy holds no REST classes — deployed them from harness/");
+      const { webApp } = await deployRestService(vademoImpl(), { sourceDir: src });
+      note(`  REST service uploaded and compiled; web app /Harness/Equipment ${webApp}`);
+      replaceDir(kg.dirs.site, apiOut);
+      note("  entry form files copied back to /prototype/build/");
+    },
     orchestrator: kg => {
       const names = pushClasses(kg, irisFor());
       note(`  ${names.length} production classes uploaded and compiled`);

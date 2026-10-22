@@ -5,6 +5,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { saveKnownGood } = require("../lib/known-good");
+const { REST_CLASSES } = require("../lib/rest-service");
 const { restoreAll, STATUS_FILE } = require("../restore-runner");
 
 const tmp = p => fs.mkdtempSync(path.join(os.tmpdir(), p));
@@ -14,11 +15,20 @@ const ENV = {
   VADEMO_URL: "http://vademo:80", VADEMO_USER: "v", VADEMO_PASSWORD: "fake-vademo-pass-123", AWS_BEARER_TOKEN_BEDROCK: "fake-bedrock-tok-456",
 };
 
-function world({ copies = ["api", "orchestrator", "ai"], compileErrorFor = null } = {}) {
+function world({ copies = ["api", "orchestrator", "ai"], compileErrorFor = null, apiWithRest = false } = {}) {
   const root = tmp("kgr-"), out = tmp("kgo-"), scripts = tmp("kgs-");
   fs.mkdirSync(path.join(scripts, "lib")); fs.writeFileSync(path.join(scripts, "lib", "iris.py"), "# fake");
   const sources = [];
-  if (copies.includes("api")) saveKnownGood("api", { dirs: { site: files(tmp("s-"), { "index.html": "form v1" }) } }, root);
+  let restDir;
+  if (copies.includes("api")) {
+    const siteDir = files(tmp("s-"), { "index.html": "form v1" });
+    if (apiWithRest) {
+      restDir = files(tmp("r-"), Object.fromEntries(REST_CLASSES.map(c => [c, `fake-${c}`])));
+      saveKnownGood("api", { dirs: { site: siteDir, rest: restDir } }, root);
+    } else {
+      saveKnownGood("api", { dirs: { site: siteDir } }, root);
+    }
+  }
   if (copies.includes("orchestrator")) saveKnownGood("orchestrator", { dirs: { classes: files(tmp("s-"), { "EquipmentEntry.Production.cls": "x", "EquipmentEntry.BS.RegisterService.cls": "y" }) }, meta: { container: "iris-ai-hub", namespace: "INTEROP" } }, root);
   if (copies.includes("ai")) saveKnownGood("ai", { dirs: { classes: files(tmp("s-"), { "EquipmentAI.Agent.cls": "a" }), chat: files(tmp("s-"), { "index.html": "chat v1" }) }, meta: { container: "iris-ai-hub", namespace: "INTEROP" } }, root);
   const calls = [];
@@ -35,9 +45,16 @@ function world({ copies = ["api", "orchestrator", "ai"], compileErrorFor = null 
     sessions.push(script);
     return /StartProduction/.test(script) ? "WEBAPP:exists\nSTART:ok\nSTATE:EquipmentEntry.Production:1\n" : "WEBAPP:exists\nCONFIG:set\nVADEMO:stored\nBEDROCK:stored\nSESSIONS:cleared 0\n";
   };
+  // Fake VADEMO client: records putClass(name, text) calls; compile and query succeed.
+  const vademo = { puts: [] };
+  const vademoImpl = () => ({
+    putClass: async (name, text) => { vademo.puts.push({ name, text }); },
+    compile: async () => {},
+    query: async () => [{ r: "updated: /Harness/Equipment" }],
+  });
   const opts = { root, statusFile: path.join(out, "restore-status.json"), configFile: path.join(out, "servers.json"),
-                 apiOut: path.join(out, "build"), chatOut: path.join(out, "chat"), env: { ...ENV, INTERCLAW_SCRIPTS: scripts }, irisScriptImpl, irisSessionImpl };
-  return { opts, calls, sessions, cleanup: () => [root, out, scripts].forEach(d => fs.rmSync(d, { recursive: true, force: true })) };
+                 apiOut: path.join(out, "build"), chatOut: path.join(out, "chat"), env: { ...ENV, INTERCLAW_SCRIPTS: scripts }, irisScriptImpl, irisSessionImpl, vademoImpl };
+  return { opts, calls, sessions, vademo, restDir, cleanup: () => [root, out, scripts, ...(restDir ? [restDir] : [])].forEach(d => fs.rmSync(d, { recursive: true, force: true })) };
 }
 
 test("restore last good puts back all three deliverables from their copies", async () => {
@@ -81,4 +98,50 @@ test("one deliverable failing doesn't stop the others; the failure is named and 
 
 test("the real status file path is agent/restore-status.json (git-ignored)", () => {
   assert.equal(path.basename(STATUS_FILE), "restore-status.json");
+});
+
+test("restoring Phase 1 deploys the REST service from the copy, then the site", async () => {
+  const w = world({ copies: ["api"], apiWithRest: true });
+  try {
+    const s = await restoreAll(w.opts);
+    assert.equal(s.state, "done", s.error);
+    assert.equal(s.results[0].outcome, "restored");
+    // All three REST classes were PUT with the copy's text.
+    for (const cls of REST_CLASSES) {
+      const put = w.vademo.puts.find(p => p.name === cls);
+      assert.ok(put, `expected a PUT for ${cls}`);
+      assert.equal(put.text, `fake-${cls}`);
+    }
+    // The site was also copied.
+    assert.equal(fs.readFileSync(path.join(w.opts.apiOut, "index.html"), "utf8"), "form v1");
+    // Log mentions the web app outcome.
+    const logStr = JSON.parse(fs.readFileSync(w.opts.statusFile, "utf8")).log.join("\n");
+    assert.match(logStr, /REST service uploaded and compiled; web app \/Harness\/Equipment updated/);
+  } finally { w.cleanup(); }
+});
+
+test("an old Phase 1 copy without REST classes deploys them from harness/", async () => {
+  // api copy has only site (no rest dir) — harness/ fallback is used.
+  const w = world({ copies: ["api"] });
+  try {
+    const s = await restoreAll(w.opts);
+    assert.equal(s.state, "done", s.error);
+    // Three REST classes were PUT (content from the real harness/ dir).
+    assert.equal(w.vademo.puts.length, REST_CLASSES.length);
+    assert.deepEqual(w.vademo.puts.map(p => p.name), REST_CLASSES);
+    // Log has the fallback note.
+    const logStr = JSON.parse(fs.readFileSync(w.opts.statusFile, "utf8")).log.join("\n");
+    assert.match(logStr, /this copy holds no REST classes — deployed them from harness\//);
+  } finally { w.cleanup(); }
+});
+
+test("restore never marks a layer built", async () => {
+  const w = world({ copies: ["api"] });
+  const implFile = path.join(path.dirname(w.opts.statusFile), "implemented.json");
+  const before = JSON.stringify({ phase: 1, built: ["api"] });
+  fs.writeFileSync(implFile, before);
+  try {
+    await restoreAll(w.opts);
+    assert.equal(fs.readFileSync(implFile, "utf8"), before, "implemented.json must be unchanged after restore");
+  } finally { w.cleanup(); }
 });
