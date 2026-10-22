@@ -131,6 +131,9 @@ function compareRow(expected, row) {
   return { ok: rows.every(r => r.ok), rows };
 }
 
+// Case-insensitive OK check: real REST returns "ok" for NextIEN but "OK" for POST
+const isOK = status => String(status).toUpperCase() === "OK";
+
 // Full write-path: GET NextIEN → POST → GET record → SQL read-back → compare
 async function verifyWritePath(client, apiSpec, { runId, log = () => {} }) {
   const fields = operatorFields(apiSpec);
@@ -139,11 +142,11 @@ async function verifyWritePath(client, apiSpec, { runId, log = () => {} }) {
 
   log("GET /NextIEN");
   const nextRes = await client.rest("GET", "/NextIEN");
-  if (nextRes.json?.status !== "OK") throw new Error(`GET /NextIEN failed: ${JSON.stringify(nextRes.json)}`);
+  if (!isOK(nextRes.json?.status)) throw new Error(`GET /NextIEN failed: ${JSON.stringify(nextRes.json)}`);
 
   log("POST /Equipment6914");
   const postRes = await client.rest("POST", "/Equipment6914", payload);
-  if (postRes.json?.status !== "OK") throw new Error(`POST /Equipment6914 failed: ${JSON.stringify(postRes.json)}`);
+  if (!isOK(postRes.json?.status)) throw new Error(`POST /Equipment6914 failed: ${JSON.stringify(postRes.json)}`);
   const ien = postRes.json.equipmentIEN;
 
   log(`GET /Equipment6914/${ien}`);
@@ -161,4 +164,4 @@ async function verifyWritePath(client, apiSpec, { runId, log = () => {} }) {
   return { ien, serial: payload.serial, rows: cmp.rows };
 }
 
-module.exports = { COLUMN, TEST_VALUES, STORED_YESNO, runIdOf, testSerial, fmDate, operatorFields, pickPointers, testRecord, expectedRow, compareRow, verifyWritePath };
+module.exports = { COLUMN, TEST_VALUES, STORED_YESNO, runIdOf, testSerial, fmDate, operatorFields, pickPointers, testRecord, expectedRow, compareRow, verifyWritePath, isOK };

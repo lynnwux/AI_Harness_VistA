@@ -6,7 +6,7 @@ const { generate } = require("../lib/specs");
 const {
   COLUMN, TEST_VALUES, STORED_YESNO,
   runIdOf, testSerial, fmDate, operatorFields,
-  pickPointers, testRecord, expectedRow, compareRow, verifyWritePath,
+  pickPointers, testRecord, expectedRow, compareRow, verifyWritePath, isOK,
 } = require("../lib/api-verify");
 
 const inputs = (record, implemented = IM) => ({ graph, record, implemented });
@@ -78,7 +78,7 @@ test("verifyWritePath posts, reads back and passes", async () => {
     },
     async rest(method, p, body) {
       restCalls.push({ method, p });
-      if (method === "GET" && p === "/NextIEN") return { status: 200, json: { status: "OK", ien: 12345 } };
+      if (method === "GET" && p === "/NextIEN") return { status: 200, json: { status: "ok", ien: 464 } };
       if (method === "POST") return { status: 200, json: { status: "OK", equipmentIEN: 12345, lifecycleStatus: "created" } };
       return { status: 200, json: {} };
     },
@@ -103,7 +103,7 @@ test("verifyWritePath names every mismatch", async () => {
       return [{ ien: "99" }];
     },
     async rest(method, p) {
-      if (method === "GET" && p === "/NextIEN") return { status: 200, json: { status: "OK", ien: 12345 } };
+      if (method === "GET" && p === "/NextIEN") return { status: 200, json: { status: "ok", ien: 464 } };
       if (method === "POST") return { status: 200, json: { status: "OK", equipmentIEN: 12345, lifecycleStatus: "created" } };
       return { status: 200, json: {} };
     },
@@ -111,5 +111,33 @@ test("verifyWritePath names every mismatch", async () => {
   await assert.rejects(
     () => verifyWritePath(client, spec, { runId }),
     /MODEL expected TEST-MODEL, stored /,
+  );
+});
+
+test("isOK accepts both upper and lower case", () => {
+  assert.ok(isOK("OK"));
+  assert.ok(isOK("ok"));
+  assert.ok(isOK("Ok"));
+  assert.ok(!isOK("ERROR"));
+  assert.ok(!isOK("error"));
+  assert.ok(!isOK(undefined));
+});
+
+test("verifyWritePath throws with the error message when NextIEN returns status error", async () => {
+  const spec = generate(inputs(rec())).api;
+  const runId = "20261022153000";
+  const flds = operatorFields(spec);
+  const fakePointers = Object.fromEntries(flds.filter(f => f.table).map(f => [f.k, "99"]));
+  const client = {
+    async query() { return [{ ien: "99" }]; },
+    async rest(method, p) {
+      if (method === "GET" && p === "/NextIEN")
+        return { status: 200, json: { status: "error", message: "^ENG(6914,0) not found" } };
+      return { status: 200, json: {} };
+    },
+  };
+  await assert.rejects(
+    () => verifyWritePath(client, spec, { runId }),
+    /\^ENG\(6914,0\) not found/,
   );
 });
