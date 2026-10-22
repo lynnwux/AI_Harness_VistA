@@ -343,7 +343,7 @@ function openingMessages(specs){
     ];
   }
   // IEN of the test record written during the API build, if the server included it.
-  const ien=(specs.layers.api&&specs.layers.api.verifiedRecord)?` (test record IEN ${specs.layers.api.verifiedRecord})`:"";
+  const ien=(specs.layers.api&&specs.layers.api.verifiedRecord&&specs.layers.api.verifiedRecord.ien)?` (test record IEN ${specs.layers.api.verifiedRecord.ien})`:"";
   if(st.layer==="ai"){
     const ai=specs.layers.ai, miss=(ai&&ai.missing)||[];
     const where=`**Where we are — ✅ Phase 1 (API) and Phase 2 (the IRIS production) are built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/), and the IRIS production (the orchestrator layer) is running.\n\nWe're working on Phase 3, the **AI** layer, now — the equipment inventory chatbot on IRIS AI Hub; its spec is on the AI tab.`;
@@ -515,8 +515,9 @@ const RESET_PROMPT="DEMO RESET — this tears down every phase.\n\nThe REST serv
 function confirmReset(ask){ const typed=ask(RESET_PROMPT); return typed!=null && String(typed).trim().toLowerCase()==="reset"; }
 // One line per teardown result; verdict on last line; called by the reset poll and used by tests.
 // s.state==="error" also triggers the failure verdict (e.g. server unreachable or idle restart).
+const resetRows=s=>(s.results||[]).map(r=>{ const f=/^failed/.test(r.outcome),mark=r.outcome==="removed"?"✅":f?"✗":"—"; return `<div>${mark} ${esc(r.where)} · ${esc(r.item)} — ${esc(r.outcome)}</div>`; }).join("");
 function resetSummary(s){
-  const rows=(s.results||[]).map(r=>{ const f=/^failed/.test(r.outcome),mark=r.outcome==="removed"?"✅":f?"✗":"—"; return `<div>${mark} ${esc(r.where)} · ${esc(r.item)} — ${esc(r.outcome)}</div>`; }).join("");
+  const rows=resetRows(s);
   const hadFail=s.state==="error"||(s.results||[]).some(r=>/^failed/.test(r.outcome));
   const v=hadFail?`<b>✗ Reset finished with failures — ${esc(s.error||"")}. Nothing is marked built; the next build replaces what is left.</b>`:`<b>✅ Reset finished — nothing is built; Phase 1 is next.</b>`;
   return rows+`<div style="margin-top:6px">${v}</div>`;
@@ -531,14 +532,18 @@ function nextResetStep(status,failures){
 document.getElementById("resetBtn").onclick=async ()=>{
   if(!confirmReset(m=>prompt(m,""))) return;
   const btn=document.getElementById("resetBtn"), label=btn.textContent; btn.disabled=true; btn.textContent="…";
+  const free=()=>{ btn.disabled=false; btn.textContent=label; };
   try{
     const res=await(await fetch("/api/demo/reset",{method:"POST"})).json();
-    if(!res.ok){ addMsg("assistant","⚠ Demo reset refused: "+(res.error||"unknown")); btn.disabled=false; btn.textContent=label; return; }
-    await loadSpecs(); chatHistory=[];
+    // refused only when no teardown started; a later failure (e.g. spec generation) is shown and the teardown still followed
+    if(!res.ok&&!(res.teardown&&res.teardown.started)){ addMsg("assistant","⚠ Demo reset refused: "+(res.error||"unknown")); free(); return; }
+    // the page opens as on load — in Phase 1 — and the teardown is followed below it, ending with its verdict
+    await openPage();
+    const warn=res.ok?"":`<div>⚠ ${esc(res.error||"unknown")}</div>`;
     const bx=document.getElementById("chatMsgs"),bl=document.createElement("div"); bl.className="cmsg assistant"; bx.appendChild(bl);
     const upd=h=>{ bl.innerHTML=h; bx.scrollTop=bx.scrollHeight; };
-    const done=s=>{ upd(resetSummary(s)); btn.disabled=false; btn.textContent=label; location.reload(); };
-    upd("<b>↺ Tearing down…</b>");
+    const done=s=>{ upd(warn+resetSummary(s)); free(); loadSpecs(); };
+    upd("<b>↺ Tearing down…</b>"+warn);
     let failures=0;
     const poll=async()=>{
       let s=null; try{ s=await(await fetch("/api/demo/reset/status",{cache:"no-store"})).json(); failures=0; }catch(e){ failures++; }
@@ -549,10 +554,10 @@ document.getElementById("resetBtn").onclick=async ()=>{
         else done(s);
         return;
       }
-      upd("<b>↺ Tearing down…</b> "+esc((s&&(s.step||s.state))||"")); setTimeout(poll,2000);
+      upd("<b>↺ Tearing down…</b> "+esc((s&&(s.step||s.state))||"")+warn+(s?resetRows(s):"")); setTimeout(poll,2000);
     };
     poll();
-  }catch(e){ addMsg("assistant","⚠ Demo reset failed: "+e.message); btn.disabled=false; btn.textContent=label; }
+  }catch(e){ addMsg("assistant","⚠ Demo reset failed: "+e.message); free(); }
 };
 document.getElementById("dlBtn").onclick=()=>{
   if(!SPECS||!SPECS.layers) return;
@@ -561,7 +566,8 @@ document.getElementById("dlBtn").onclick=()=>{
 };
 document.getElementById("buildBtn").onclick=async ()=>{
   const btn=document.getElementById("buildBtn"); const kill=document.getElementById("killBtn"); const label=btn.textContent;
-  const reset=()=>{ btn.textContent=label; btn.disabled=false; kill.disabled=true; kill.textContent="⏹ Stop"; };
+  // every ending refreshes the specs, so the agenda and the buttons show what the build left
+  const reset=()=>{ btn.textContent=label; btn.disabled=false; kill.disabled=true; kill.textContent="⏹ Stop"; loadSpecs(); };
   btn.textContent="🔨 Building…"; btn.disabled=true; kill.disabled=false;
   // a live progress bubble (created manually so it isn't auto-spoken on every poll tick)
   const boxEl=document.getElementById("chatMsgs");
@@ -579,7 +585,7 @@ document.getElementById("buildBtn").onclick=async ()=>{
     const poll=async ()=>{
       let s; try{ s=await (await fetch("/api/build/status",{cache:"no-store"})).json(); }catch(e){ setTimeout(poll,3000); return; }
       const tail=(s.log||[]).slice(-8).join("\n");
-      if(s.state==="done"){ upd("<b>✅ Build complete.</b> Opening <a href='/prototype/build/' target='_blank' style='color:var(--accent)'>/prototype/build/</a> in a new tab."+vtbl(s.verification)+bar(s)+pre(tail)); window.open("/prototype/build/?t="+Date.now(),"_blank"); loadSpecs(); reset(); return; }
+      if(s.state==="done"){ upd("<b>✅ Build complete.</b> Opening <a href='/prototype/build/' target='_blank' style='color:var(--accent)'>/prototype/build/</a> in a new tab."+vtbl(s.verification)+bar(s)+pre(tail)); window.open("/prototype/build/?t="+Date.now(),"_blank"); reset(); return; }
       if(s.state==="error"){ upd("<b>✗ Build failed:</b> "+esc(s.error||"")+vtbl(s.verification)+bar(s)+pre(tail)); reset(); return; }
       if(s.state==="cancelled"){ upd("<b>⏹ Build cancelled.</b> Environment reset — ready for the next build."+bar(s)+pre(tail)); reset(); return; }
       upd("<b>🔨 Building…</b> "+esc(s.step||s.state||"")+bar(s)+pre(tail));
@@ -672,14 +678,21 @@ document.getElementById("killBtn").onclick=async ()=>{
   catch(e){ document.getElementById("doc").innerHTML='<div class="specerr">Could not load the capability graph — run the workbench server and open http://localhost:8899/capability-graph/decide.html</div>'; return; }
   document.getElementById("hdrSub").textContent = G.workflow.name + " → " + TARGET;
   wireTabs(); wireChat();
+  await openPage();
+})();
+// Draws the page for the current stage, as on load: the specs, the stage's tab, the right pane and a fresh chat
+// opening. Run at boot and after a demo reset (in place — a reload would wipe the reset's verdict).
+async function openPage(){
+  PORTAL=null; AI_CHAT_URL=null; AI_BUILT=false;
   await loadSpecs(); TAB=defaultTab(SPECS); renderRight(); loadPortal(); loadAiStatus();
+  document.getElementById("chatMsgs").innerHTML=""; chatHistory=[];
   addMsg("assistant", capabilityOverview());
   for(const m of openingMessages(SPECS)) addMsg("assistant", m);
   const st=SPECS&&SPECS.stage, layer=st&&st.layer==="ai"?"ai":st&&st.layer==="api"?"api":"orchestrator";
   const pend=SPECS&&SPECS.layers ? (layer==="ai" ? SPECS.layers.ai.missing : layer==="api" ? [] : SPECS.layers.orchestrator.missing.filter(m=>m.kind==="decide")) : [];
   const histIntro=layer==="ai"?"Phase 1 (API) and Phase 2 (production) built+verified; working on Phase 3, the AI layer":layer==="api"?"Phase 1 (API) not built; working on Phase 1":"Phase 1 (API) built+verified; working on Phase 2, the orchestrator";
   chatHistory.push({role:"assistant",text:`[intro: ${histIntro}; stage=${st?st.layer+"/"+st.step:"unknown"}; still to decide: ${pend.map(m=>m.id||m.what).join(", ")||"none"}; approach = show legacy evidence, explain, developer decides]`});
-})();
+}
 </script>
 </body>
 </html>

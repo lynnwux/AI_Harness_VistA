@@ -144,7 +144,7 @@ test("the restore summary names each deliverable and its outcome, escaped", () =
   assert.match(SCRIPT, /\/api\/restore\/status/);
 });
 
-test("the demo reset is a small icon in the top bar, needs the word 'reset' typed, then calls the route and reloads", () => {
+test("the demo reset is a small icon in the top bar, needs the word 'reset' typed, then calls the route", () => {
   assert.match(HTML, /Layer Map<\/button>\s*<button[^>]*id="resetBtn"[^>]*>↺<\/button>/, "an icon-only button next to Layer Map");
   assert.match(HTML, /id="resetBtn"[^>]*title="[^"]*[Dd]emo reset/, "the tooltip says what it is");
   assert.doesNotMatch(HTML, /\.demo-reset\{[^}]*position:fixed/, "no longer floating over the chat");
@@ -157,7 +157,7 @@ test("the demo reset is a small icon in the top bar, needs the word 'reset' type
   const h = SCRIPT.slice(SCRIPT.indexOf('getElementById("resetBtn").onclick')).slice(0, 900);
   assert.match(h, /confirmReset\(/);
   assert.match(h, /\/api\/demo\/reset/);
-  assert.match(h, /location\.reload\(\)/);
+  assert.doesNotMatch(SCRIPT, /location\.reload\(/, "the page is redrawn in place, never reloaded");
 });
 
 test("the status line shows the AI layer as built only when the stage says so, not from a leftover build status", () => {
@@ -240,4 +240,89 @@ test("nextResetStep: done/error/idle terminate; tearing-down retries; consecutiv
   assert.equal(p.nextResetStep({ state: "starting" }, 0), "retry");
   assert.equal(p.nextResetStep(null, 4), "retry", "4 failures → retry");
   assert.equal(p.nextResetStep(null, 5), "fail", "5th failure → fail");
+});
+
+test("the orchestrator opening names the test record by its IEN", () => {
+  const p = page();
+  const s = apiSpecs(rec(), IM);
+  s.layers.api.verifiedRecord = { ien: 4711, serial: "SN-1", at: "2026-10-22T10:00:00Z" };
+  const text = p.openingMessages(s).join("\n\n");
+  assert.match(text, /\(test record IEN 4711\)/);
+  assert.doesNotMatch(text, /\[object Object\]/);
+});
+
+// The page with a DOM that keeps children and a fetch that answers per route, so the boot and the handlers run.
+const GRAPH_FILE = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), "utf8"));
+function livePage(routes) {
+  const els = {}, reloads = [];
+  const mk = id => ({ id, style: {}, dataset: {}, children: [], _html: "", textContent: "", classList: { toggle() {}, add() {}, remove() {} }, addEventListener() {}, insertAdjacentHTML() {},
+    appendChild(c) { this.children.push(c); c.parent = this; return c; }, remove() { if (this.parent) this.parent.children = this.parent.children.filter(x => x !== this); },
+    get innerHTML() { return this._html; }, set innerHTML(v) { this._html = v; this.children = []; } });
+  const byId = id => els[id] || (els[id] = mk(id));
+  const fetch = async (url, opts = {}) => {
+    const key = `${opts.method || "GET"} ${String(url).split("?")[0]}`, h = routes[key];
+    if (!h) throw new Error("no route " + key);
+    const body = typeof h === "function" ? h() : h;
+    return { ok: true, json: async () => body, text: async () => JSON.stringify(body) };
+  };
+  const ctx = vm.createContext({
+    document: { getElementById: byId, querySelectorAll: () => [], createElement: () => mk(null) },
+    location: { protocol: "http:", reload: () => reloads.push(1) }, window: { open() {} }, localStorage: { getItem: () => null, setItem() {} },
+    prompt: () => "reset", fetch, setTimeout, setInterval, clearInterval, console, URL, Blob: function () {},
+  });
+  vm.runInContext(SCRIPT + "\n;globalThis.__page = { openPage, tab: () => TAB, history: () => chatHistory };", ctx);
+  const chat = () => byId("chatMsgs").children.map(c => c._html || c.textContent);
+  return { p: ctx.__page, byId, reloads, chat };
+}
+const settle = () => new Promise(r => setTimeout(r, 30));
+const PAGE_ROUTES = specs => ({ "GET new-inventory-entry.json": GRAPH_FILE, "GET /api/specs": specs,
+  "GET /api/build/production/status": { state: "idle" }, "GET /api/build/ai/status": { state: "idle" } });
+
+test("openPage redraws the page in place: Phase 1 tab, a fresh chat with the overview and the opening", async () => {
+  const specs = apiSpecs(rec(), emptyImplemented());
+  const w = livePage(PAGE_ROUTES(specs));
+  await settle();
+  w.byId("chatMsgs").appendChild({ _html: "a stale message" });
+  w.p.openPage();
+  await settle();
+  const msgs = w.chat();
+  assert.ok(!msgs.some(m => m.includes("a stale message")), "the old chat is cleared");
+  assert.match(msgs[0], /What we're building/);
+  assert.ok(msgs.some(m => /Phase 1, the API layer: designed, not built/.test(m)), "the Phase 1 opening");
+  assert.equal(w.p.tab(), "api");
+  assert.equal(w.p.history().length, 1, "the chat history starts again from the intro");
+});
+
+test("a reset whose spec generation failed after the teardown started shows the error and follows the teardown to its verdict", async () => {
+  const specs = apiSpecs(rec(), emptyImplemented());
+  const w = livePage({ ...PAGE_ROUTES(specs),
+    "POST /api/demo/reset": { ok: false, error: "spec generation failed: boom", local: [], teardown: { started: true, statusUrl: "/api/demo/reset/status" } },
+    "GET /api/demo/reset/status": { state: "error", error: "1 item failed", results: [{ where: "VADEMO", item: "class Harness.Equipment.REST.cls", outcome: "failed: HTTP 403" }] } });
+  await settle();
+  w.byId("chatMsgs").appendChild({ _html: "before the reset" });
+  await w.byId("resetBtn").onclick();
+  await settle();
+  const msgs = w.chat(), last = msgs[msgs.length - 1];
+  assert.deepEqual(w.reloads, [], "never reloads");
+  assert.ok(!msgs.some(m => m.includes("before the reset")), "the page was redrawn");
+  assert.ok(msgs.some(m => /Phase 1, the API layer: designed, not built/.test(m)), "opens in Phase 1");
+  assert.doesNotMatch(msgs.join("\n"), /refused/);
+  assert.match(last, /spec generation failed: boom/, "the error is shown");
+  assert.match(last, /class Harness\.Equipment\.REST\.cls — failed: HTTP 403/, "the verdict names the failed item");
+  assert.match(last, /Reset finished with failures/);
+  assert.equal(w.byId("resetBtn").disabled, false);
+});
+
+test("a reset refused before any teardown says so and leaves the page", async () => {
+  const w = livePage({ ...PAGE_ROUTES(apiSpecs(rec(), IM)), "POST /api/demo/reset": { ok: false, error: "busy" } });
+  await settle();
+  await w.byId("resetBtn").onclick();
+  const msgs = w.chat();
+  assert.match(msgs[msgs.length - 1], /Demo reset refused: busy/);
+  assert.equal(w.p.tab(), "orchestrator");
+});
+
+test("every ending of an API build refreshes the specs", () => {
+  const h = SCRIPT.slice(SCRIPT.indexOf('getElementById("buildBtn").onclick'));
+  assert.match(h.slice(0, h.indexOf("\n", h.indexOf("const reset="))), /const reset=\(\)=>\{[^\n]*loadSpecs\(\)/);
 });
