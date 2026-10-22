@@ -5,7 +5,8 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { graph, rec, IM } = require("./helpers");
-const { generate, render, writeSpecs, stage, inputHashes } = require("../lib/specs");
+const { generate, render, writeSpecs, stage, inputHashes, designHash } = require("../lib/specs");
+const { PHASE1_SERVICES, emptyImplemented, builtApi } = require("../lib/implemented");
 
 const inputs = (record, implemented = IM) => ({ graph, record, implemented });
 
@@ -56,19 +57,33 @@ test("stage walks decide → the bulletin's recipients → ready → ai (discove
   assert.equal(aiStage.step, "discovery");
 });
 
-test("stage starts at Phase 1 — 🔨 Build on the API tab — until the entry form has been built from its spec", () => {
-  const { entryForm: _e, ...noForm } = IM;
-  for (const im of [noForm, { ...IM, entryForm: { built: false } }]) {
-    const st = stage(generate(inputs(rec(), im)), im);
-    assert.deepEqual(st, { layer: "api", step: "build", next: null });
+test("stage starts at Phase 1 until the API layer is built and verified", () => {
+  // emptyImplemented(), api:verified=false, and api as old array (PHASE1_SERVICES) → all return api/build
+  for (const im of [emptyImplemented(), { ...IM, api: { ...builtApi(), verified: false } }, { ...IM, api: PHASE1_SERVICES }]) {
+    assert.deepEqual(stage(generate(inputs(rec(), im)), im), { layer: "api", step: "build", next: null });
   }
-  // the entry form comes first even when the production is already built
-  const orchDone = { ...noForm, orchestrator: { built: true, verified: true } };
+  // orchestrator built but API not → still api layer
+  const orchDone = { ...emptyImplemented(), orchestrator: { built: true, verified: true } };
   assert.equal(stage(generate(inputs(rec(), orchDone)), orchDone).layer, "api");
+  // IM has api built and verified → moves to orchestrator
   assert.equal(stage(generate(inputs(rec())), IM).layer, "orchestrator");
 });
 
-test("building the entry form never makes the API spec look stale", () => {
-  const { entryForm: _e, ...noForm } = IM;
-  assert.deepEqual(inputHashes("api", inputs(rec(), IM)), inputHashes("api", inputs(rec(), noForm)));
+test("a Phase 1 decision after the build marks it out of date", () => {
+  const currentHash = designHash(generate(inputs(rec())).api);
+  const im = { ...IM, api: builtApi(PHASE1_SERVICES, { builtFrom: currentHash }) };
+  // same spec → not out of date
+  assert.equal(stage(generate(inputs(rec())), im).apiOutOfDate, undefined);
+  // changed spec → out of date, but orchestrator layer continues
+  const st = stage(generate(inputs(rec({ dec: { "FLD.model": "Omit" } }))), im);
+  assert.equal(st.apiOutOfDate, true);
+  assert.equal(st.layer, "orchestrator");
+});
+
+test("building Phase 1 never makes the API spec look stale", () => {
+  // builtFrom and verifiedRecord are never hashed — extra fields in api record don't shift the input hash
+  assert.deepEqual(
+    inputHashes("api", inputs(rec(), IM)),
+    inputHashes("api", inputs(rec(), { ...IM, api: builtApi(PHASE1_SERVICES, { verifiedRecord: { ien: 9 }, builtFrom: "x" }) }))
+  );
 });

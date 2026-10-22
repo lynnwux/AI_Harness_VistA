@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { loadRecord } = require("../record");
-const { apiServices, emptyImplemented } = require("../implemented");
+const { apiServices, apiRecord, emptyImplemented } = require("../implemented");
 const api = require("./api");
 const orchestrator = require("./orchestrator");
 const ai = require("./ai");
@@ -26,6 +26,8 @@ function canon(v) {
   return JSON.stringify(v === undefined ? null : v);
 }
 const sha = v => crypto.createHash("sha256").update(canon(v)).digest("hex");
+// Hash of the two API-layer design inputs: changing either marks a built record out of date.
+const designHash = apiSpec => sha({ graph: apiSpec.inputs.graph, decisions: apiSpec.inputs.decisions });
 
 // The API spec hashes only what it may depend on, so orchestrator decisions never make it look stale.
 // The orchestrator hash excludes aiQuestions and implemented.ai, so AI-layer decisions and a finished AI build never
@@ -71,22 +73,28 @@ function writeSpecs(dir, specs, inputs) {
 }
 
 function stage(specs, implemented) {
+  // Phase 1 gate: nothing opens until the API layer is built and verified.
+  const api = apiRecord(implemented);
+  if (!(api.built && api.verified)) return { layer: "api", step: "build", next: null };
+  // Out-of-date flag: a string builtFrom that no longer matches the current design hash.
+  const apiOutOfDate = typeof api.builtFrom === "string" && api.builtFrom !== designHash(specs.api);
+  const stamp = r => apiOutOfDate ? { ...r, apiOutOfDate: true } : r;
   const o = specs.orchestrator;
   for (const kind of ["decide", "binding", "evidence", "target"]) {
     const m = o.missing.find(x => x.kind === kind);
-    if (m) return { layer: "orchestrator", step: kind, next: m };
+    if (m) return stamp({ layer: "orchestrator", step: kind, next: m });
   }
   const unmet = o.needs.find(n => !n.met);
-  if (unmet) return { layer: "orchestrator", step: "needs", next: unmet };
+  if (unmet) return stamp({ layer: "orchestrator", step: "needs", next: unmet });
   const p = (implemented && implemented.orchestrator) || {};
-  if (!(p.built && p.verified)) return { layer: "orchestrator", step: "ready", next: null };
+  if (!(p.built && p.verified)) return stamp({ layer: "orchestrator", step: "ready", next: null });
   // Orchestrator is built and verified — walk the AI layer one question at a time: the AI spec lists
   // its missing items question by question (keep, wording, then each parameter), so take them in order.
   const m = specs.ai.missing[0];
-  if (m) return { layer: "ai", step: m.kind, next: m };
+  if (m) return stamp({ layer: "ai", step: m.kind, next: m });
   const pa = (implemented && implemented.ai) || {};
-  if (!(pa.built && pa.verified)) return { layer: "ai", step: "ready", next: null };
-  return { layer: "ai", step: "done", next: null };
+  if (!(pa.built && pa.verified)) return stamp({ layer: "ai", step: "ready", next: null });
+  return stamp({ layer: "ai", step: "done", next: null });
 }
 
 const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return fallback; } };
@@ -100,4 +108,4 @@ function loadInputs(paths = DEFAULT_PATHS, fallbackRecord) {
   };
 }
 
-module.exports = { DEFAULT_PATHS, LAYERS, canon, inputHashes, generate, render, writeSpecs, stage, loadInputs };
+module.exports = { DEFAULT_PATHS, LAYERS, canon, inputHashes, designHash, generate, render, writeSpecs, stage, loadInputs };

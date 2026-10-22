@@ -153,7 +153,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
   }).catch(e => { if (!res.headersSent) res.status(500).json({ error: String(e.message || e) }); }));
 
   registerVistaRoutes(app);
-  registerBuildRoutes(app, regenerate, serially);
+  registerBuildRoutes(app, regenerate, serially, { spawnImpl, buildStatus: statusFiles.build || STATUS_FILE });
   const runners = { spawnImpl, productionStatus: statusFiles.production || PRODUCTION_STATUS, aiStatus: statusFiles.ai || AI_STATUS_FILE, restoreStatus: statusFiles.restore || RESTORE_STATUS };
   // Demo reset: the Decide page starts over — every decision back to the defaults, the production and AI build
   // status back to not built. What is deployed keeps running; the Phase 1 services and the known-good copies stay.
@@ -178,7 +178,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     try { res.json(JSON.parse(fs.readFileSync(runners.restoreStatus, "utf8"))); }
     catch (e) { res.json({ state: "idle", step: "", log: [], results: [] }); }
   });
-  registerProductionRoutes(app, regenerate, serially, () => state.specs, runners);
+  registerProductionRoutes(app, regenerate, serially, () => state.specs, () => state.stage, runners);
   registerAiRoutes(app, regenerate, serially, () => state.specs, () => state.stage, runners);
   registerAiProxyRoutes(app);
   app.use(express.static(ROOT));
@@ -295,7 +295,11 @@ function registerVistaRoutes(app) {
 const STATUS_FILE = path.join(__dirname, "build-status.json");
 let buildProc = null;
 
-function registerBuildRoutes(app, regenerate, serially) {
+// Gate texts used by production and AI routes.
+const PHASE2_CLOSED = "Phase 2 opens after the Phase 1 build — press 🔨 Build on the API tab first";
+const API_OUT_OF_DATE = "the API layer changed since it was built — press 🔨 Build on the API tab to rebuild Phase 1 first";
+
+function registerBuildRoutes(app, regenerate, serially, { spawnImpl = spawn, buildStatus = STATUS_FILE } = {}) {
   // queued behind any chat turn in flight, so the build reads the record that turn saved
   app.post("/api/build", (_req, res) => serially(() => {
     try {
@@ -303,27 +307,28 @@ function registerBuildRoutes(app, regenerate, serially) {
       if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build" });
       const g = regenerate();   // the build always reads the latest specs; it ignores any request body
       if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
-      fs.writeFileSync(STATUS_FILE, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], url: null, error: null, startedAt: new Date().toISOString() }, null, 2));
-      buildProc = spawn(process.execPath, [path.join(__dirname, "build-runner.js")], { cwd: __dirname, detached: true, stdio: "ignore" });
+      fs.writeFileSync(buildStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], url: null, error: null, startedAt: new Date().toISOString() }, null, 2));
+      buildProc = spawnImpl(process.execPath, [path.join(__dirname, "build-runner.js")], { cwd: __dirname, detached: true, stdio: "ignore" });
       buildProc.on("exit", (code) => {
         buildProc = null;
         // Safety net: if the runner died without writing a terminal state (crash / kill),
         // mark the status errored so the UI poll ends and the Build button re-enables.
         try {
-          const s = JSON.parse(fs.readFileSync(STATUS_FILE, "utf8"));
+          const s = JSON.parse(fs.readFileSync(buildStatus, "utf8"));
           if (s.state !== "done" && s.state !== "error" && s.state !== "cancelled") {
             s.state = "error"; s.error = "build process exited unexpectedly (code " + code + ")"; s.etaSec = 0;
             (s.log = s.log || []).push("✗ build process exited unexpectedly (code " + code + ")");
-            fs.writeFileSync(STATUS_FILE, JSON.stringify(s, null, 2));
+            fs.writeFileSync(buildStatus, JSON.stringify(s, null, 2));
           }
         } catch (e) { /* no status file yet — nothing to reconcile */ }
+        serially(() => regenerate());   // implemented.json may now say built + verified
       });
       buildProc.unref();
       res.json({ started: true, statusUrl: "/api/build/status" });
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
   }));
   app.get("/api/build/status", (_req, res) => {
-    try { res.json(JSON.parse(fs.readFileSync(STATUS_FILE, "utf8"))); }
+    try { res.json(JSON.parse(fs.readFileSync(buildStatus, "utf8"))); }
     catch (e) { res.json({ state: "idle", step: "", log: [], url: null }); }
   });
   // Cancel a running build and get the environment ready for the next press. Kills the
@@ -369,13 +374,16 @@ function reconcileExit(statusFile, what, code) {
   } catch (e) { /* no status file — nothing to reconcile */ }
 }
 
-function registerProductionRoutes(app, regenerate, serially, specs, { spawnImpl = spawn, productionStatus = PRODUCTION_STATUS } = {}) {
+function registerProductionRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl = spawn, productionStatus = PRODUCTION_STATUS } = {}) {
   app.post("/api/build/production", (_req, res) => serially(() => {
     if (productionProc) return res.json({ started: false, running: true, note: "a production build is already running" });
     if (aiProc) return res.status(409).json({ started: false, error: "the AI build is running — wait for it to finish, then build the production" });
     if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build the production" });
     const g = regenerate();
     if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
+    const st = stageOf();
+    if (st && st.layer === "api") return res.status(409).json({ started: false, error: PHASE2_CLOSED });
+    if (st && st.apiOutOfDate) return res.status(409).json({ started: false, error: API_OUT_OF_DATE });
     const o = specs().orchestrator;
     if (!o.complete) return res.status(409).json({ started: false, error: "the orchestrator spec is not complete — finish its missing items in the Decide chat first", missing: o.missing.map(m => m.what) });
     fs.writeFileSync(productionStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], error: null, startedAt: new Date().toISOString() }, null, 2));
@@ -413,8 +421,9 @@ function registerAiRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl
     if (productionProc) return res.status(409).json({ started: false, error: "the production build is running — wait for it to finish, then build the AI layer" });
     const g = regenerate();
     if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
-    // The spec's offer rule: the AI layer is offered only once the orchestrator is built and verified.
     const st = stageOf();
+    if (st && st.apiOutOfDate) return res.status(409).json({ started: false, error: API_OUT_OF_DATE });
+    // The spec's offer rule: the AI layer is offered only once the orchestrator is built and verified.
     if (!st || st.layer !== "ai") return res.status(409).json({ started: false, error: "the AI layer is offered only once the orchestrator is built and verified — finish and build the orchestrator first", stage: st || null });
     const a = specs() && specs().ai;
     if (!a || !a.complete) return res.status(409).json({ started: false, error: "the AI spec is not complete — finish its missing items in the Decide chat first", missing: (a && a.missing || []).map(m => m.what) });

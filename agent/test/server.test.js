@@ -7,13 +7,17 @@ const path = require("path");
 const { createApp } = require("../server");
 const { runTool } = require("../lib/tools");
 const { inputHashes, loadInputs } = require("../lib/specs");
-const { builtApi, apiServices } = require("../lib/implemented");
+const { builtApi, emptyImplemented, apiServices } = require("../lib/implemented");
+const { IM } = require("./helpers");
 
 function setup(fakeAgent, prepare) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-"));
   const graphCopy = path.join(dir, "graph.json");
   fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), graphCopy);
-  const paths = { graph: graphCopy, decisions: path.join(dir, "decisions.json"), implemented: path.join(__dirname, "..", "implemented.json"), specsDir: path.join(dir, "specs") };
+  // write temp implemented.json with IM so setup() never touches agent/implemented.json
+  const implPath = path.join(dir, "implemented.json");
+  fs.writeFileSync(implPath, JSON.stringify(IM));
+  const paths = { graph: graphCopy, decisions: path.join(dir, "decisions.json"), implemented: implPath, specsDir: path.join(dir, "specs") };
   if (prepare) prepare(paths);
   const made = createApp({ paths, runAgentImpl: fakeAgent || (async () => ({ reply: "ok", toolTrace: [] })) });
   return new Promise(resolve => {
@@ -260,18 +264,16 @@ const ALL_KEPT = {
 };
 
 // A server whose builds are fake processes: nothing is spawned, and the status files are temp files.
-async function buildSetup({ orchestratorVerified = true, aiQuestions = undefined, agentCalls = [] } = {}) {
+async function buildSetup({ apiBuilt = true, orchestratorVerified = true, aiQuestions = undefined, agentCalls = [] } = {}) {
   const procs = [];
   const spawnImpl = (_cmd, args) => { const p = new EventEmitter(); p.args = args; p.pid = 0; p.unref = () => {}; procs.push(p); return p; };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-b-"));
   const paths = { graph: path.join(dir, "graph.json"), decisions: path.join(dir, "decisions.json"), implemented: path.join(dir, "implemented.json"), inventory: INVENTORY, specsDir: path.join(dir, "specs") };
   fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), paths.graph);
   fs.writeFileSync(paths.decisions, JSON.stringify(aiQuestions ? { ...MIN_DEC, aiQuestions } : MIN_DEC));
-  fs.writeFileSync(paths.implemented, JSON.stringify({ api: builtApi(), orchestrator: { built: orchestratorVerified, verified: orchestratorVerified } }));
+  fs.writeFileSync(paths.implemented, JSON.stringify({ api: apiBuilt ? builtApi() : emptyImplemented().api, orchestrator: { built: orchestratorVerified, verified: orchestratorVerified } }));
   const statusFiles = { build: path.join(dir, "build-status.json"), production: path.join(dir, "production-status.json"), ai: path.join(dir, "ai-status.json"), restore: path.join(dir, "restore-status.json") };
-  const publishedDir = path.join(dir, "published-entry-form");
-  fs.mkdirSync(publishedDir); fs.writeFileSync(path.join(publishedDir, "index.html"), "<app-root></app-root>");
-  const made = createApp({ paths, runAgentImpl: async m => { agentCalls.push(m); return { reply: "ok", toolTrace: [] }; }, spawnImpl, statusFiles, publishedDir });
+  const made = createApp({ paths, runAgentImpl: async m => { agentCalls.push(m); return { reply: "ok", toolTrace: [] }; }, spawnImpl, statusFiles });
   const t = await new Promise(resolve => {
     const srv = made.app.listen(0, "127.0.0.1", () => resolve({ ...made, srv, paths, dir, base: `http://127.0.0.1:${srv.address().port}` }));
   });
@@ -281,9 +283,57 @@ async function buildSetup({ orchestratorVerified = true, aiQuestions = undefined
     t.srv.close();
     fs.rmSync(dir, { recursive: true, force: true });
   };
-  return { ...t, procs, statusFiles, publishedDir, done };
+  return { ...t, procs, statusFiles, done };
 }
 const post = (t, p) => fetch(t.base + p, { method: "POST" });
+
+test("the production build is refused (409) until Phase 1 is built", async () => {
+  // MIN_DEC is complete enough for the orchestrator spec; the gate fires on api.built, not completeness
+  const t = await buildSetup({ apiBuilt: false, orchestratorVerified: false });
+  try {
+    const r = await post(t, "/api/build/production");
+    assert.equal(r.status, 409);
+    assert.match((await r.json()).error, /Phase 2 opens after the Phase 1 build/);
+    assert.equal(t.procs.length, 0, "nothing was started");
+  } finally { await t.done(); }
+});
+
+test("production and AI builds are refused while Phase 1 is out of date", async () => {
+  const t = await buildSetup({ aiQuestions: ALL_KEPT });
+  try {
+    // mark api.builtFrom with a stale hash — the route's regenerate() will set apiOutOfDate:true
+    const im = JSON.parse(fs.readFileSync(t.paths.implemented, "utf8"));
+    im.api = { ...im.api, builtFrom: "stale" };
+    fs.writeFileSync(t.paths.implemented, JSON.stringify(im));
+    const r1 = await post(t, "/api/build/production");
+    assert.equal(r1.status, 409);
+    assert.match((await r1.json()).error, /the API layer changed/);
+    const r2 = await post(t, "/api/build/ai");
+    assert.equal(r2.status, 409);
+    assert.match((await r2.json()).error, /the API layer changed/);
+    assert.equal(t.procs.length, 0, "nothing was started");
+  } finally { await t.done(); }
+});
+
+test("the API build route uses the injected spawn and status file, and regenerates on exit", async () => {
+  // start with Phase 1 not built so exit(0) moves stage from api to orchestrator
+  const t = await buildSetup({ apiBuilt: false, orchestratorVerified: false });
+  try {
+    const r = await (await post(t, "/api/build")).json();
+    assert.equal(r.started, true, JSON.stringify(r));
+    assert.ok(t.procs[0].args.some(a => /build-runner\.js$/.test(a)), "spawned build-runner.js");
+    assert.ok(fs.existsSync(t.statusFiles.build), "build status file written");
+    assert.equal(JSON.parse(fs.readFileSync(t.statusFiles.build, "utf8")).state, "starting");
+    // write builtApi() then signal exit(0) — the exit handler regenerates so specs update
+    const im = JSON.parse(fs.readFileSync(t.paths.implemented, "utf8"));
+    im.api = builtApi();
+    fs.writeFileSync(t.paths.implemented, JSON.stringify(im));
+    t.procs[0].emit("exit", 0);
+    await new Promise(res => setTimeout(res, 50));
+    const s = await (await fetch(t.base + "/api/specs")).json();
+    assert.equal(s.stage.layer, "orchestrator");
+  } finally { await t.done(); }
+});
 
 test("POST /api/build/ai is refused (409) until the orchestrator is built and verified — the spec's offer rule", async () => {
   const t = await buildSetup({ orchestratorVerified: false, aiQuestions: ALL_KEPT });
