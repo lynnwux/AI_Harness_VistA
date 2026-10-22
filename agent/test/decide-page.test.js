@@ -22,7 +22,7 @@ function page(extra) {
     fetch: () => new Promise(() => {}),   // the boot waits forever: nothing is loaded
     setTimeout, setInterval, clearInterval, console, URL, Blob: function () {},
   });
-  vm.runInContext(SCRIPT + "\n;globalThis.__page = { openingMessages, defaultTab, serverLooksOld, OLD_SERVER_NOTICE, RESET_PROMPT, resetSummary" + (extra ? ", " + extra : "") + " };", ctx);
+  vm.runInContext(SCRIPT + "\n;globalThis.__page = { openingMessages, defaultTab, serverLooksOld, OLD_SERVER_NOTICE, RESET_PROMPT, resetSummary, nextResetStep" + (extra ? ", " + extra : "") + " };", ctx);
   return ctx.__page;
 }
 
@@ -229,4 +229,15 @@ test("resetSummary lists every result and the verdict", () => {
   assert.match(html, /✅.*VADEMO.*removed/s);
   assert.match(html, /✗.*IRIS.*failed: timeout/s);
   assert.match(html, /Reset finished with failures/);
+});
+
+test("nextResetStep: done/error/idle terminate; tearing-down retries; consecutive failures gate at 5", () => {
+  const p = page();
+  assert.equal(p.nextResetStep({ state: "done" }, 0), "done");
+  assert.equal(p.nextResetStep({ state: "error" }, 0), "done");
+  assert.equal(p.nextResetStep({ state: "idle" }, 0), "done", "idle is terminal");
+  assert.equal(p.nextResetStep({ state: "tearing down" }, 0), "retry");
+  assert.equal(p.nextResetStep({ state: "starting" }, 0), "retry");
+  assert.equal(p.nextResetStep(null, 4), "retry", "4 failures → retry");
+  assert.equal(p.nextResetStep(null, 5), "fail", "5th failure → fail");
 });

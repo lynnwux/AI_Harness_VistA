@@ -290,7 +290,7 @@ function renderRight(){
   const doc=document.getElementById("doc");
   if(!SPECS||!SPECS.layers){ doc.innerHTML=`<div class="specerr">${esc((SPECS&&SPECS.error)||"Specs not available")}</div>`; return; }
   const banner = (serverLooksOld(SPECS, AI_STATUS_JSON) ? `<div class="specerr">⚠ ${esc(OLD_SERVER_NOTICE)}</div>` : "")
-    + (SPECS.stage && SPECS.stage.apiOutOfDate ? `<div class="specerr">⚠ The API layer changed since it was built. Press 🔨 Build on the API tab to rebuild Phase 1 — the production and AI builds stay disabled until then.</div>` : "")
+    + (SPECS.stage && SPECS.stage.apiOutOfDate ? `<div class="specerr">${esc(API_OOD_NOTICE.replace(/\*\*/g,""))}</div>` : "")
     + (SPECS.notice ? `<div class="specerr">⚠ ${esc(SPECS.notice)}</div>` : "")
     + (SPECS.error ? `<div class="specerr">⚠ Spec generation failed — showing the last good version. ${esc(SPECS.error)}</div>` : "");
   doc.innerHTML = banner + mdToHtml(SPECS.layers[TAB].md);
@@ -514,11 +514,19 @@ function wireChat(){
 const RESET_PROMPT="DEMO RESET — this tears down every phase.\n\nThe REST service and its web app are removed from VADEMO, the IRIS production and the AI layer are removed from IRIS, the published apps and build logs are deleted, and every decision goes back to the defaults. Kept: the known-good copies (\"restore last good\" still works), a backup of your decisions, and the test records in file 6914.\n\nType  reset  to confirm:";
 function confirmReset(ask){ const typed=ask(RESET_PROMPT); return typed!=null && String(typed).trim().toLowerCase()==="reset"; }
 // One line per teardown result; verdict on last line; called by the reset poll and used by tests.
+// s.state==="error" also triggers the failure verdict (e.g. server unreachable or idle restart).
 function resetSummary(s){
   const rows=(s.results||[]).map(r=>{ const f=/^failed/.test(r.outcome),mark=r.outcome==="removed"?"✅":f?"✗":"—"; return `<div>${mark} ${esc(r.where)} · ${esc(r.item)} — ${esc(r.outcome)}</div>`; }).join("");
-  const hadFail=(s.results||[]).some(r=>/^failed/.test(r.outcome));
+  const hadFail=s.state==="error"||(s.results||[]).some(r=>/^failed/.test(r.outcome));
   const v=hadFail?`<b>✗ Reset finished with failures — ${esc(s.error||"")}. Nothing is marked built; the next build replaces what is left.</b>`:`<b>✅ Reset finished — nothing is built; Phase 1 is next.</b>`;
   return rows+`<div style="margin-top:6px">${v}</div>`;
+}
+// Decides the next action for the reset status poll — testable without timers.
+// status=null means the fetch threw; failures = consecutive-failure count after this attempt.
+function nextResetStep(status,failures){
+  if(status===null) return failures>=5?"fail":"retry";
+  if(status.state==="done"||status.state==="error"||status.state==="idle") return "done";
+  return "retry";
 }
 document.getElementById("resetBtn").onclick=async ()=>{
   if(!confirmReset(m=>prompt(m,""))) return;
@@ -531,10 +539,17 @@ document.getElementById("resetBtn").onclick=async ()=>{
     const upd=h=>{ bl.innerHTML=h; bx.scrollTop=bx.scrollHeight; };
     const done=s=>{ upd(resetSummary(s)); btn.disabled=false; btn.textContent=label; location.reload(); };
     upd("<b>↺ Tearing down…</b>");
+    let failures=0;
     const poll=async()=>{
-      let s; try{ s=await(await fetch("/api/demo/reset/status",{cache:"no-store"})).json(); }catch(e){ setTimeout(poll,2000); return; }
-      if(s.state==="done"||s.state==="error"){ done(s); return; }
-      upd("<b>↺ Tearing down…</b> "+esc(s.step||s.state||"")); setTimeout(poll,2000);
+      let s=null; try{ s=await(await fetch("/api/demo/reset/status",{cache:"no-store"})).json(); failures=0; }catch(e){ failures++; }
+      const step=nextResetStep(s,failures);
+      if(step==="fail"){ done({state:"error",error:"the reset status could not be read — the workbench server may have stopped",results:[]}); return; }
+      if(step==="done"){
+        if(s&&s.state==="idle") done({state:"error",error:"the workbench server no longer has a record of this reset (it may have restarted)",results:s.results||[]});
+        else done(s);
+        return;
+      }
+      upd("<b>↺ Tearing down…</b> "+esc((s&&(s.step||s.state))||"")); setTimeout(poll,2000);
     };
     poll();
   }catch(e){ addMsg("assistant","⚠ Demo reset failed: "+e.message); btn.disabled=false; btn.textContent=label; }
