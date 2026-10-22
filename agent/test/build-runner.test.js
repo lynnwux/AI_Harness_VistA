@@ -206,6 +206,25 @@ test("a stale spec changes nothing", async () => {
   fs.rmSync(ctx.dir, { recursive: true, force: true });
 });
 
+test("a failed known-good save leaves Phase 1 not built", async () => {
+  // start with api: builtApi() — it gets cleared before VADEMO, so on any error api stays empty
+  const ctx = setupCtx({ impl: { api: builtApi(), orchestrator: { built: false, verified: false }, ai: { built: false, verified: false } } });
+  const vademo = fakeVademo({ storedRow: ctx.storedRow });
+
+  const st = await main({
+    paths: ctx.paths, statusFile: ctx.statusFile, outDir: ctx.outDir,
+    workRoot: ctx.workRoot, knownGoodRoot: ctx.knownGoodRoot,
+    vademo, buildApp: fakeBuildApp, now: () => FIXED_DATE,
+    saveKnownGood: () => { throw new Error("disk full"); },
+  });
+
+  assert.equal(st.state, "error");
+  const im = JSON.parse(fs.readFileSync(ctx.paths.implemented, "utf8"));
+  assert.deepEqual(im.api, emptyImplemented().api, "implemented.api must be empty when known-good save fails");
+
+  fs.rmSync(ctx.dir, { recursive: true, force: true });
+});
+
 test("nothing secret in the status", async () => {
   const ctx = setupCtx();
   const password = "fake-vademo-pass-123";

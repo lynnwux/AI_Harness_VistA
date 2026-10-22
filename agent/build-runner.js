@@ -7,7 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const { angularFiles, DEFAULT_COMPONENT_FILES } = require("./lib/angular-app");
 const { buildAngularApp } = require("./lib/angular-build");
-const { saveKnownGood, KNOWN_GOOD_ROOT } = require("./lib/known-good");
+const { saveKnownGood: saveKnownGoodLib, KNOWN_GOOD_ROOT } = require("./lib/known-good");
 const { DEFAULT_PATHS, loadInputs, inputHashes, designHash, canon } = require("./lib/specs");
 const { PHASE1_SERVICES, emptyImplemented, apiRecord, builtApi } = require("./lib/implemented");
 const { vademoFromEnv } = require("./lib/vademo");
@@ -56,6 +56,7 @@ async function main(deps = {}) {
     buildApp = buildAngularApp,
     now = () => new Date(),
   } = deps;
+  const saveKG = deps.saveKnownGood || saveKnownGoodLib;
 
   const t0 = Date.now();
   let phaseIdx = -1, phaseStart = Date.now(), ticker = null;
@@ -149,18 +150,20 @@ async function main(deps = {}) {
     const restDir = path.join(workRoot, "rest-" + RUN_ID);
     fs.mkdirSync(restDir, { recursive: true });
     for (const cls of REST_CLASSES) fs.copyFileSync(path.join(HARNESS_DIR, cls), path.join(restDir, cls));
-
-    clearInterval(ticker); phaseIdx = -1;
-    status.state = "done"; status.pct = 100; status.etaSec = 0; status.url = "/prototype/build/"; status.finishedAt = now().toISOString();
-
-    // read-modify-write: record success without stomping orchestrator / ai entries
     const verifiedRecord = { ien: verify.ien, serial: verify.serial, at: now().toISOString() };
+    try {
+      saveKG("api", { dirs: { site: outDir, rest: restDir }, meta: { url: "/prototype/build/", restClasses: REST_CLASSES } }, knownGoodRoot);
+    } finally {
+      // clean up on every path — saveKnownGood atomically copied the dir before this runs
+      try { fs.rmSync(restDir, { recursive: true, force: true }); } catch (_) {}
+    }
+    // implemented.json is the last committed side effect: written only after known-good succeeds
     const freshImpl = readJson(paths.implemented, emptyImplemented());
     freshImpl.api = { ...builtApi(PHASE1_SERVICES, { verifiedRecord, builtFrom: designHash(apiSpec) }) };
     fs.writeFileSync(paths.implemented, JSON.stringify(freshImpl, null, 2));
 
-    saveKnownGood("api", { dirs: { site: outDir, rest: restDir }, meta: { url: "/prototype/build/", restClasses: REST_CLASSES } }, knownGoodRoot);
-    try { fs.rmSync(restDir, { recursive: true, force: true }); } catch (_) {}
+    clearInterval(ticker); phaseIdx = -1;
+    status.state = "done"; status.pct = 100; status.etaSec = 0; status.url = "/prototype/build/"; status.finishedAt = now().toISOString();
     log("  saved as the known-good entry form (restore last good)");
     status.step = "Done — built and published"; log("✅ Done — built and published"); save();
     return status;
