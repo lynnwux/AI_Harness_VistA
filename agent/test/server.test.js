@@ -783,3 +783,15 @@ test("a runner that cannot be spawned ends its status in error and blocks nothin
     assert.equal((await (await post(t, "/api/build")).json()).started, true, "the teardown no longer blocks a build");
   } finally { await t.done(); }
 });
+
+test("the guide's instructions state each layer's build status from the record, and that a stub is not an unbuilt production", async () => {
+  const t = await buildSetup({ aiQuestions: ALL_KEPT });
+  try {
+    const p = t.systemPrompt();
+    assert.match(p, /^Build status \(recorded\): API built and verified · Production built and verified · AI not built$/m);
+    assert.match(p, /built: false[^\n]*stub/);
+  } finally { await t.done(); }
+  const t2 = await buildSetup({ apiBuilt: false, orchestratorVerified: false });
+  try { assert.match(t2.systemPrompt(), /^Build status \(recorded\): API not built · Production not built · AI not built$/m); }
+  finally { await t2.done(); }
+});

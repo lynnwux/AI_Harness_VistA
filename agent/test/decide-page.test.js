@@ -326,3 +326,45 @@ test("every ending of an API build refreshes the specs", () => {
   const h = SCRIPT.slice(SCRIPT.indexOf('getElementById("buildBtn").onclick'));
   assert.match(h.slice(0, h.indexOf("\n", h.indexOf("const reset="))), /const reset=\(\)=>\{[^\n]*loadSpecs\(\)/);
 });
+
+test("a build that moves the stage to another layer moves the page on: a new layer, or the AI layer finishing", () => {
+  const p = page("stageMoved, historyNote");
+  assert.equal(p.stageMoved({ layer: "orchestrator", step: "ready" }, { layer: "ai", step: "keep" }), true);
+  assert.equal(p.stageMoved({ layer: "api", step: "build" }, { layer: "orchestrator", step: "decide" }), true);
+  assert.equal(p.stageMoved({ layer: "ai", step: "ready" }, { layer: "ai", step: "done" }), true);
+  assert.equal(p.stageMoved({ layer: "orchestrator", step: "ready" }, { layer: "orchestrator", step: "ready" }), false);
+  assert.equal(p.stageMoved(null, { layer: "ai", step: "keep" }), true);
+});
+
+test("the chat history note names the stage the page is on, so the guide never works from a stale intro", () => {
+  const p = page("historyNote");
+  const ai = apiSpecs(rec(DONE), VERIFIED);
+  assert.match(p.historyNote(ai, "stage changed"), /^\[stage changed: Phase 1 \(API\) and Phase 2 \(production\) built\+verified; working on Phase 3, the AI layer; stage=ai\//);
+  assert.match(p.historyNote(apiSpecs(rec(), emptyImplemented()), "intro"), /^\[intro: Phase 1 \(API\) not built; working on Phase 1; stage=api\/build/);
+});
+
+test("after a successful build the page moves on: the stage's tab, its opening, and a history note — the chat is kept", async () => {
+  const added = [];
+  const el = () => ({ style: {}, dataset: {}, classList: { toggle() {}, add() {}, remove() {} }, addEventListener() {}, appendChild() {}, remove() {}, insertAdjacentHTML() {}, set innerHTML(v) { this._h = v; }, get innerHTML() { return this._h || ""; } });
+  const ai = apiSpecs(rec(DONE), VERIFIED);
+  const ctx = vm.createContext({
+    document: { getElementById: el, querySelectorAll: () => [], createElement: el },
+    location: { protocol: "http:" }, window: { open() {} }, localStorage: { getItem: () => null, setItem() {} },
+    fetch: url => (/\/api\//.test(String(url)) ? Promise.resolve({ json: async () => (String(url).includes("/api/specs") ? ai : { state: "idle" }), text: async () => "{}" }) : new Promise(() => {})),   // the boot's graph fetch never answers
+    setTimeout, setInterval, clearInterval, console, URL, Blob: function () {},
+  });
+  vm.runInContext(SCRIPT + "\n;addMsg=(role,text)=>__added.push(text);globalThis.__page = { moveOn, tab: () => TAB, history: () => chatHistory, setHistory: h => { chatHistory = h; } };", Object.assign(ctx, { __added: added }));
+  const p = ctx.__page;
+  p.setHistory([{ role: "user", text: "earlier turn" }]);
+  added.length = 0;
+  const moved = await p.moveOn({ layer: "orchestrator", step: "ready" });
+  assert.equal(moved, true);
+  assert.equal(p.tab(), "ai");
+  assert.ok(added.some(m => /Phase 2 \(the IRIS production\) are built and verified/.test(m)), added.join("\n---\n"));
+  const h = p.history();
+  assert.equal(h[0].text, "earlier turn", "the conversation is kept");
+  assert.match(h[h.length - 1].text, /^\[stage changed: .*working on Phase 3, the AI layer/);
+  added.length = 0;
+  assert.equal(await p.moveOn({ layer: "ai", step: "keep" }), false, "no move when the stage stayed");
+  assert.equal(added.length, 0);
+});

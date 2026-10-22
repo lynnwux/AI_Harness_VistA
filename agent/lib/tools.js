@@ -6,7 +6,7 @@ const { cap: C, isBlocking, isMandatory, allowedTargetKeys, VIA } = require("./r
 const { generate, stage } = require("./specs");
 const { requestContract } = require("./specs/api");
 const { TEMPLATES, validateParams, sqlFor, validateOne } = require("./ai-templates");
-const { emptyImplemented } = require("./implemented");
+const { emptyImplemented, apiRecord } = require("./implemented");
 
 const CAT_OPTS = {
   oq:   ["Business rule", "Required input", "Defer"],
@@ -146,6 +146,9 @@ function getState(graph, decisions, extra = {}) {
   }
   const specs = generate({ graph, record, implemented, inventory: extra.inventory || null });
   const o = specs.orchestrator;
+  const st = stage(specs, implemented);
+  const done = l => ({ built: !!(implemented[l] && implemented[l].built), verified: !!(implemented[l] && implemented[l].verified) });
+  const api = apiRecord(implemented);
   return {
     capability: c.name, summary,
     blocking: (c.openQuestions || []).filter(q => isBlocking(record, q.id)).map(q => q.id),
@@ -154,7 +157,9 @@ function getState(graph, decisions, extra = {}) {
     missing: o.missing, needs: o.needs,
     requestContract: specs.api.request,
     mandatory: (c.sideEffects || []).filter(isMandatory).map(s => s.id),
-    stage: stage(specs, implemented),
+    stage: st,
+    // whether each layer is built, straight from implemented.json — a side effect's built:false above means a stub
+    builds: { api: { built: api.built, verified: api.verified, outOfDate: !!st.apiOutOfDate }, orchestrator: done("orchestrator"), ai: done("ai") },
     ai: buildAiState(record, extra.inventory || null, specs.ai),
   };
 }
@@ -323,7 +328,7 @@ const TARGET_PROPS = { via: { type: "string", description: "where the work is pe
 for (const k of ["writePath", "fields", "operatorValues", "channel", "recipients", "content", "system", "endpoint", "trigger", "mapping", "settings"]) TARGET_PROPS[k] = { type: "string" };
 
 const TOOL_SPECS = [
-  { toolSpec: { name: "getState", description: "The RECORDED state — the only source of truth for summaries and status. Returns every disposition, which open questions block, each question's recorded resolution (mode, policy, field bindings), every side effect (built or not, mandatory, gating question, legacy evidence, recorded target details, reason if not built), the missing list, needs from lower layers, the API request contract, mandatory items, and the current stage.", inputSchema: { json: { type: "object", properties: {} } } } },
+  { toolSpec: { name: "getState", description: "The RECORDED state — the only source of truth for summaries and status. Returns every disposition, which open questions block, each question's recorded resolution (mode, policy, field bindings), every side effect (built or not, mandatory, gating question, legacy evidence, recorded target details, reason if not built), the missing list, needs from lower layers, the API request contract, mandatory items, the current stage, and builds — whether each layer (api, orchestrator, ai) is built and verified, from the record (the only source for whether a layer is built; a side effect with built:false is a stub or outside this build, not an unbuilt production).", inputSchema: { json: { type: "object", properties: {} } } } },
   { toolSpec: { name: "explainOption", description: "Explain what a disposition option means for a specific element: the IRIS artifact it produces, when to use it, and its risk.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, option: { type: "string" } }, required: ["nodeId", "option"] } } } },
   { toolSpec: { name: "explainMapping", description: "Explain how a legacy element maps through the target layers (AI Hub / IRIS Production / REST / FileMan).", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" } }, required: ["nodeId"] } } } },
   { toolSpec: { name: "setDisposition", description: "Apply a disposition to an element (rule/behavior/data/security/dependency). Not for open questions. Drop is refused for mandatory items.", inputSchema: { json: { type: "object", properties: { nodeId: { type: "string" }, option: { type: "string" } }, required: ["nodeId", "option"] } } } },

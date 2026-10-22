@@ -288,3 +288,12 @@ test("form fields can be decided in every stage", () => {
   assert.ok(runTool("explainOption", { nodeId: "FLD.model", option: "Include" }, c1).appliesToThisElement, "explainOption answers");
   assert.ok(runTool("explainMapping", { nodeId: "FLD.model" }, c1).mapsThroughLayers.length > 0, "explainMapping answers");
 });
+
+test("getState reports each layer's build status from the record — the only source for 'is it built'", () => {
+  const none = runTool("getState", {}, { graph, decisions: rec(), implemented: emptyImplemented() }).builds;
+  assert.deepEqual(none, { api: { built: false, verified: false, outOfDate: false }, orchestrator: { built: false, verified: false }, ai: { built: false, verified: false } });
+  const prod = runTool("getState", {}, { graph, decisions: rec(), implemented: { ...IM, orchestrator: { built: true, verified: true } } }).builds;
+  assert.deepEqual(prod.api, { built: true, verified: true, outOfDate: false });
+  assert.deepEqual(prod.orchestrator, { built: true, verified: true });
+  assert.match(TOOL_SPECS.find(t => t.toolSpec.name === "getState").toolSpec.description, /builds/);
+});

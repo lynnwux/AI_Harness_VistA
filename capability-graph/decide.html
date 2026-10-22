@@ -566,6 +566,7 @@ document.getElementById("dlBtn").onclick=()=>{
 };
 document.getElementById("buildBtn").onclick=async ()=>{
   const btn=document.getElementById("buildBtn"); const kill=document.getElementById("killBtn"); const label=btn.textContent;
+  const before=SPECS&&SPECS.stage;   // the stage the build started from — moveOn compares against it
   // every ending refreshes the specs, so the agenda and the buttons show what the build left
   const reset=()=>{ btn.textContent=label; btn.disabled=false; kill.disabled=true; kill.textContent="⏹ Stop"; loadSpecs(); };
   btn.textContent="🔨 Building…"; btn.disabled=true; kill.disabled=false;
@@ -585,7 +586,7 @@ document.getElementById("buildBtn").onclick=async ()=>{
     const poll=async ()=>{
       let s; try{ s=await (await fetch("/api/build/status",{cache:"no-store"})).json(); }catch(e){ setTimeout(poll,3000); return; }
       const tail=(s.log||[]).slice(-8).join("\n");
-      if(s.state==="done"){ upd("<b>✅ Build complete.</b> Opening <a href='/prototype/build/' target='_blank' style='color:var(--accent)'>/prototype/build/</a> in a new tab."+vtbl(s.verification)+bar(s)+pre(tail)); window.open("/prototype/build/?t="+Date.now(),"_blank"); reset(); return; }
+      if(s.state==="done"){ upd("<b>✅ Build complete.</b> Opening <a href='/prototype/build/' target='_blank' style='color:var(--accent)'>/prototype/build/</a> in a new tab."+vtbl(s.verification)+bar(s)+pre(tail)); window.open("/prototype/build/?t="+Date.now(),"_blank"); reset(); moveOn(before); return; }
       if(s.state==="error"){ upd("<b>✗ Build failed:</b> "+esc(s.error||"")+vtbl(s.verification)+bar(s)+pre(tail)); reset(); return; }
       if(s.state==="cancelled"){ upd("<b>⏹ Build cancelled.</b> Environment reset — ready for the next build."+bar(s)+pre(tail)); reset(); return; }
       upd("<b>🔨 Building…</b> "+esc(s.step||s.state||"")+bar(s)+pre(tail));
@@ -596,6 +597,7 @@ document.getElementById("buildBtn").onclick=async ()=>{
 };
 document.getElementById("prodBtn").onclick=async ()=>{
   const btn=document.getElementById("prodBtn"), label="🔨 Build production";
+  const before=SPECS&&SPECS.stage;
   const reset=()=>{ btn.textContent=label; delete btn.dataset.busy; btn.disabled=false; loadSpecs(); };
   btn.textContent="🔨 Building…"; btn.disabled=true; btn.dataset.busy="1";
   const boxEl=document.getElementById("chatMsgs");
@@ -619,7 +621,7 @@ document.getElementById("prodBtn").onclick=async ()=>{
             : "<b>✅ Production running and verified (dry-run).</b> Nothing was filed in VistA and no email was sent; the stubs stayed unwired.")
           + (PORTAL?` <a href="${esc(PORTAL)}" target="_blank" rel="noopener" style="color:var(--accent)">🔗 Open it in IRIS</a>`:"")
           + (b?"<div style='margin-top:6px'>The bulletin it "+(sent?"sent":"composed")+" (to "+esc(b.Recipients)+"):</div>"+pre(b.Subject+"\n\n"+b.Body):"")
-          + pre(log)); reset(); return;
+          + pre(log)); reset(); moveOn(before); return;
       }
       if(s.state==="error"){ upd("<b>✗ Production build failed:</b> "+esc(s.error||"")+pre(log)); reset(); return; }
       upd("<b>🔨 Building the production…</b> "+esc(s.step||s.state||"")+pre(log));
@@ -632,6 +634,7 @@ document.getElementById("irisBtn").onclick=()=>{ if(PORTAL) window.open(PORTAL,"
 document.getElementById("chatAppBtn").onclick=()=>{ if(AI_CHAT_URL) window.open(AI_CHAT_URL,"_blank","noopener"); };
 document.getElementById("aiBtn").onclick=async ()=>{
   const btn=document.getElementById("aiBtn"), label="🔨 Build AI";
+  const before=SPECS&&SPECS.stage;
   const reset=()=>{ btn.textContent=label; delete btn.dataset.busy; btn.disabled=false; loadSpecs(); };
   btn.textContent="🔨 Building…"; btn.disabled=true; btn.dataset.busy="1";
   const boxEl=document.getElementById("chatMsgs");
@@ -657,7 +660,7 @@ document.getElementById("aiBtn").onclick=async ()=>{
         bubble.appendChild(chatA);
         bubble.insertAdjacentHTML("beforeend",pre(log));
         boxEl.scrollTop=boxEl.scrollHeight;
-        renderRight(); reset(); return;
+        renderRight(); reset(); moveOn(before); return;
       }
       if(s.state==="error"){ upd("<b>✗ AI build failed:</b> "+esc(s.error||"")+vtbl(s.verification)+pre(log)); reset(); return; }
       upd("<b>🔨 Building the AI layer…</b> "+esc(s.step||s.state||"")+pre(log));
@@ -688,10 +691,31 @@ async function openPage(){
   document.getElementById("chatMsgs").innerHTML=""; chatHistory=[];
   addMsg("assistant", capabilityOverview());
   for(const m of openingMessages(SPECS)) addMsg("assistant", m);
-  const st=SPECS&&SPECS.stage, layer=st&&st.layer==="ai"?"ai":st&&st.layer==="api"?"api":"orchestrator";
-  const pend=SPECS&&SPECS.layers ? (layer==="ai" ? SPECS.layers.ai.missing : layer==="api" ? [] : SPECS.layers.orchestrator.missing.filter(m=>m.kind==="decide")) : [];
-  const histIntro=layer==="ai"?"Phase 1 (API) and Phase 2 (production) built+verified; working on Phase 3, the AI layer":layer==="api"?"Phase 1 (API) not built; working on Phase 1":"Phase 1 (API) built+verified; working on Phase 2, the orchestrator";
-  chatHistory.push({role:"assistant",text:`[intro: ${histIntro}; stage=${st?st.layer+"/"+st.step:"unknown"}; still to decide: ${pend.map(m=>m.id||m.what).join(", ")||"none"}; approach = show legacy evidence, explain, developer decides]`});
+  chatHistory.push({role:"assistant",text:historyNote(SPECS,"intro")});
+}
+// The note at the head of the chat history that tells the guide which stage the page is on.
+function historyNote(specs, label){
+  const st=specs&&specs.stage, layer=st&&st.layer==="ai"?"ai":st&&st.layer==="api"?"api":"orchestrator";
+  const pend=specs&&specs.layers ? (layer==="ai" ? specs.layers.ai.missing : layer==="api" ? [] : specs.layers.orchestrator.missing.filter(m=>m.kind==="decide")) : [];
+  const where=layer==="ai"?"Phase 1 (API) and Phase 2 (production) built+verified; working on Phase 3, the AI layer":layer==="api"?"Phase 1 (API) not built; working on Phase 1":"Phase 1 (API) built+verified; working on Phase 2, the orchestrator";
+  return `[${label}: ${where}; stage=${st?st.layer+"/"+st.step:"unknown"}; still to decide: ${pend.map(m=>m.id||m.what).join(", ")||"none"}; approach = show legacy evidence, explain, developer decides]`;
+}
+// A build moved the page on when it reached another layer, or finished the AI layer.
+function stageMoved(before, after){
+  if(!after) return false;
+  if(!before) return true;
+  return before.layer!==after.layer || (after.layer==="ai" && after.step==="done" && before.step!=="done");
+}
+// After a successful build: when the stage moved, open the stage's tab, post its opening and note the change in the
+// chat history (the conversation itself is kept). Returns whether the page moved on.
+async function moveOn(before){
+  await loadSpecs();
+  const after=SPECS&&SPECS.stage;
+  if(!stageMoved(before, after)) return false;
+  TAB=defaultTab(SPECS); renderRight();
+  for(const m of openingMessages(SPECS)) addMsg("assistant", m);
+  chatHistory.push({role:"assistant",text:historyNote(SPECS,"stage changed")});
+  return true;
 }
 </script>
 </body>

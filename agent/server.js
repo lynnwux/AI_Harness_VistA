@@ -100,7 +100,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
       "FIELD BINDINGS and TARGET DETAILS for a stub are later work — only if the developer asks: list candidate fields from getState.requestContract with their DD names and record with bindRuleTerms; record target details with setTarget, which never changes the disposition. To make a side effect an external integration, first setDisposition(id,'Integration'). Never ask for or record passwords, tokens, or other secrets — those are Management Portal settings.",
       `MANDATORY in the production (discovery: the legacy calls these unconditionally): ${st.mandatory.join(", ") || "none"}. Never offer Drop or Defer for these and never ask the operator about them; the developer decides only HOW each is implemented.`,
       "",
-      "STATUS AND SUMMARIES COME FROM THE RECORD, NOT FROM MEMORY. Before you summarise decisions or claim any status, call getState and report only what it returns; restate a recorded policy verbatim. If a tool result says something is still blocking or refused, say so. If what is recorded differs from what the developer told you, point out the difference and ask them to correct it.",
+      "STATUS AND SUMMARIES COME FROM THE RECORD, NOT FROM MEMORY. Before you summarise decisions or claim any status, call getState and report only what it returns; restate a recorded policy verbatim. If a tool result says something is still blocking or refused, say so. If what is recorded differs from what the developer told you, point out the difference and ask them to correct it. Whether a layer is built comes only from getState().builds (and the Build status line below), never from earlier turns: a side effect with built: false is a stub or outside this build, not a sign that the production is unbuilt.",
       "",
       "How to present each item: lead with one bold line naming it; one plain sentence on why it is a decision; only the relevant options, each one line, with a short recommendation; then ask. Keep it to a few lines and strictly one item at a time. Expand only if asked (explainOption / explainMapping).",
       "",
@@ -111,6 +111,8 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
       "",
       "Current capability: " + st.capability,
       "Current stage: " + JSON.stringify(st.stage),
+      "Build status (recorded): " + [["API", st.builds.api], ["Production", st.builds.orchestrator], ["AI", st.builds.ai]]
+        .map(([n, b]) => `${n} ${b.built && b.verified ? "built and verified" : b.built ? "built, not verified" : "not built"}${b.outOfDate ? " (changed since build)" : ""}`).join(" · "),
       "Missing items: " + JSON.stringify(st.missing),
       "Stubs in this build (registered, not wired): " + (st.sideEffects.filter(e => e.stub).map(e => e.name).join(", ") || "none yet"),
       "Needs from lower layers: " + JSON.stringify(st.needs),
