@@ -28,7 +28,7 @@ async function buildAngularApp({ workRoot, name, files, removeFiles, baseHref, o
   function run(cmd, args, cwd) {
     return new Promise((resolve, reject) => {
       logger("$ " + cmd + " " + args.join(" ") + (cwd ? "   (in " + path.basename(cwd) + ")" : ""));
-      const p = spawn(cmd, args, { cwd: cwd || workRoot, shell: true, env: process.env });
+      const p = spawn(cmd, args, { cwd: cwd || workRoot, shell: true, env: process.env, windowsHide: true });
       p.stdout.on("data", d => String(d).split(/\r?\n/).forEach(l => l.trim() && logger(l.trim().slice(0, 200))));
       p.stderr.on("data", d => String(d).split(/\r?\n/).forEach(l => l.trim() && logger(l.trim().slice(0, 200))));
       p.on("close", code => code === 0 ? resolve() : reject(new Error(cmd + " exited " + code)));

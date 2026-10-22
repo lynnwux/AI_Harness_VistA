@@ -8,7 +8,7 @@ const path = require("path");
 // Kill the process tree rooted at pid (synchronous). Ignores "not found" / ESRCH errors.
 function killTree(pid, { spawnSyncImpl = spawnSync, platform = process.platform } = {}) {
   try {
-    if (platform === "win32") spawnSyncImpl("taskkill", ["/PID", String(pid), "/T", "/F"]);
+    if (platform === "win32") spawnSyncImpl("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
     else process.kill(-pid, "SIGKILL");
   } catch (_) {}
 }

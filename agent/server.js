@@ -366,7 +366,7 @@ function registerBuildRoutes(app, regenerate, serially, { spawnImpl = spawn, bui
       const g = regenerate();   // the build always reads the latest specs; it ignores any request body
       if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
       fs.writeFileSync(buildStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], url: null, error: null, startedAt: new Date().toISOString() }, null, 2));
-      const proc = buildProc = spawnImpl(process.execPath, [path.join(__dirname, "build-runner.js")], { cwd: __dirname, detached: true, stdio: "ignore" });
+      const proc = buildProc = spawnImpl(process.execPath, [path.join(__dirname, "build-runner.js")], { cwd: __dirname, detached: true, stdio: "ignore", windowsHide: true });
       proc.on("error", e => { if (buildProc === proc) buildProc = null; failSpawn(buildStatus, "the build", e); });
       proc.on("exit", (code) => {
         if (buildProc === proc) buildProc = null;

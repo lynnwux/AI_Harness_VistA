@@ -42,7 +42,7 @@ function failureText(r, secrets = []) {
 // Live-confirmed 2026-10-20: successful halt → exit 0; missing container → exit 1, stderr "No such container".
 // secrets: values the script carries (passwords, tokens) — redacted from the thrown message before it is cut.
 function irisSession(container, script, { secrets = [], spawnSyncImpl = spawnSync } = {}) {
-  const r = spawnSyncImpl("docker", ["exec", "-i", container, "iris", "session", "IRIS"], { input: script, encoding: "utf8", timeout: 180000 });
+  const r = spawnSyncImpl("docker", ["exec", "-i", container, "iris", "session", "IRIS"], { input: script, encoding: "utf8", timeout: 180000, windowsHide: true });
   if (r.error) throw new Error(redact(`could not run docker: ${r.error.message}`, secrets));
   if (r.status !== 0) throw new Error(`iris session failed (exit ${r.status}): ${failureText(r, secrets)}`);
   return r.stdout || "";
@@ -55,7 +55,7 @@ function irisScript(env, server, configFile, { secrets = [], spawnSyncImpl = spa
   const scripts = (env.INTERCLAW_SCRIPTS || "").trim();
   const hide = [env.IRIS_PASSWORD, ...secrets];
   return (method, p, extra = []) => {
-    const r = spawnSyncImpl("python", [path.join(scripts, "lib", "iris.py"), "--server", server, "--config", configFile, method, p, ...extra], { env, encoding: "utf8", timeout: 180000 });
+    const r = spawnSyncImpl("python", [path.join(scripts, "lib", "iris.py"), "--server", server, "--config", configFile, method, p, ...extra], { env, encoding: "utf8", timeout: 180000, windowsHide: true });
     if (r.error) throw new Error(redact(`could not run the interclaw script: ${r.error.message}`, hide));
     if (r.status !== 0) throw new Error(`${method} ${p} failed: ${failureText(r, hide)}`);
     try { return JSON.parse(r.stdout); } catch (e) { return r.stdout; }

@@ -266,7 +266,7 @@ const ALL_KEPT = {
 // A server whose builds are fake processes: nothing is spawned, and every file it writes or removes is a temp file.
 async function buildSetup({ apiBuilt = true, orchestratorVerified = true, aiQuestions = undefined, agentCalls = [], killTreeImpl = () => {}, inventory = INVENTORY, vademoFetch, localTeardownImpl } = {}) {
   const procs = [];
-  const spawnImpl = (_cmd, args) => { const p = new EventEmitter(); p.args = args; p.pid = 1000 + procs.length; p.unref = () => {}; procs.push(p); return p; };
+  const spawnImpl = (_cmd, args, opts) => { const p = new EventEmitter(); p.args = args; p.opts = opts; p.pid = 1000 + procs.length; p.unref = () => {}; procs.push(p); return p; };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-b-"));
   const paths = { graph: path.join(dir, "graph.json"), decisions: path.join(dir, "decisions.json"), implemented: path.join(dir, "implemented.json"), inventory, specsDir: path.join(dir, "specs") };
   fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), paths.graph);
@@ -335,6 +335,19 @@ test("the API build route uses the injected spawn and status file, and regenerat
     const s = await (await fetch(t.base + "/api/specs")).json();
     assert.equal(s.stage.layer, "orchestrator");
   } finally { await t.done(); }
+});
+
+test("the API build spawn options include windowsHide: true", async () => {
+  const t = await buildSetup({ apiBuilt: false, orchestratorVerified: false });
+  try {
+    await post(t, "/api/build");
+    assert.strictEqual(t.procs[0].opts && t.procs[0].opts.windowsHide, true, "spawn opts.windowsHide must be true");
+  } finally { await t.done(); }
+});
+
+test("angular-build.js spawns with windowsHide: true (static check)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "angular-build.js"), "utf8");
+  assert.match(src, /windowsHide\s*:\s*true/, "angular-build.js must set windowsHide: true in spawn options");
 });
 
 test("POST /api/build/ai is refused (409) until the orchestrator is built and verified — the spec's offer rule", async () => {
