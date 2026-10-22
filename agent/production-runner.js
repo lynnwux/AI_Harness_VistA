@@ -104,7 +104,7 @@ function sessionScript(namespace, smtp = null) {
   const prod = `${PKG}.Production`, dispatch = `${PKG}.REST.Dispatch`;
   return [
     `zn "%SYS"`,
-    `if '##class(Security.Applications).Exists("${WEB_APP}") { set p("NameSpace")="${namespace}",p("DispatchClass")="${dispatch}",p("AutheEnabled")=32,p("Enabled")=1 set sc=##class(Security.Applications).Create("${WEB_APP}",.p) write "WEBAPP:",$select(sc=1:"created",1:$system.Status.GetErrorText(sc)),! } else { write "WEBAPP:exists",! }`,
+    `if '##class(Security.Applications).Exists("${WEB_APP}") { set p("NameSpace")="${namespace}",p("DispatchClass")="${dispatch}",p("AutheEnabled")=32,p("Enabled")=1 set sc=##class(Security.Applications).Create("${WEB_APP}",.p) write "WEBAPP:",$select(sc=1:"created",1:$system.Status.GetErrorText(sc)),! } else { set p("NameSpace")="${namespace}",p("DispatchClass")="${dispatch}",p("AutheEnabled")=32,p("Enabled")=1 set sc=##class(Security.Applications).Modify("${WEB_APP}",.p) if sc=1 { write "WEBAPP:updated",! } else { write "WEBAPP:ERROR ",$system.Status.GetErrorText(sc),! } }`,
     `zn "${namespace}"`,
     `set sc=##class(Ens.Director).StopProduction(10,1)`,
     bulletinSettingsScript(namespace, smtp),
@@ -230,4 +230,4 @@ async function main(paths = DEFAULT_PATHS) {
 
 if (require.main === module) main();
 
-module.exports = { readSpecs, serverEntry, samplePayload, judge, sessionScript, portalUrl, docPath, smtpSettings, bulletinSettingsScript, findDelivered, STATUS_FILE };
+module.exports = { readSpecs, serverEntry, samplePayload, judge, sessionScript, portalUrl, docPath, smtpSettings, bulletinSettingsScript, findDelivered, STATUS_FILE, CREDENTIAL_ID };

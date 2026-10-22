@@ -101,7 +101,7 @@ function aiSettingsScript(env) {
 
   return [
     `zn "%SYS"`,
-    `if '##class(Security.Applications).Exists(${osq(WEB_APP)}) { set p("NameSpace")=${osq(ns)},p("DispatchClass")=${osq(dispatch)},p("AutheEnabled")=32,p("Enabled")=1 set sc=##class(Security.Applications).Create(${osq(WEB_APP)},.p) write "WEBAPP:",$select(sc=1:"created",1:$system.Status.GetErrorText(sc)),! } else { write "WEBAPP:exists",! }`,
+    `if '##class(Security.Applications).Exists(${osq(WEB_APP)}) { set p("NameSpace")=${osq(ns)},p("DispatchClass")=${osq(dispatch)},p("AutheEnabled")=32,p("Enabled")=1 set sc=##class(Security.Applications).Create(${osq(WEB_APP)},.p) write "WEBAPP:",$select(sc=1:"created",1:$system.Status.GetErrorText(sc)),! } else { set p("NameSpace")=${osq(ns)},p("DispatchClass")=${osq(dispatch)},p("AutheEnabled")=32,p("Enabled")=1 set sc=##class(Security.Applications).Modify(${osq(WEB_APP)},.p) if sc=1 { write "WEBAPP:updated",! } else { write "WEBAPP:ERROR ",$system.Status.GetErrorText(sc),! } }`,
     `zn ${osq(ns)}`,
     `set ^${PKG}.Config("vademoServer")=${osq(vademoServer)}`,
     `set ^${PKG}.Config("vademoPort")=${osq(vademoPort)}`,
@@ -316,8 +316,8 @@ function checkSettingsMarkers(irisOut) {
   const said = k => ((irisOut || "").match(new RegExp(`^${k}:(.*)$`, "m")) || [])[1];
   const problems = [];
   const webapp = said("WEBAPP");
-  if (webapp !== "created" && webapp !== "exists")
-    problems.push(`WEBAPP: expected "created" or "exists", got "${webapp || "(missing)"}"`);
+  if (webapp !== "created" && webapp !== "updated" && webapp !== "exists")
+    problems.push(`WEBAPP: expected "created", "updated", or "exists", got "${webapp || "(missing)"}"`);
   const config = said("CONFIG");
   if (config !== "set")
     problems.push(`CONFIG: expected "set", got "${config || "(missing)"}"`);
