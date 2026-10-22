@@ -52,3 +52,34 @@ test("a copy never holds a secret: a meta value that looks like a credential is 
     assert.throws(() => saveKnownGood("ai", { dirs: { classes: src }, meta: { note: "password=hunter2" } }, root), /credential/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(src, { recursive: true, force: true }); }
 });
+
+test("a rename that throws EPERM twice then succeeds saves the copy (transient Windows lock)", () => {
+  const root = tmp(), src = files(tmp(), { "a.cls": "v1" });
+  let calls = 0;
+  const _rename = (from, to) => { if (++calls <= 2) throw Object.assign(new Error("EPERM"), { code: "EPERM" }); fs.renameSync(from, to); };
+  try {
+    saveKnownGood("ai", { dirs: { classes: src }, _rename }, root);
+    assert.equal(fs.readFileSync(path.join(readKnownGood("ai", root).dirs.classes, "a.cls"), "utf8"), "v1");
+    assert.ok(calls >= 3, `_rename must have been called at least 3 times, got ${calls}`);
+  } finally { for (const d of [root, src]) fs.rmSync(d, { recursive: true, force: true }); }
+});
+
+test("a rename that always throws EPERM exhausts retries and the previous good copy is still readable", () => {
+  const root = tmp(), v1 = files(tmp(), { "a.cls": "v1" }), v2 = files(tmp(), { "a.cls": "v2" });
+  try {
+    saveKnownGood("ai", { dirs: { classes: v1 } }, root);
+    const _rename = () => { throw Object.assign(new Error("EPERM"), { code: "EPERM" }); };
+    assert.throws(() => saveKnownGood("ai", { dirs: { classes: v2 }, _rename }, root));
+    assert.equal(fs.readFileSync(path.join(readKnownGood("ai", root).dirs.classes, "a.cls"), "utf8"), "v1");
+  } finally { for (const d of [root, v1, v2]) fs.rmSync(d, { recursive: true, force: true }); }
+});
+
+test("a non-retryable rename error (ENOENT) is thrown at once without retrying", () => {
+  const root = tmp(), src = files(tmp(), { "a.cls": "v1" });
+  let calls = 0;
+  const _rename = () => { calls++; throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
+  try {
+    assert.throws(() => saveKnownGood("ai", { dirs: { classes: src }, _rename }, root), /ENOENT/);
+    assert.equal(calls, 1);
+  } finally { for (const d of [root, src]) fs.rmSync(d, { recursive: true, force: true }); }
+});
