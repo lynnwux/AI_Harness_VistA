@@ -63,8 +63,25 @@ Logins and hosts always come from `agent/.env`; copies hold no credentials. The 
 
 ## Demo reset
 
-The small **↺** icon in the Decide page's top bar (tooltip: Demo reset) starts the page over — only after you type `reset` to confirm: every decision in
-`agent/decisions.json` goes back to the defaults — a copy is kept as `agent/decisions.backup-<time>.json` — and
-`implemented.json` marks the production and the AI layer not built, so the stage starts again at the first decision.
-What is deployed keeps running (the entry form, the IRIS production, the AI chatbot), the Phase 1 services stay, and
-"restore last good" still works. Refused while a build or restore is running. Route: `POST /api/demo/reset`.
+The small **↺** icon in the Decide page's top bar (tooltip: Demo reset) tears every phase down — only after you
+type `reset` to confirm — so the page opens in Phase 1 with nothing built:
+
+- **stopped first:** a running build, production build, AI build, restore or earlier reset teardown is killed
+  (its whole process tree) and marked cancelled;
+- **VADEMO:** the REST service — web app `/Harness/Equipment` and classes `Harness.Equipment.REST`,
+  `Harness.Equipment6914.API` (and the old `Harness.EquipmentAPI`); `Harness.Setup` stays;
+- **IRIS:** the production `EquipmentEntry.Production` (stopped only if it is the one running) with its messages,
+  event log and settings, the AI layer (`EquipmentAI.*`, its config and stored conversations), both web apps and the
+  three credentials;
+- **here:** the published apps (`prototype/build/`, `prototype/chat/`), the build logs (`*-status.json`), the build
+  workspaces (`agent/_build/*`, `agent/_production/*`, `%TEMP%/eqchat-*`), half-swapped known-good debris
+  (`_known-good/<layer>.new-*`, `.old-*`), `decisions.json.tmp` and `interclaw-servers.json`;
+- **decisions** go back to the defaults — the old record is kept as `agent/decisions.backup-<time>.json` (the newest
+  5 backups are kept) — and `implemented.json` says nothing is built.
+
+Kept: the known-good copies (`agent/_known-good/<layer>/`, so "restore last good" still works), the decisions
+backups and the 6914 test records. The local part finishes before `POST /api/demo/reset` answers; the VADEMO and
+IRIS part runs as a job (`teardown-runner.js`) — progress at `GET /api/demo/reset/status` (status file
+`agent/teardown-status.json`), one result per item. It ends `done` only if every item was removed or already absent,
+otherwise `error` naming each item it could not remove; either way the next 🔨 Build deploys over whatever is left.
+Builds and restore wait until the teardown finishes.

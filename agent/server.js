@@ -1,6 +1,7 @@
 "use strict";
 const express = require("express");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 const { runAgent } = require("./lib/bedrock");
@@ -9,6 +10,8 @@ const { defaultDecisions, getState, findNode, label } = require("./lib/tools");
 const { loadRecord, saveRecord, diffRecords, normalize } = require("./lib/record");
 const { DEFAULT_PATHS, generate, writeSpecs, stage } = require("./lib/specs");
 const { emptyImplemented } = require("./lib/implemented");
+const { localTeardown } = require("./lib/teardown");
+const { KNOWN_GOOD_ROOT } = require("./lib/known-good");
 const { groundedTurn } = require("./lib/grounding");
 const { TEMPLATES } = require("./lib/ai-templates");
 
@@ -16,8 +19,10 @@ const ROOT = path.join(__dirname, "..");                 // repo root (serves ca
 const PORT = process.env.PORT || 8899;
 const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return fallback; } };
 
-// spawnImpl, statusFiles and killTreeImpl let tests run the build routes without starting a runner or touching agent/ files.
-function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl = spawn, statusFiles = {}, killTreeImpl = killTree } = {}) {
+// spawnImpl, statusFiles and killTreeImpl let tests run the build routes without starting a runner or touching agent/ files;
+// agentDir, repoRoot, knownGoodRoot and tmpDir are where the demo reset removes leftovers; vademoFetch serves the lookups.
+function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl = spawn, statusFiles = {}, killTreeImpl = killTree,
+                     agentDir = __dirname, repoRoot = ROOT, knownGoodRoot = KNOWN_GOOD_ROOT, tmpDir = os.tmpdir(), vademoFetch = fetch } = {}) {
   let graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
   let inventory = readJson(paths.inventory || DEFAULT_PATHS.inventory, null);     // re-read in regenerate()
   let notice = null;
@@ -159,28 +164,40 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     res.json({ reply: out.reply, toolTrace: out.toolTrace, recorded, grounding: out.grounding, evidence: out.evidence, specsError: g.error || null });
   }).catch(e => { if (!res.headersSent) res.status(500).json({ error: String(e.message || e) }); }));
 
-  registerVistaRoutes(app);
-  registerBuildRoutes(app, regenerate, serially, { spawnImpl, buildStatus: statusFiles.build || STATUS_FILE, killTreeImpl });
-  const runners = { spawnImpl, productionStatus: statusFiles.production || PRODUCTION_STATUS, aiStatus: statusFiles.ai || AI_STATUS_FILE, restoreStatus: statusFiles.restore || RESTORE_STATUS, killTreeImpl };
-  // Demo reset: the Decide page starts over — every decision back to the defaults, the production and AI build
-  // status back to not built. What is deployed keeps running; the Phase 1 services and the known-good copies stay.
+  const vista = registerVistaRoutes(app, { fetchImpl: vademoFetch });
+  const runners = { spawnImpl, buildStatus: statusFiles.build || STATUS_FILE, productionStatus: statusFiles.production || PRODUCTION_STATUS, aiStatus: statusFiles.ai || AI_STATUS_FILE,
+                    restoreStatus: statusFiles.restore || RESTORE_STATUS, teardownStatus: statusFiles.teardown || TEARDOWN_STATUS, killTreeImpl };
+  registerBuildRoutes(app, regenerate, serially, runners);
+  // Demo reset: a clean teardown of every phase. Running builds are stopped first; the local leftovers go now, and
+  // the VADEMO and IRIS teardown runs as a job the page follows. Only the known-good copies, the decisions
+  // backups and the 6914 records stay.
   app.post("/api/demo/reset", (_req, res) => serially(() => {
-    if (buildProc || productionProc || aiProc || restoreProc) return res.status(409).json({ ok: false, error: "a build or restore is running — wait for it to finish, then reset" });
+    // kill each run's process tree first, then mark it cancelled, so no runner writes after the teardown
+    const running = [[buildProc, runners.buildStatus], [productionProc, runners.productionStatus], [aiProc, runners.aiStatus],
+                     [restoreProc, runners.restoreStatus, ["restoring", "starting"]], [teardownProc, runners.teardownStatus, ["tearing down", "starting"]]];
+    for (const [proc, file, live] of running) if (proc) { killTreeImpl(proc.pid); markCancelled(file, live); }
     const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
     const backup = `decisions.backup-${stamp}.json`;
     if (fs.existsSync(paths.decisions)) fs.copyFileSync(paths.decisions, path.join(path.dirname(paths.decisions), backup));
     restore(normalize(defaultDecisions(graph)));
     saveRecord(paths.decisions, state.record);
-    const im = implemented();
-    im.orchestrator = { built: false, verified: false };
-    im.ai = { built: false, verified: false };
-    fs.writeFileSync(paths.implemented, JSON.stringify(im, null, 2) + "\n");
-    // the last production, AI and restore runs are build logs the page reads — a fresh start shows none of them
-    for (const f of [runners.productionStatus, runners.aiStatus, runners.restoreStatus]) fs.rmSync(f, { force: true });
-    const g = regenerate();
-    if (g.error) return res.status(500).json({ ok: false, error: "spec generation failed: " + g.error, backup });
-    res.json({ ok: true, backup });
-  }));
+    fs.writeFileSync(paths.implemented, JSON.stringify(emptyImplemented(), null, 2) + "\n");
+    const local = localTeardown({ agentDir, repoRoot, knownGoodRoot, tmpDir, decisionsFile: paths.decisions,
+      statusFiles: { build: runners.buildStatus, production: runners.productionStatus, ai: runners.aiStatus, restore: runners.restoreStatus, teardown: runners.teardownStatus } });
+    vista.clearCache();
+    const g = regenerate();   // re-reads the inventory too
+    fs.writeFileSync(runners.teardownStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], results: [], error: null, startedAt: new Date().toISOString() }, null, 2));
+    const proc = teardownProc = spawnImpl(process.execPath, [path.join(__dirname, "teardown-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
+    // a teardown killed by the next reset must not touch the status file the new one owns
+    proc.on("exit", code => { if (teardownProc === proc) { teardownProc = null; reconcileExit(runners.teardownStatus, "the demo reset teardown", code); } });
+    const teardown = { started: true, statusUrl: "/api/demo/reset/status" };
+    if (g.error) return res.status(500).json({ ok: false, error: "spec generation failed: " + g.error, backup, local, teardown });
+    res.json({ ok: true, backup, local, teardown });
+  }).catch(e => { if (!res.headersSent) res.status(500).json({ ok: false, error: String(e.message || e) }); }));
+  app.get("/api/demo/reset/status", (_req, res) => {
+    try { res.json(JSON.parse(fs.readFileSync(runners.teardownStatus, "utf8"))); }
+    catch (e) { res.json({ state: "idle", step: "", log: [], results: [] }); }
+  });
   app.get("/api/restore/status", (_req, res) => {
     try { res.json(JSON.parse(fs.readFileSync(runners.restoreStatus, "utf8"))); }
     catch (e) { res.json({ state: "idle", step: "", log: [], results: [] }); }
@@ -199,7 +216,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
   // Reconcile any status files left in a live state by the previous server process.
   // watchParent kills runners with taskkill /F so they cannot write a final state themselves.
   const RESTART_ERR = "the workbench server restarted while this was running";
-  for (const f of [statusFiles.build || STATUS_FILE, statusFiles.production || PRODUCTION_STATUS, statusFiles.ai || AI_STATUS_FILE, statusFiles.restore || RESTORE_STATUS]) {
+  for (const f of [runners.buildStatus, runners.productionStatus, runners.aiStatus, runners.restoreStatus, runners.teardownStatus]) {
     try {
       const s = JSON.parse(fs.readFileSync(f, "utf8"));
       if (s.state !== "done" && s.state !== "error" && s.state !== "cancelled") {
@@ -214,7 +231,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
   return { app, state, regenerate, systemPrompt };
 }
 
-function registerVistaRoutes(app) {
+function registerVistaRoutes(app, { fetchImpl = fetch } = {}) {
   // ── Dev proxy to the real Harness REST data service on VADEMO ────────────────
   // The backend is Harness.Equipment.REST (fileman2class CRUD → ^ENG(6914)).
   // Browser → this node dev-server (same origin) → VADEMO REST with basic auth,
@@ -231,25 +248,25 @@ function registerVistaRoutes(app) {
   const VADEMO_TIMEOUT = 30000;
   app.get("/equipment/next-ien", async (_req, res) => {
     try {
-      const r = await fetch(vademo(HARNESS + "/NextIEN"), { headers: { Authorization: VAUTH }, signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
+      const r = await fetchImpl(vademo(HARNESS + "/NextIEN"), { headers: { Authorization: VAUTH }, signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
       res.json(await r.json());
     } catch (e) { res.status(502).json({ status: "error", message: String(e.message || e) }); }
   });
   app.post("/equipment", async (req, res) => {
     try {
-      const r = await fetch(vademo(HARNESS + "/Equipment6914"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: VAUTH }, body: JSON.stringify(req.body || {}), signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
+      const r = await fetchImpl(vademo(HARNESS + "/Equipment6914"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: VAUTH }, body: JSON.stringify(req.body || {}), signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
       res.status(r.status).json(await r.json());
     } catch (e) { res.status(502).json({ status: "ERROR", error: String(e.message || e) }); }
   });
   app.get("/equipment/:ien", async (req, res) => {
     try {
-      const r = await fetch(vademo(HARNESS + "/Equipment6914/" + encodeURIComponent(req.params.ien)), { headers: { Authorization: VAUTH }, signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
+      const r = await fetchImpl(vademo(HARNESS + "/Equipment6914/" + encodeURIComponent(req.params.ien)), { headers: { Authorization: VAUTH }, signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
       res.status(r.status).json(await r.json());
     } catch (e) { res.status(502).json({ status: "error", message: String(e.message || e) }); }
   });
   app.delete("/equipment/:ien", async (req, res) => {
     try {
-      const r = await fetch(vademo(HARNESS + "/Equipment6914/" + encodeURIComponent(req.params.ien)), { method: "DELETE", headers: { Authorization: VAUTH }, signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
+      const r = await fetchImpl(vademo(HARNESS + "/Equipment6914/" + encodeURIComponent(req.params.ien)), { method: "DELETE", headers: { Authorization: VAUTH }, signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
       res.status(r.status).json(await r.json());
     } catch (e) { res.status(502).json({ status: "error", message: String(e.message || e) }); }
   });
@@ -280,7 +297,7 @@ function registerVistaRoutes(app) {
   };
   const listCache = {};
   async function atelierQuery(sql) {
-    const r = await fetch(vademo(ATELIER_QUERY), { method: "POST", headers: { "Content-Type": "application/json", Authorization: VAUTH }, body: JSON.stringify({ query: sql }), signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
+    const r = await fetchImpl(vademo(ATELIER_QUERY), { method: "POST", headers: { "Content-Type": "application/json", Authorization: VAUTH }, body: JSON.stringify({ query: sql }), signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
     const j = await r.json();
     if (j.status && j.status.errors && j.status.errors.length) throw new Error(j.status.errors[0].error);
     return (j.result && j.result.content) || [];
@@ -314,6 +331,7 @@ function registerVistaRoutes(app) {
     if (!all) out = out.slice(0, 25);
     res.json({ items: out, total });
   });
+  return { clearCache: () => { for (const k of Object.keys(listCache)) delete listCache[k]; } };
 }
 
 // ── Build: run the REAL naive build as an async job (scaffold + npm install +
@@ -326,11 +344,13 @@ let buildProc = null;
 // Gate texts used by production and AI routes.
 const PHASE2_CLOSED = "Phase 2 opens after the Phase 1 build — press 🔨 Build on the API tab first";
 const API_OUT_OF_DATE = "the API layer changed since it was built — press 🔨 Build on the API tab to rebuild Phase 1 first";
+const TEARING_DOWN = "the demo reset is still tearing down — wait for it to finish";
 
 function registerBuildRoutes(app, regenerate, serially, { spawnImpl = spawn, buildStatus = STATUS_FILE, killTreeImpl = killTree } = {}) {
   // queued behind any chat turn in flight, so the build reads the record that turn saved
   app.post("/api/build", (_req, res) => serially(() => {
     try {
+      if (teardownProc) return res.status(409).json({ started: false, error: TEARING_DOWN });
       if (buildProc) return res.json({ started: false, running: true, note: "a build is already running" });
       if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build" });
       const g = regenerate();   // the build always reads the latest specs; it ignores any request body
@@ -394,6 +414,7 @@ function reconcileExit(statusFile, what, code) {
 
 function registerProductionRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl = spawn, productionStatus = PRODUCTION_STATUS, killTreeImpl = killTree } = {}) {
   app.post("/api/build/production", (_req, res) => serially(() => {
+    if (teardownProc) return res.status(409).json({ started: false, error: TEARING_DOWN });
     if (productionProc) return res.json({ started: false, running: true, note: "a production build is already running" });
     if (aiProc) return res.status(409).json({ started: false, error: "the AI build is running — wait for it to finish, then build the production" });
     if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build the production" });
@@ -429,8 +450,11 @@ const { STATUS_FILE: AI_STATUS_FILE } = require("./ai-runner");
 const { STATUS_FILE: RESTORE_STATUS } = require("./restore-runner");
 const RESTORE_COMMAND = /^\s*restore last good\s*[.!]?\s*$/i;
 let restoreProc = null;
+const { STATUS_FILE: TEARDOWN_STATUS } = require("./teardown-runner");
+let teardownProc = null;   // the demo reset's VADEMO + IRIS teardown
 // "restore last good": one job that puts back the known-good copy of each deliverable (restore-runner.js).
 function startRestore({ spawnImpl = spawn, restoreStatus = RESTORE_STATUS } = {}) {
+  if (teardownProc) return { reply: "The demo reset is still tearing down — wait for it to finish, then say \"restore last good\" again.", restore: { started: false } };
   if (restoreProc) return { reply: "A restore is already running — its progress is shown below.", restore: { started: false, running: true, statusUrl: "/api/restore/status" } };
   if (buildProc || productionProc || aiProc) return { reply: "A build is running — wait for it to finish, then say \"restore last good\" again.", restore: { started: false } };
   fs.writeFileSync(restoreStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], results: [], error: null, startedAt: new Date().toISOString() }, null, 2));
@@ -440,6 +464,7 @@ function startRestore({ spawnImpl = spawn, restoreStatus = RESTORE_STATUS } = {}
 }
 function registerAiRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl = spawn, aiStatus = AI_STATUS_FILE, killTreeImpl = killTree } = {}) {
   app.post("/api/build/ai", (_req, res) => serially(() => {
+    if (teardownProc) return res.status(409).json({ started: false, error: TEARING_DOWN });
     if (aiProc) return res.json({ started: false, running: true, note: "an AI build is already running" });
     if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build the AI layer" });
     if (productionProc) return res.status(409).json({ started: false, error: "the production build is running — wait for it to finish, then build the AI layer" });

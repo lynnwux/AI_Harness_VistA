@@ -1,7 +1,10 @@
 "use strict";
-// Generates the IRIS teardown script (removes only the harness's own fixed names) and
-// parses its stdout into per-item outcomes.  Task 9 adds localTeardown() to this file.
-
+// Generates the IRIS teardown script (removes only the harness's own fixed names), parses its stdout into
+// per-item outcomes, and removes what a cycle leaves behind locally (localTeardown).
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { LAYERS } = require("./known-good");
 const { PKG: PROD_PKG, WEB_APP: PROD_APP } = require("./production");
 const { PKG: AI_PKG, WEB_APP: AI_APP, CREDENTIALS } = require("./ai-hub");
 
@@ -73,4 +76,38 @@ function parseIrisTeardown(stdout) {
   return items.map(item => ({ item, outcome: outcome(said(item)) }));
 }
 
-module.exports = { irisTeardownScript, parseIrisTeardown };
+// Remove one fixed path; never throws. lstat, so a dangling link still counts as present.
+function removePath(p, item) {
+  try { fs.lstatSync(p); } catch (_) { return { item, outcome: "absent" }; }
+  try { fs.rmSync(p, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); return { item, outcome: "removed" }; }
+  catch (e) { return { item, outcome: "failed: " + (e.message || e) }; }
+}
+// Remove the entries of dir (not dir itself) whose name passes `match`; one "absent" item when there are none.
+function removeEntries(dir, label, match, pattern) {
+  let names = [];
+  try { names = fs.readdirSync(dir).filter(match).sort(); } catch (e) { if (e.code !== "ENOENT") return [{ item: `${label}/${pattern}`, outcome: "failed: " + (e.message || e) }]; }
+  return names.length ? names.map(n => removePath(path.join(dir, n), `${label}/${n}`)) : [{ item: `${label}/${pattern}`, outcome: "absent" }];
+}
+
+// The local half of a demo reset: removes only fixed paths and fixed name patterns — never a known-good copy,
+// never decisions.json or a decisions.corrupt-* file. Each item is attempted; never throws.
+function localTeardown({ agentDir, repoRoot, knownGoodRoot, statusFiles = {}, decisionsFile, tmpDir = os.tmpdir(), keepBackups = 5 }) {
+  const debris = new RegExp(`^(${LAYERS.join("|")})\\.(new|old)-.+$`);   // half-swapped copies, never <layer> itself
+  const backupDir = path.dirname(decisionsFile);
+  const backups = (() => { try { return fs.readdirSync(backupDir).filter(n => /^decisions\.backup-.+\.json$/.test(n)).sort(); } catch (_) { return []; } })();
+  const prune = backups.slice(0, Math.max(0, backups.length - keepBackups));
+  return [
+    removePath(path.join(repoRoot, "prototype", "build"), "prototype/build"),
+    removePath(path.join(repoRoot, "prototype", "chat"), "prototype/chat"),
+    ...Object.values(statusFiles).map(f => removePath(f, path.basename(f))),
+    ...removeEntries(path.join(agentDir, "_build"), "_build", () => true, "*"),
+    ...removeEntries(path.join(agentDir, "_production"), "_production", () => true, "*"),
+    ...removeEntries(knownGoodRoot, path.basename(knownGoodRoot), n => debris.test(n), "<layer>.new-*, <layer>.old-*"),
+    ...removeEntries(tmpDir, "%TEMP%", n => n.startsWith("eqchat-"), "eqchat-*"),
+    removePath(path.join(agentDir, "decisions.json.tmp"), "decisions.json.tmp"),
+    removePath(path.join(agentDir, "interclaw-servers.json"), "interclaw-servers.json"),
+    ...(prune.length ? prune.map(n => removePath(path.join(backupDir, n), n)) : [{ item: `decisions backups beyond the newest ${keepBackups}`, outcome: "absent" }]),
+  ];
+}
+
+module.exports = { irisTeardownScript, parseIrisTeardown, localTeardown };

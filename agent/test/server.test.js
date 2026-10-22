@@ -7,7 +7,7 @@ const path = require("path");
 const { createApp } = require("../server");
 const { runTool } = require("../lib/tools");
 const { inputHashes, loadInputs } = require("../lib/specs");
-const { builtApi, emptyImplemented, apiServices } = require("../lib/implemented");
+const { builtApi, emptyImplemented } = require("../lib/implemented");
 const { IM } = require("./helpers");
 
 function setup(fakeAgent, prepare) {
@@ -263,17 +263,19 @@ const ALL_KEPT = {
   "AIQ.CapitalPlanningTotals":  { keep: true, wording: "Totals?",     params: { useStatuses: ["ALL"], valueColumns: ["TOTAL_ASSET_VALUE"], groupBy: "none" } },
 };
 
-// A server whose builds are fake processes: nothing is spawned, and the status files are temp files.
-async function buildSetup({ apiBuilt = true, orchestratorVerified = true, aiQuestions = undefined, agentCalls = [], killTreeImpl = () => {}, inventory = INVENTORY } = {}) {
+// A server whose builds are fake processes: nothing is spawned, and every file it writes or removes is a temp file.
+async function buildSetup({ apiBuilt = true, orchestratorVerified = true, aiQuestions = undefined, agentCalls = [], killTreeImpl = () => {}, inventory = INVENTORY, vademoFetch } = {}) {
   const procs = [];
-  const spawnImpl = (_cmd, args) => { const p = new EventEmitter(); p.args = args; p.pid = 0; p.unref = () => {}; procs.push(p); return p; };
+  const spawnImpl = (_cmd, args) => { const p = new EventEmitter(); p.args = args; p.pid = 1000 + procs.length; p.unref = () => {}; procs.push(p); return p; };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-b-"));
   const paths = { graph: path.join(dir, "graph.json"), decisions: path.join(dir, "decisions.json"), implemented: path.join(dir, "implemented.json"), inventory, specsDir: path.join(dir, "specs") };
   fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), paths.graph);
   fs.writeFileSync(paths.decisions, JSON.stringify(aiQuestions ? { ...MIN_DEC, aiQuestions } : MIN_DEC));
   fs.writeFileSync(paths.implemented, JSON.stringify({ api: apiBuilt ? builtApi() : emptyImplemented().api, orchestrator: { built: orchestratorVerified, verified: orchestratorVerified } }));
-  const statusFiles = { build: path.join(dir, "build-status.json"), production: path.join(dir, "production-status.json"), ai: path.join(dir, "ai-status.json"), restore: path.join(dir, "restore-status.json") };
-  const made = createApp({ paths, runAgentImpl: async m => { agentCalls.push(m); return { reply: "ok", toolTrace: [] }; }, spawnImpl, statusFiles, killTreeImpl });
+  const statusFiles = { build: path.join(dir, "build-status.json"), production: path.join(dir, "production-status.json"), ai: path.join(dir, "ai-status.json"), restore: path.join(dir, "restore-status.json"), teardown: path.join(dir, "teardown-status.json") };
+  // the reset's local teardown works only inside dir
+  const roots = { agentDir: path.join(dir, "agent"), repoRoot: path.join(dir, "repo"), knownGoodRoot: path.join(dir, "agent", "_known-good"), tmpDir: path.join(dir, "tmp") };
+  const made = createApp({ paths, runAgentImpl: async m => { agentCalls.push(m); return { reply: "ok", toolTrace: [] }; }, spawnImpl, statusFiles, killTreeImpl, ...roots, ...(vademoFetch ? { vademoFetch } : {}) });
   const t = await new Promise(resolve => {
     const srv = made.app.listen(0, "127.0.0.1", () => resolve({ ...made, srv, paths, dir, base: `http://127.0.0.1:${srv.address().port}` }));
   });
@@ -483,10 +485,15 @@ test("only the exact command restores: a sentence that merely mentions it goes t
   } finally { await t.done(); }
 });
 
-test("demo reset: every decision back to the defaults, production and AI build status back to not built, a backup kept", async () => {
+const LIVE = ["starting", "building", "restoring", "tearing down"];
+const liveStatus = f => { try { return LIVE.includes(JSON.parse(fs.readFileSync(f, "utf8")).state); } catch (_) { return false; } };
+const BUILD_STATUS = t => [t.statusFiles.build, t.statusFiles.production, t.statusFiles.ai, t.statusFiles.restore];
+
+test("reset: nothing built anywhere, the page opens in Phase 1", async () => {
   const t = await buildSetup({ aiQuestions: ALL_KEPT });
   try {
     const before = fs.readFileSync(t.paths.decisions, "utf8");
+    for (const f of BUILD_STATUS(t)) fs.writeFileSync(f, JSON.stringify({ state: "done" }));
     const r = await (await post(t, "/api/demo/reset")).json();
     assert.equal(r.ok, true, JSON.stringify(r));
     // the record is the defaults: nothing decided
@@ -497,35 +504,80 @@ test("demo reset: every decision back to the defaults, production and AI build s
     // the old record is kept beside it
     assert.ok(r.backup && fs.existsSync(path.join(path.dirname(t.paths.decisions), r.backup)), r.backup);
     assert.equal(fs.readFileSync(path.join(path.dirname(t.paths.decisions), r.backup), "utf8"), before);
-    // the production and AI layers read as not built; the Phase 1 services stay
-    const im = JSON.parse(fs.readFileSync(t.paths.implemented, "utf8"));
-    assert.deepEqual(im.orchestrator, { built: false, verified: false });
-    assert.deepEqual(im.ai, { built: false, verified: false });
-    assert.ok(apiServices(im).some(s => s.id === "read:lookup"));
-    // and the specs start over
+    // nothing is built for any layer, so the page opens in Phase 1
+    assert.deepEqual(JSON.parse(fs.readFileSync(t.paths.implemented, "utf8")), emptyImplemented());
     const s = await (await fetch(t.base + "/api/specs")).json();
-    assert.equal(s.stage.layer, "orchestrator");
-    assert.equal(s.stage.step, "decide");
+    assert.deepEqual(s.stage, { layer: "api", step: "build", next: null });
+    // the last runs' build logs are gone; the local teardown is reported item by item
+    for (const f of BUILD_STATUS(t)) assert.ok(!fs.existsSync(f), f);
+    assert.deepEqual(await (await fetch(t.base + "/api/build/ai/status")).json(), { state: "idle", step: "", log: [] });
+    assert.ok(Array.isArray(r.local) && r.local.some(x => x.item === "ai-status.json" && x.outcome === "removed"), JSON.stringify(r.local));
+    // the remote teardown is a job the page follows
+    assert.deepEqual(r.teardown, { started: true, statusUrl: "/api/demo/reset/status" });
+    assert.match(t.procs.at(-1).args.at(-1), /teardown-runner\.js$/);
+    assert.equal((await (await fetch(t.base + "/api/demo/reset/status")).json()).state, "starting");
   } finally { await t.done(); }
 });
 
-test("demo reset is refused while a build or a restore is running", async () => {
-  const t = await buildSetup({ aiQuestions: ALL_KEPT });
+test("the reset status answers idle before any reset", async () => {
+  const t = await buildSetup();
+  try {
+    assert.deepEqual(await (await fetch(t.base + "/api/demo/reset/status")).json(), { state: "idle", step: "", log: [], results: [] });
+  } finally { await t.done(); }
+});
+
+test("reset stops a running build, then tears down", async () => {
+  const kills = [];
+  const t = await buildSetup({ aiQuestions: ALL_KEPT, killTreeImpl: pid => kills.push({ pid, spawned: t.procs.length }) });
   try {
     assert.equal((await (await post(t, "/api/build/ai")).json()).started, true);
+    fs.writeFileSync(t.statusFiles.ai, JSON.stringify({ state: "building", step: "Deploying", log: [] }));
     const r = await post(t, "/api/demo/reset");
-    assert.equal(r.status, 409);
-    assert.match((await r.json()).error, /running/);
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).ok, true);
+    assert.deepEqual(kills, [{ pid: t.procs[0].pid, spawned: 1 }], "the AI build's tree was killed before the teardown runner was spawned");
+    assert.match(t.procs[1].args.at(-1), /teardown-runner\.js$/);
+    t.procs[0].emit("exit", 1);                        // the killed runner's exit arrives later
+    await new Promise(res => setTimeout(res, 30));
+    for (const f of BUILD_STATUS(t)) assert.ok(!liveStatus(f), f);
   } finally { await t.done(); }
 });
 
-test("demo reset also clears the production, AI and restore build status, so the page shows nothing as built or run", async () => {
+test("builds wait while the reset tears down", async () => {
   const t = await buildSetup({ aiQuestions: ALL_KEPT });
   try {
-    for (const f of [t.statusFiles.production, t.statusFiles.ai, t.statusFiles.restore]) fs.writeFileSync(f, JSON.stringify({ state: "done" }));
     assert.equal((await (await post(t, "/api/demo/reset")).json()).ok, true);
-    for (const f of [t.statusFiles.production, t.statusFiles.ai, t.statusFiles.restore]) assert.ok(!fs.existsSync(f), f);
-    assert.deepEqual(await (await fetch(t.base + "/api/build/ai/status")).json(), { state: "idle", step: "", log: [] });
+    for (const p of ["/api/build", "/api/build/production", "/api/build/ai"]) {
+      const r = await post(t, p);
+      assert.equal(r.status, 409, p);
+      assert.match((await r.json()).error, /still tearing down/, p);
+    }
+    const rs = await (await say(t, "restore last good")).json();
+    assert.equal(rs.restore.started, false);
+    assert.match(rs.reply, /still tearing down/);
+    assert.equal(t.procs.length, 1, "only the teardown runner was started");
+    t.procs[0].emit("exit", 0);
+    await new Promise(res => setTimeout(res, 30));
+    assert.equal((await (await post(t, "/api/build")).json()).started, true);
+  } finally { await t.done(); }
+});
+
+test("reset clears the lookup cache", async () => {
+  const keys = ["VADEMO_URL", "VADEMO_USER", "VADEMO_PASSWORD"];
+  const saved = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+  Object.assign(process.env, { VADEMO_URL: "http://vademo.invalid", VADEMO_USER: "u", VADEMO_PASSWORD: "fake-pass" });
+  const answers = [[{ ien: 1, c0: "A" }], [{ ien: 1, c0: "A" }, { ien: 2, c0: "B" }]];
+  let calls = 0;
+  const vademoFetch = async () => ({ json: async () => ({ result: { content: answers[Math.min(calls++, 1)] } }) });
+  let t;
+  try { t = await buildSetup({ vademoFetch }); }
+  finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
+  try {
+    const items = async () => (await (await fetch(t.base + "/lookup/VENDOR440?all=1")).json()).items;
+    assert.equal((await items()).length, 1);
+    assert.equal((await items()).length, 1, "cached");
+    assert.equal((await (await post(t, "/api/demo/reset")).json()).ok, true);
+    assert.equal((await items()).length, 2);
   } finally { await t.done(); }
 });
 
@@ -614,9 +666,11 @@ test("createApp over a building production status marks it error with restart me
   const statusFiles = {
     build:      path.join(dir, "b.json"), production: path.join(dir, "p.json"),
     ai:         path.join(dir, "a.json"), restore:    path.join(dir, "r.json"),
+    teardown:   path.join(dir, "t.json"),
   };
-  // Stale "building" state left by the previous server run
+  // Stale live states left by the previous server run
   fs.writeFileSync(statusFiles.production, JSON.stringify({ state: "building", step: "Deploying", log: [] }));
+  fs.writeFileSync(statusFiles.teardown, JSON.stringify({ state: "tearing down", step: "IRIS", log: [], results: [] }));
   const spawnImpl = (_cmd, args) => { const p = new EventEmitter(); p.args = args; p.pid = 0; p.unref = () => {}; return p; };
   const made = createApp({ paths, statusFiles, spawnImpl });
   const srv = await new Promise(resolve => { const s = made.app.listen(0, "127.0.0.1", () => resolve(s)); });
@@ -624,6 +678,7 @@ test("createApp over a building production status marks it error with restart me
     const s = JSON.parse(fs.readFileSync(statusFiles.production, "utf8"));
     assert.equal(s.state, "error");
     assert.match(s.error, /restarted while this was running/);
+    assert.equal(JSON.parse(fs.readFileSync(statusFiles.teardown, "utf8")).state, "error", "a teardown left running is reconciled too");
   } finally {
     srv.close();
     fs.rmSync(dir, { recursive: true, force: true });
