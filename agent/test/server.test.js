@@ -345,9 +345,24 @@ test("the API build spawn options include windowsHide: true", async () => {
   } finally { await t.done(); }
 });
 
-test("angular-build.js spawns with windowsHide: true (static check)", () => {
-  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "angular-build.js"), "utf8");
-  assert.match(src, /windowsHide\s*:\s*true/, "angular-build.js must set windowsHide: true in spawn options");
+test("every spawn/spawnSync call in agent/*.js and agent/lib/*.js includes windowsHide: true (static check)", () => {
+  // collect source files from agent/ (top-level) and agent/lib/ — skip test/ and node_modules/
+  const agentDir = path.join(__dirname, "..");
+  const libDir   = path.join(agentDir, "lib");
+  const files = [
+    ...fs.readdirSync(agentDir).filter(f => f.endsWith(".js")).map(f => path.join(agentDir, f)),
+    ...fs.readdirSync(libDir).filter(f => f.endsWith(".js")).map(f => path.join(libDir, f)),
+  ];
+  const bad = [];
+  for (const file of files) {
+    const lines = fs.readFileSync(file, "utf8").split("\n");
+    lines.forEach((line, i) => {
+      // a spawn-family call that opens an inline options object but omits windowsHide
+      if (/\bspawn(?:Sync|Impl)?\s*\(/.test(line) && /\{/.test(line) && !/windowsHide/.test(line))
+        bad.push(`${path.relative(agentDir, file)}:${i + 1}: ${line.trim().slice(0, 120)}`);
+    });
+  }
+  assert.deepEqual(bad, [], "spawn calls without windowsHide: true:\n" + bad.join("\n"));
 });
 
 test("POST /api/build/ai is refused (409) until the orchestrator is built and verified — the spec's offer rule", async () => {

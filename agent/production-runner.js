@@ -146,7 +146,7 @@ async function main(paths = DEFAULT_PATHS) {
 
     const env = { ...process.env, IRIS_USERNAME: user, IRIS_PASSWORD: pass };
     const iris = (method, p, extra) => {
-      const r = spawnSync("python", [path.join(scripts, "lib", "iris.py"), "--server", SERVER, "--config", CONFIG_FILE, method, p, ...extra], { env, encoding: "utf8", timeout: 180000 });
+      const r = spawnSync("python", [path.join(scripts, "lib", "iris.py"), "--server", SERVER, "--config", CONFIG_FILE, method, p, ...extra], { env, encoding: "utf8", timeout: 180000, windowsHide: true });
       if (r.error) throw new Error(`could not run the interclaw script: ${r.error.message}`);
       if (r.status !== 0) throw new Error(`${method} ${p} failed: ${(r.stderr || r.stdout || "").trim().slice(0, 600)}`);
       try { return JSON.parse(r.stdout); } catch (e) { return r.stdout; }
@@ -163,7 +163,7 @@ async function main(paths = DEFAULT_PATHS) {
     note("compiled with no errors");
 
     step(`Ensuring the ${WEB_APP} web app and restarting ${PKG}.Production (stops whatever production runs in ${d.namespace})`);
-    const s = spawnSync("docker", ["exec", "-i", d.container, "iris", "session", "IRIS"], { input: sessionScript(d.namespace, smtp), encoding: "utf8", timeout: 180000 });
+    const s = spawnSync("docker", ["exec", "-i", d.container, "iris", "session", "IRIS"], { input: sessionScript(d.namespace, smtp), encoding: "utf8", timeout: 180000, windowsHide: true });
     if (s.error) throw new Error(`could not run docker: ${s.error.message}`);
     const said = k => ((s.stdout || "").match(new RegExp(`^${k}:(.*)$`, "m")) || [])[1];
     note(`web app: ${said("WEBAPP") || "?"} · start: ${said("START") || "?"} · state: ${said("STATE") || "?"}`);
