@@ -23,12 +23,12 @@ function irisTeardownScript() {
     `zn "INTEROP"`,
     // STOP — only when GetProductionStatus names EquipmentEntry.Production
     `try { do ##class(Ens.Director).GetProductionStatus(.pn,.ps) if pn=${osq(prod)} { set sc=##class(Ens.Director).StopProduction(10,1) if $$$ISOK(sc) { do ##class(Ens.Director).CleanProduction() write "STOP:stopped",! } else { write "STOP:ERROR ",$system.Status.GetErrorText(sc),! } } else { write "STOP:not running",! } } catch e { write "STOP:ERROR ",e.DisplayString(),! }`,
-    // MESSAGES — delete message header rows for both packages
-    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens.MessageHeader WHERE MessageBodyClassName %STARTSWITH ${osq(prodPfx)} OR MessageBodyClassName %STARTSWITH ${osq(aiPfx)}") write "MESSAGES:",st.%ROWCOUNT,! } catch e { write "MESSAGES:ERROR ",e.DisplayString(),! }`,
+    // MESSAGES — delete message header rows for both packages (SQL single-quotes inside OS double-quoted string)
+    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens.MessageHeader WHERE MessageBodyClassName %STARTSWITH '${prodPfx}' OR MessageBodyClassName %STARTSWITH '${aiPfx}'") write "MESSAGES:",st.%ROWCOUNT,! } catch e { write "MESSAGES:ERROR ",e.DisplayString(),! }`,
     // EVENTLOG — delete event log rows for both packages
-    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens_Util.Log WHERE SourceClass %STARTSWITH ${osq(prodPfx)} OR SourceClass %STARTSWITH ${osq(aiPfx)}") write "EVENTLOG:",st.%ROWCOUNT,! } catch e { write "EVENTLOG:ERROR ",e.DisplayString(),! }`,
+    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens_Util.Log WHERE SourceClass %STARTSWITH '${prodPfx}' OR SourceClass %STARTSWITH '${aiPfx}'") write "EVENTLOG:",st.%ROWCOUNT,! } catch e { write "EVENTLOG:ERROR ",e.DisplayString(),! }`,
     // SETTINGS — delete production default settings; SQLCODE 0 = success
-    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens_Config.DefaultSettings WHERE ProductionName=${osq(prod)}") write "SETTINGS:",st.%SQLCODE,! } catch e { write "SETTINGS:ERROR ",e.DisplayString(),! }`,
+    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens_Config.DefaultSettings WHERE ProductionName='${prod}'") write "SETTINGS:",st.%SQLCODE,! } catch e { write "SETTINGS:ERROR ",e.DisplayString(),! }`,
     // AISESSIONS — delete stored AI agent sessions (same loop as aiSettingsScript)
     `try { set n=0,k="" for { set k=$order(^${AI_PKG}.Sessions(k)) quit:k=""  set id=$get(^${AI_PKG}.Sessions(k)) do:id'="" ##class(%AI.Agent.Session).%DeleteId(id) set n=n+1 } kill ^${AI_PKG}.Sessions write "AISESSIONS:",n,! } catch e { write "AISESSIONS:ERROR ",e.DisplayString(),! }`,
     // AICONFIG — kill the AI config global unconditionally

@@ -26,6 +26,7 @@ test("parseIrisTeardown treats absent as removed", () => {
   const { parseIrisTeardown } = require("../lib/teardown");
 
   // All markers with absent/0/not-running → every outcome is "absent"
+  // ("AICONFIG:0" is an artificial parser case — the real script always writes "killed")
   const allAbsent = [
     "STOP:not running",
     "MESSAGES:0",
@@ -81,4 +82,23 @@ test("the production and AI scripts update an existing web app", () => {
   // checkSettingsMarkers accepts "updated" as a valid WEBAPP outcome
   const out = "WEBAPP:updated\nCONFIG:set\nVADEMO:stored\nBEDROCK:stored\nSESSIONS:cleared 0\n";
   assert.deepEqual(checkSettingsMarkers(out), []);
+});
+
+test("the teardown script's SQL uses SQL quotes inside ObjectScript strings", () => {
+  const { irisTeardownScript } = require("../lib/teardown");
+  const s = irisTeardownScript();
+  const execLines = s.split("\n").filter(l => l.includes("%ExecDirect("));
+  assert.ok(execLines.length > 0, "must have at least one %ExecDirect line");
+
+  // All three single-quoted SQL literals must appear across the ExecDirect lines
+  const allExec = execLines.join("\n");
+  assert.match(allExec, /'EquipmentEntry\.'/, "single-quoted package prefix 'EquipmentEntry.' must appear");
+  assert.match(allExec, /'EquipmentAI\.'/, "single-quoted package prefix 'EquipmentAI.' must appear");
+  assert.match(allExec, /'EquipmentEntry\.Production'/, "single-quoted production name must appear");
+
+  // Even number of double-quote characters on every ExecDirect line → no ObjectScript string terminated early
+  for (const line of execLines) {
+    const dqCount = (line.match(/"/g) || []).length;
+    assert.equal(dqCount % 2, 0, `odd double-quote count (${dqCount}) — ObjectScript string broken: ${line}`);
+  }
 });
