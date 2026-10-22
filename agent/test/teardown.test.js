@@ -175,10 +175,10 @@ test("the teardown's SQL lines report an SQL error and count rows", () => {
   const { irisTeardownScript } = require("../lib/teardown");
   const lines = irisTeardownScript().split("\n");
   for (const key of ["MESSAGES", "EVENTLOG", "SETTINGS"]) {
-    const l = lines.find(x => x.includes(`write "${key}:`));
+    const l = lines.find(x => x.includes(`"${key}:`));
     assert.ok(l, `${key} line present`);
-    assert.match(l, new RegExp(`if st\.%SQLCODE<0 \{ write "${key}:ERROR ",st\.%Message,! \} else \{ write "${key}:",st\.%ROWCOUNT,! \}`), `${key} checks %SQLCODE<0 and writes %ROWCOUNT`);
-    assert.doesNotMatch(l, /write "[A-Z]+:",st\.%SQLCODE/, `${key} must not write %SQLCODE as its count`);
+    assert.match(l, new RegExp(`if st\\.%SQLCODE<0 \\{ write !,"${key}:ERROR ",st\\.%Message,! \\} else \\{ write !,"${key}:",st\\.%ROWCOUNT,! \\}`), `${key} checks %SQLCODE<0 and writes %ROWCOUNT`);
+    assert.doesNotMatch(l, /write !,"[A-Z]+:",st\.%SQLCODE/, `${key} must not write %SQLCODE as its count`);
   }
 });
 
@@ -188,4 +188,33 @@ test("the teardown stops the production only when it is ours and running, suspen
   assert.match(l, /\$get\(pn\)="EquipmentEntry\.Production"/);
   assert.match(l, /\(\$get\(ps\)=1\)!\(\$get\(ps\)=3\)!\(\$get\(ps\)=4\)/, "states 1, 3, 4 only (2 = stopped)");
   assert.match(l, /StopProduction\(10,1\) if \$system\.Status\.IsOK\(sc\) \{ do ##class\(Ens\.Director\)\.CleanProduction\(\)/, "CleanProduction only after a real stop");
+});
+
+test("teardown markers always start a line (PKG lines use displaylog=0 and every marker write uses write !,)", () => {
+  const { irisTeardownScript } = require("../lib/teardown");
+  const s = irisTeardownScript();
+  // PKG lines must suppress DeletePackage's class-deletion display output
+  const pkgLines = s.split("\n").filter(l => l.includes("DeletePackage("));
+  assert.ok(pkgLines.length >= 2, "must have at least 2 PKG lines");
+  for (const l of pkgLines) assert.match(l, /displaylog=0/, `PKG line missing displaylog=0: ${l.slice(0, 80)}`);
+  // No bare write "MARKER: — every marker write must carry the leading newline
+  const bareWrites = (s.match(/write "[A-Z]{2,}:/g) || []);
+  assert.deepEqual(bareWrites, [], `bare marker writes found (missing write !,): ${bareWrites.join(", ")}`);
+  // Spot-check the prefix is present
+  assert.match(s, /write !,"STOP:/, "STOP marker must use write !,");
+  assert.match(s, /write !,"PKG:/, "PKG markers must use write !,");
+  assert.match(s, /write !,"WEBAPP:/, "WEBAPP markers must use write !,");
+});
+
+test("parseIrisTeardown finds a PKG marker even when preceding output shares the line", () => {
+  const { parseIrisTeardown } = require("../lib/teardown");
+  // With write !,  applied, DeletePackage's trailing text is followed by a newline before the marker
+  const withNewline = "Deleting class EquipmentEntry.A\nPKG:EquipmentEntry:ok\nPKG:EquipmentAI:ok\n";
+  const r1 = parseIrisTeardown(withNewline);
+  assert.equal(r1.find(x => x.item === "PKG:EquipmentEntry").outcome, "removed");
+  assert.equal(r1.find(x => x.item === "PKG:EquipmentAI").outcome, "removed");
+  // Parser robustness: marker preceded by non-identifier text (e.g. a space or ": ")
+  const r2 = parseIrisTeardown(" PKG:EquipmentEntry:ok\n");
+  assert.equal(r2.find(x => x.item === "PKG:EquipmentEntry").outcome, "removed",
+    "marker preceded by a space must be found");
 });
