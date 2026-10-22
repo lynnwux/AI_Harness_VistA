@@ -5,7 +5,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { saveKnownGood } = require("../lib/known-good");
-const { REST_CLASSES } = require("../lib/rest-service");
+const { REST_CLASSES, HARNESS_DIR } = require("../lib/rest-service");
 const { restoreAll, STATUS_FILE } = require("../restore-runner");
 
 const tmp = p => fs.mkdtempSync(path.join(os.tmpdir(), p));
@@ -126,9 +126,13 @@ test("an old Phase 1 copy without REST classes deploys them from harness/", asyn
   try {
     const s = await restoreAll(w.opts);
     assert.equal(s.state, "done", s.error);
-    // Three REST classes were PUT (content from the real harness/ dir).
+    // Three REST classes were PUT with the real harness/ file text.
     assert.equal(w.vademo.puts.length, REST_CLASSES.length);
     assert.deepEqual(w.vademo.puts.map(p => p.name), REST_CLASSES);
+    for (const cls of REST_CLASSES) {
+      const put = w.vademo.puts.find(p => p.name === cls);
+      assert.equal(put.text, fs.readFileSync(path.join(HARNESS_DIR, cls), "utf8"), `PUT body for ${cls} must equal harness/ content`);
+    }
     // Log has the fallback note.
     const logStr = JSON.parse(fs.readFileSync(w.opts.statusFile, "utf8")).log.join("\n");
     assert.match(logStr, /this copy holds no REST classes — deployed them from harness\//);
