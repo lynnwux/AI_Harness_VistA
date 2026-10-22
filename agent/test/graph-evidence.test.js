@@ -3,6 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
+const { PHASE1_SERVICES } = require("../lib/implemented");
 
 const graph = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), "utf8"));
 const c = graph.capabilities[0];
@@ -61,8 +62,9 @@ test("each bulletin placeholder says where its value comes from, so the producti
 });
 
 test("the implemented-services file has the expected shape", () => {
+  // Phase 1 service ids live in the module, not the file (which starts empty after a reset)
+  assert.deepEqual(PHASE1_SERVICES.map(s => s.id), ["write:6914", "read:next-ien", "read:lookup"]);
   const im = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "implemented.json"), "utf8"));
-  assert.deepEqual(im.api.map(s => s.id), ["write:6914", "read:next-ien", "read:lookup"]);
   assert.equal(typeof im.orchestrator.built, "boolean");   // the production build sets these
   assert.equal(typeof im.orchestrator.verified, "boolean");
 });

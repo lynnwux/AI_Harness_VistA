@@ -7,6 +7,7 @@ const path = require("path");
 const { createApp } = require("../server");
 const { runTool } = require("../lib/tools");
 const { inputHashes, loadInputs } = require("../lib/specs");
+const { builtApi, apiServices } = require("../lib/implemented");
 
 function setup(fakeAgent, prepare) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-"));
@@ -227,8 +228,7 @@ test("when the orchestrator is verified, the system prompt guides the AI layer a
     fs.writeFileSync(paths.decisions, JSON.stringify(minDec));
     const tempImpl = path.join(path.dirname(paths.decisions), "implemented.json");
     fs.writeFileSync(tempImpl, JSON.stringify({
-      api: [{ id: "read:lookup", endpoint: "GET /lookup/{file}" }],
-      entryForm: { built: true },
+      api: builtApi(),
       orchestrator: { built: true, verified: true },
     }));
     paths.implemented = tempImpl;
@@ -260,14 +260,14 @@ const ALL_KEPT = {
 };
 
 // A server whose builds are fake processes: nothing is spawned, and the status files are temp files.
-async function buildSetup({ orchestratorVerified = true, entryFormBuilt = true, aiQuestions = undefined, agentCalls = [] } = {}) {
+async function buildSetup({ orchestratorVerified = true, aiQuestions = undefined, agentCalls = [] } = {}) {
   const procs = [];
   const spawnImpl = (_cmd, args) => { const p = new EventEmitter(); p.args = args; p.pid = 0; p.unref = () => {}; procs.push(p); return p; };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-b-"));
   const paths = { graph: path.join(dir, "graph.json"), decisions: path.join(dir, "decisions.json"), implemented: path.join(dir, "implemented.json"), inventory: INVENTORY, specsDir: path.join(dir, "specs") };
   fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), paths.graph);
   fs.writeFileSync(paths.decisions, JSON.stringify(aiQuestions ? { ...MIN_DEC, aiQuestions } : MIN_DEC));
-  fs.writeFileSync(paths.implemented, JSON.stringify({ api: [{ id: "read:lookup", endpoint: "GET /lookup/{file}" }], entryForm: { built: entryFormBuilt }, orchestrator: { built: orchestratorVerified, verified: orchestratorVerified } }));
+  fs.writeFileSync(paths.implemented, JSON.stringify({ api: builtApi(), orchestrator: { built: orchestratorVerified, verified: orchestratorVerified } }));
   const statusFiles = { build: path.join(dir, "build-status.json"), production: path.join(dir, "production-status.json"), ai: path.join(dir, "ai-status.json"), restore: path.join(dir, "restore-status.json") };
   const publishedDir = path.join(dir, "published-entry-form");
   fs.mkdirSync(publishedDir); fs.writeFileSync(path.join(publishedDir, "index.html"), "<app-root></app-root>");
@@ -451,7 +451,7 @@ test("demo reset: every decision back to the defaults, production and AI build s
     const im = JSON.parse(fs.readFileSync(t.paths.implemented, "utf8"));
     assert.deepEqual(im.orchestrator, { built: false, verified: false });
     assert.deepEqual(im.ai, { built: false, verified: false });
-    assert.ok(im.api.some(s => s.id === "read:lookup"));
+    assert.ok(apiServices(im).some(s => s.id === "read:lookup"));
     // and the specs start over
     const s = await (await fetch(t.base + "/api/specs")).json();
     assert.equal(s.stage.layer, "orchestrator");

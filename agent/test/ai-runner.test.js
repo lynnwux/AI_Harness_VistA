@@ -6,6 +6,7 @@ const os = require("os");
 const path = require("path");
 const { graph, rec } = require("./helpers");
 const { generate, writeSpecs } = require("../lib/specs");
+const { builtApi } = require("../lib/implemented");
 const { GUARD_CASES } = require("../lib/ai-hub");
 
 const { readAiSpec, aiSettingsScript, checkSettingsMarkers, main, STATUS_FILE,
@@ -17,8 +18,7 @@ const inventory = JSON.parse(fs.readFileSync(INVENTORY_PATH, "utf8"));
 function setupAiSpecs(record) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "air-"));
   const im = {
-    api: [{ id: "read:lookup", endpoint: "GET /lookup/{file}" }],
-    entryForm: { built: true },
+    api: builtApi(),
     orchestrator: { built: true, verified: true },
     ai: { built: false, verified: false },
   };

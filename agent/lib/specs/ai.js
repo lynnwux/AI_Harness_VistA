@@ -3,9 +3,10 @@
 // Consumes: TEMPLATES, missingFor, sqlFor, validateOne (Task 2); inventory-fields.json (Task 1).
 const { TEMPLATES, sqlFor, invalidParams } = require("../ai-templates");
 
+const { apiServices } = require("../implemented");
 const CONTAINER = "iris-ai-hub", NAMESPACE = "INTEROP", PACKAGE = "EquipmentAI";
 const ALL_TABLES = [...new Set(TEMPLATES.flatMap(t => t.tables))];
-const has = (implemented, id) => ((implemented && implemented.api) || []).some(s => s.id === id);
+const has = (implemented, id) => apiServices(implemented).some(s => s.id === id);
 
 function buildAiSpec(graph, record, implemented, inventory) {
   void graph; // not needed by this layer — accepted for a uniform signature

@@ -7,6 +7,7 @@ const path = require("path");
 
 const { chatAppFiles } = require("../lib/chat-app");
 const { GUARD_CASES } = require("../lib/ai-hub");
+const { builtApi } = require("../lib/implemented");
 
 // ── chatAppFiles ─────────────────────────────────────────────────────────────
 
@@ -133,8 +134,7 @@ const allKept = {
 function setupCompleteAiSpecs() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-air-"));
   const im = {
-    api: [{ id: "read:lookup", endpoint: "GET /lookup/{file}" }],
-    entryForm: { built: true },
+    api: builtApi(),
     orchestrator: { built: true, verified: true },
     ai: { built: false, verified: false },
   };

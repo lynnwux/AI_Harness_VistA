@@ -7,6 +7,7 @@ const { runAgent } = require("./lib/bedrock");
 const { defaultDecisions, getState, findNode, label } = require("./lib/tools");
 const { loadRecord, saveRecord, diffRecords, normalize } = require("./lib/record");
 const { DEFAULT_PATHS, generate, writeSpecs, stage } = require("./lib/specs");
+const { emptyImplemented } = require("./lib/implemented");
 const { groundedTurn } = require("./lib/grounding");
 const { TEMPLATES } = require("./lib/ai-templates");
 
@@ -24,7 +25,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
   state.notice = notice;
   // the file is the single truth builds read: write it when missing, or when it was unreadable (now backed up)
   if (!fs.existsSync(paths.decisions) || state.notice) saveRecord(paths.decisions, state.record);
-  const implemented = () => readJson(paths.implemented, { api: [], orchestrator: { built: false, verified: false }, ai: { built: false, verified: false } });
+  const implemented = () => readJson(paths.implemented, emptyImplemented());
   const labelOf = id => {
     const q = TEMPLATES.find(t => t.id === id);
     if (q) return ((state.record.aiQuestions || {})[id] || {}).wording || q.defaultWording;

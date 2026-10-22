@@ -6,8 +6,9 @@
 const { cap, isBlocking, isMandatory, requiredTargetKeys, buildTargetKeys, buildDefaults, describeKey } = require("../rules");
 const { requestContract } = require("./api");
 
+const { apiServices } = require("../implemented");
 const CONTAINER = "iris-ai-hub", NAMESPACE = "INTEROP";
-const has = (implemented, id) => ((implemented && implemented.api) || []).some(s => s.id === id);
+const has = (implemented, id) => apiServices(implemented).some(s => s.id === id);
 const filled = v => String(v == null ? "" : v).trim() !== "";
 
 function needsFor(se, target, implemented) {

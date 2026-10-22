@@ -2,6 +2,7 @@
 // API layer spec: legacy discovery + a REST service proposal. Reads ONLY the graph, the Phase 1
 // slice of the record (data-field dispositions) and implemented services — never a higher layer's decisions.
 const { cap } = require("../rules");
+const { PHASE1_SERVICES, apiServices } = require("../implemented");
 
 const TARGET = "RegisterEquipment";
 const DROPDOWN_MAX = 60;
@@ -28,9 +29,15 @@ function requestContract(graph, record) {
   return included(graph, phase1(graph, record)).map(d => ({ id: d.id, field: String(d.field), name: d.name }));
 }
 
-function proposedServices(graph) {
-  return (cap(graph).sideEffects || []).filter(s => s.writes)
+// Phase 1 services first, then legacy-discovery writes; deduped by id; filtered to not-built only.
+function proposedServices(graph, built = []) {
+  const builtIds = new Set(built.map(s => s.id));
+  const phase1 = PHASE1_SERVICES.map(s => ({ id: s.id, what: s.endpoint + " — " + s.what, source: "Phase 1 (REST service on VADEMO)" }));
+  const discovered = (cap(graph).sideEffects || []).filter(s => s.writes)
     .map(s => ({ id: "write:" + s.writes.file, what: `write file ${s.writes.file} — ${s.name}`, source: s.call }));
+  const seen = new Set();
+  const deduped = [...phase1, ...discovered].filter(p => { if (seen.has(p.id)) return false; seen.add(p.id); return true; });
+  return deduped.filter(p => !builtIds.has(p.id));
 }
 
 function buildApiSpec(graph, record, implemented) {
@@ -39,11 +46,11 @@ function buildApiSpec(graph, record, implemented) {
   const byId = id => (c.data || []).find(d => d.id === id);
   const pages = (c.formScreens || []).filter(s => s.fields && s.fields.length)
     .map(s => ({ title: s.title, fields: s.fields.map(byId).filter(d => d && !omit.has(d.id)).map(fieldCfg) }));
-  const built = (implemented && implemented.api) || [];
+  const built = apiServices(implemented);
   return {
     layer: "api",
     builds: ["REST data service on VADEMO (file 6914)", "Angular data-entry app"],
-    owns: { built, proposed: proposedServices(graph).filter(p => !built.some(b => b.id === p.id)) },
+    owns: { built, proposed: proposedServices(graph, built) },
     uses: [], needs: [], missing: [], complete: true,
     request: requestContract(graph, record),
     detail: { capability: c.name || "Register Equipment", command: TARGET, pages },
@@ -98,7 +105,10 @@ function renderApi(graph, record, spec) {
   L.push(`Source: ${w.name} · legacy ${c.entryPoint ? c.entryPoint.dispatch : ""} (file 6914). Generated from the capability graph and Phase 1 decisions only — legacy discovery plus a REST service proposal.`);
   L.push("");
   L.push("## Builds"); spec.builds.forEach(b => L.push(`- ${b}`)); L.push("");
-  L.push("## Owns — built services"); spec.owns.built.forEach(s => L.push(`- \`${s.endpoint}\` — ${s.what} (\`${s.id}\`)`)); L.push("");
+  L.push("## Owns — built services");
+  if (!spec.owns.built.length) L.push("- none");
+  spec.owns.built.forEach(s => L.push(`- \`${s.endpoint}\` — ${s.what} (\`${s.id}\`)`));
+  L.push("");
   L.push("## Owns — proposed services (from legacy discovery, not built)");
   if (!spec.owns.proposed.length) L.push("- none");
   spec.owns.proposed.forEach(p => L.push(`- ${p.what} — from \`${p.source}\` (\`${p.id}\`)`));

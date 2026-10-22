@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { loadRecord } = require("../record");
+const { apiServices, emptyImplemented } = require("../implemented");
 const api = require("./api");
 const orchestrator = require("./orchestrator");
 const ai = require("./ai");
@@ -31,7 +32,7 @@ const sha = v => crypto.createHash("sha256").update(canon(v)).digest("hex");
 // make it look stale (one-way rule).
 // The AI hash adds the inventory because the spec depends on it.
 function inputHashes(layer, { graph, record, implemented, inventory }) {
-  if (layer === "api") return { graph: sha(graph), decisions: sha(api.dataSlice(graph, record)), implemented: sha((implemented && implemented.api) || []) };
+  if (layer === "api") return { graph: sha(graph), decisions: sha(api.dataSlice(graph, record)), implemented: sha(apiServices(implemented)) };
   if (layer === "orchestrator") {
     const { aiQuestions: _aq, ...recordWithout } = record;
     const { ai: _ai, ...implementedWithout } = implemented || {};
@@ -94,7 +95,7 @@ function loadInputs(paths = DEFAULT_PATHS, fallbackRecord) {
   return {
     graph: JSON.parse(fs.readFileSync(paths.graph, "utf8")),
     record: loadRecord(paths.decisions, fallbackRecord, { backup: false }),   // a reader: never writes
-    implemented: readJson(paths.implemented, { api: [], orchestrator: { built: false, verified: false }, ai: { built: false, verified: false } }),
+    implemented: readJson(paths.implemented, emptyImplemented()),
     inventory: readJson(paths.inventory, null),
   };
 }

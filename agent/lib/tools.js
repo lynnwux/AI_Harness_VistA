@@ -6,6 +6,7 @@ const { cap: C, isBlocking, isMandatory, allowedTargetKeys, VIA } = require("./r
 const { generate, stage } = require("./specs");
 const { requestContract } = require("./specs/api");
 const { TEMPLATES, validateParams, sqlFor, validateOne } = require("./ai-templates");
+const { emptyImplemented } = require("./implemented");
 
 const CAT_OPTS = {
   oq:   ["Business rule", "Required input", "Defer"],
@@ -137,7 +138,7 @@ function buildAiState(record, inventory, aiSpec) {
 function getState(graph, decisions, extra = {}) {
   const c = C(graph);
   const record = normalize(decisions);
-  const implemented = extra.implemented || { api: [], orchestrator: { built: false, verified: false } };
+  const implemented = extra.implemented || emptyImplemented();
   const cats = { oq: c.openQuestions, rule: c.businessRules, beh: c.sideEffects, sec: c.security, dep: c.dependencies };
   const summary = {};
   for (const [k, arr] of Object.entries(cats)) {
