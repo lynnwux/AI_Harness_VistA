@@ -18,7 +18,7 @@ function killTree(pid, { spawnSyncImpl = spawnSync, platform = process.platform 
 function watchParent({
   ppid = process.ppid,
   intervalMs = 2000,
-  isAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return false; } },
+  isAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } },
   onGone = () => killTree(process.pid),
 } = {}) {
   let fired = false;

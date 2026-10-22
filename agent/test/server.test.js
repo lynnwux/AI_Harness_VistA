@@ -592,3 +592,40 @@ test("a changed inventory file is picked up without a restart", async () => {
     fs.rmSync(tempInvDir, { recursive: true, force: true });
   }
 });
+
+test("cancelling with no live process still marks a stale status as cancelled", async () => {
+  const t = await buildSetup();
+  try {
+    // Write a stale "building" state without starting any process
+    fs.writeFileSync(t.statusFiles.production, JSON.stringify({ state: "building", step: "Deploying", log: [] }));
+    const cr = await (await post(t, "/api/build/production/cancel")).json();
+    assert.equal(cr.cancelled, false, "no process was running");
+    const s = JSON.parse(fs.readFileSync(t.statusFiles.production, "utf8"));
+    assert.equal(s.state, "cancelled", "stale building status must be marked cancelled");
+  } finally { await t.done(); }
+});
+
+test("createApp over a building production status marks it error with restart message", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-stale-"));
+  const graphPath = path.join(dir, "graph.json");
+  fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), graphPath);
+  const paths = { graph: graphPath, decisions: path.join(dir, "d.json"), implemented: path.join(dir, "impl.json"), specsDir: path.join(dir, "specs") };
+  fs.writeFileSync(paths.implemented, JSON.stringify(emptyImplemented()));
+  const statusFiles = {
+    build:      path.join(dir, "b.json"), production: path.join(dir, "p.json"),
+    ai:         path.join(dir, "a.json"), restore:    path.join(dir, "r.json"),
+  };
+  // Stale "building" state left by the previous server run
+  fs.writeFileSync(statusFiles.production, JSON.stringify({ state: "building", step: "Deploying", log: [] }));
+  const spawnImpl = (_cmd, args) => { const p = new EventEmitter(); p.args = args; p.pid = 0; p.unref = () => {}; return p; };
+  const made = createApp({ paths, statusFiles, spawnImpl });
+  const srv = await new Promise(resolve => { const s = made.app.listen(0, "127.0.0.1", () => resolve(s)); });
+  try {
+    const s = JSON.parse(fs.readFileSync(statusFiles.production, "utf8"));
+    assert.equal(s.state, "error");
+    assert.match(s.error, /restarted while this was running/);
+  } finally {
+    srv.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

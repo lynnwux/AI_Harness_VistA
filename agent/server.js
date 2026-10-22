@@ -186,22 +186,29 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     catch (e) { res.json({ state: "idle", step: "", log: [], results: [] }); }
   });
   app.post("/api/restore/cancel", (_req, res) => {
-    if (!restoreProc) return res.json({ cancelled: false, running: false, note: "no restore running" });
+    if (!restoreProc) { markCancelled(runners.restoreStatus, ["restoring", "starting"]); return res.json({ cancelled: false, running: false, note: "no restore running" }); }
     killTreeImpl(restoreProc.pid);
-    try {
-      const s = JSON.parse(fs.readFileSync(runners.restoreStatus, "utf8"));
-      if (s.state === "restoring" || s.state === "starting") {
-        s.state = "cancelled"; s.step = "Cancelled by user";
-        (s.log = s.log || []).push("⏹ cancelled by user");
-        fs.writeFileSync(runners.restoreStatus, JSON.stringify(s, null, 2));
-      }
-    } catch (e) { /* no status file */ }
+    markCancelled(runners.restoreStatus, ["restoring", "starting"]);
     res.json({ cancelled: true });
   });
   registerProductionRoutes(app, regenerate, serially, () => state.specs, () => state.stage, runners);
   registerAiRoutes(app, regenerate, serially, () => state.specs, () => state.stage, runners);
   registerAiProxyRoutes(app);
   app.use(express.static(ROOT));
+
+  // Reconcile any status files left in a live state by the previous server process.
+  // watchParent kills runners with taskkill /F so they cannot write a final state themselves.
+  const RESTART_ERR = "the workbench server restarted while this was running";
+  for (const f of [statusFiles.build || STATUS_FILE, statusFiles.production || PRODUCTION_STATUS, statusFiles.ai || AI_STATUS_FILE, statusFiles.restore || RESTORE_STATUS]) {
+    try {
+      const s = JSON.parse(fs.readFileSync(f, "utf8"));
+      if (s.state !== "done" && s.state !== "error" && s.state !== "cancelled") {
+        s.state = "error"; s.error = RESTART_ERR;
+        (s.log = s.log || []).push("✗ " + RESTART_ERR);
+        fs.writeFileSync(f, JSON.stringify(s, null, 2));
+      }
+    } catch (_) {}
+  }
 
   regenerate();
   return { app, state, regenerate, systemPrompt };
@@ -221,27 +228,28 @@ function registerVistaRoutes(app) {
   }
   const HARNESS = "/irishealth/Harness/Equipment";
 
+  const VADEMO_TIMEOUT = 30000;
   app.get("/equipment/next-ien", async (_req, res) => {
     try {
-      const r = await fetch(vademo(HARNESS + "/NextIEN"), { headers: { Authorization: VAUTH } });
+      const r = await fetch(vademo(HARNESS + "/NextIEN"), { headers: { Authorization: VAUTH }, signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
       res.json(await r.json());
     } catch (e) { res.status(502).json({ status: "error", message: String(e.message || e) }); }
   });
   app.post("/equipment", async (req, res) => {
     try {
-      const r = await fetch(vademo(HARNESS + "/Equipment6914"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: VAUTH }, body: JSON.stringify(req.body || {}) });
+      const r = await fetch(vademo(HARNESS + "/Equipment6914"), { method: "POST", headers: { "Content-Type": "application/json", Authorization: VAUTH }, body: JSON.stringify(req.body || {}), signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
       res.status(r.status).json(await r.json());
     } catch (e) { res.status(502).json({ status: "ERROR", error: String(e.message || e) }); }
   });
   app.get("/equipment/:ien", async (req, res) => {
     try {
-      const r = await fetch(vademo(HARNESS + "/Equipment6914/" + encodeURIComponent(req.params.ien)), { headers: { Authorization: VAUTH } });
+      const r = await fetch(vademo(HARNESS + "/Equipment6914/" + encodeURIComponent(req.params.ien)), { headers: { Authorization: VAUTH }, signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
       res.status(r.status).json(await r.json());
     } catch (e) { res.status(502).json({ status: "error", message: String(e.message || e) }); }
   });
   app.delete("/equipment/:ien", async (req, res) => {
     try {
-      const r = await fetch(vademo(HARNESS + "/Equipment6914/" + encodeURIComponent(req.params.ien)), { method: "DELETE", headers: { Authorization: VAUTH } });
+      const r = await fetch(vademo(HARNESS + "/Equipment6914/" + encodeURIComponent(req.params.ien)), { method: "DELETE", headers: { Authorization: VAUTH }, signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
       res.status(r.status).json(await r.json());
     } catch (e) { res.status(502).json({ status: "error", message: String(e.message || e) }); }
   });
@@ -272,7 +280,7 @@ function registerVistaRoutes(app) {
   };
   const listCache = {};
   async function atelierQuery(sql) {
-    const r = await fetch(vademo(ATELIER_QUERY), { method: "POST", headers: { "Content-Type": "application/json", Authorization: VAUTH }, body: JSON.stringify({ query: sql }) });
+    const r = await fetch(vademo(ATELIER_QUERY), { method: "POST", headers: { "Content-Type": "application/json", Authorization: VAUTH }, body: JSON.stringify({ query: sql }), signal: AbortSignal.timeout(VADEMO_TIMEOUT) });
     const j = await r.json();
     if (j.status && j.status.errors && j.status.errors.length) throw new Error(j.status.errors[0].error);
     return (j.result && j.result.content) || [];
@@ -331,16 +339,7 @@ function registerBuildRoutes(app, regenerate, serially, { spawnImpl = spawn, bui
       buildProc = spawnImpl(process.execPath, [path.join(__dirname, "build-runner.js")], { cwd: __dirname, detached: true, stdio: "ignore" });
       buildProc.on("exit", (code) => {
         buildProc = null;
-        // Safety net: if the runner died without writing a terminal state (crash / kill),
-        // mark the status errored so the UI poll ends and the Build button re-enables.
-        try {
-          const s = JSON.parse(fs.readFileSync(buildStatus, "utf8"));
-          if (s.state !== "done" && s.state !== "error" && s.state !== "cancelled") {
-            s.state = "error"; s.error = "build process exited unexpectedly (code " + code + ")"; s.etaSec = 0;
-            (s.log = s.log || []).push("✗ build process exited unexpectedly (code " + code + ")");
-            fs.writeFileSync(buildStatus, JSON.stringify(s, null, 2));
-          }
-        } catch (e) { /* no status file yet — nothing to reconcile */ }
+        reconcileExit(buildStatus, "build process", code);   // safety net for crash / kill
         serially(() => regenerate());   // implemented.json may now say built + verified
       });
       buildProc.unref();
@@ -352,18 +351,11 @@ function registerBuildRoutes(app, regenerate, serially, { spawnImpl = spawn, bui
     catch (e) { res.json({ state: "idle", step: "", log: [], url: null }); }
   });
   // Cancel a running build — kills the whole process tree first, then marks "cancelled".
-  // reconcileExit leaves "cancelled" alone so the exit does not relabel it "error".
+  // Even with no live process, marks a stale status so the UI poll can end.
   app.post("/api/build/cancel", (_req, res) => {
-    if (!buildProc) return res.json({ cancelled: false, running: false, note: "no build running" });
+    if (!buildProc) { markCancelled(buildStatus); return res.json({ cancelled: false, running: false, note: "no build running" }); }
     killTreeImpl(buildProc.pid);
-    try {
-      const s = JSON.parse(fs.readFileSync(buildStatus, "utf8"));
-      if (s.state === "building" || s.state === "starting") {
-        s.state = "cancelled"; s.step = "Cancelled by user"; s.etaSec = 0;
-        (s.log = s.log || []).push("⏹ cancelled by user");
-        fs.writeFileSync(buildStatus, JSON.stringify(s, null, 2));
-      }
-    } catch (e) { /* no status file */ }
+    markCancelled(buildStatus);
     res.json({ cancelled: true });
   });
 }
@@ -372,6 +364,20 @@ const { STATUS_FILE: PRODUCTION_STATUS } = require("./production-runner");
 // The production build and the AI build both read-modify-write implemented.json, so they never run together.
 let productionProc = null;
 let aiProc = null;
+
+// Mark a status file cancelled if it is in one of the live states.
+// Called by all cancel routes even when no process is running, so a stale "building" status
+// left by a server restart or watchParent kill is cleared before the next build.
+function markCancelled(file, liveStates = ["building", "starting"]) {
+  try {
+    const s = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (liveStates.includes(s.state)) {
+      s.state = "cancelled"; s.step = "Cancelled by user"; s.etaSec = 0;
+      (s.log = s.log || []).push("⏹ cancelled by user");
+      fs.writeFileSync(file, JSON.stringify(s, null, 2));
+    }
+  } catch (e) { /* no status file */ }
+}
 
 // Mark a status file errored when its runner died without writing a terminal state.
 // Leaves "cancelled" alone — the cancel route already wrote it before killing.
@@ -412,16 +418,9 @@ function registerProductionRoutes(app, regenerate, serially, specs, stageOf, { s
     catch (e) { res.json({ state: "idle", step: "", log: [] }); }
   });
   app.post("/api/build/production/cancel", (_req, res) => {
-    if (!productionProc) return res.json({ cancelled: false, running: false, note: "no production build running" });
+    if (!productionProc) { markCancelled(productionStatus); return res.json({ cancelled: false, running: false, note: "no production build running" }); }
     killTreeImpl(productionProc.pid);
-    try {
-      const s = JSON.parse(fs.readFileSync(productionStatus, "utf8"));
-      if (s.state === "building" || s.state === "starting") {
-        s.state = "cancelled"; s.step = "Cancelled by user"; s.etaSec = 0;
-        (s.log = s.log || []).push("⏹ cancelled by user");
-        fs.writeFileSync(productionStatus, JSON.stringify(s, null, 2));
-      }
-    } catch (e) { /* no status file */ }
+    markCancelled(productionStatus);
     res.json({ cancelled: true });
   });
 }
@@ -466,16 +465,9 @@ function registerAiRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl
     catch (e) { res.json({ state: "idle", step: "", log: [] }); }
   });
   app.post("/api/build/ai/cancel", (_req, res) => {
-    if (!aiProc) return res.json({ cancelled: false, running: false, note: "no AI build running" });
+    if (!aiProc) { markCancelled(aiStatus); return res.json({ cancelled: false, running: false, note: "no AI build running" }); }
     killTreeImpl(aiProc.pid);
-    try {
-      const s = JSON.parse(fs.readFileSync(aiStatus, "utf8"));
-      if (s.state === "building" || s.state === "starting") {
-        s.state = "cancelled"; s.step = "Cancelled by user"; s.etaSec = 0;
-        (s.log = s.log || []).push("⏹ cancelled by user");
-        fs.writeFileSync(aiStatus, JSON.stringify(s, null, 2));
-      }
-    } catch (e) { /* no status file */ }
+    markCancelled(aiStatus);
     res.json({ cancelled: true });
   });
 }
@@ -498,7 +490,7 @@ function registerAiProxyRoutes(app) {
 
   async function forward(res, p, body) {
     try {
-      const r = await fetch(aiHub(p), { method: "POST", headers: { "Content-Type": "application/json", Authorization: HUB_AUTH }, body: JSON.stringify(body || {}) });
+      const r = await fetch(aiHub(p), { method: "POST", headers: { "Content-Type": "application/json", Authorization: HUB_AUTH }, body: JSON.stringify(body || {}), signal: AbortSignal.timeout(120000) });
       const text = await r.text();
       let data;
       try { data = JSON.parse(text); } catch (_e) {
