@@ -21,34 +21,39 @@ function vademoFromEnv(env, { fetchImpl = fetch, timeoutMs = 30000 } = {}) {
     catch (e) { throw new Error(redact(String(e.message || e), secrets)); }
   }
 
+  // Read an Atelier answer: throws (password redacted) on an HTTP failure, a non-JSON answer or status.errors.
+  async function answer(res, label) {
+    const j = await res.json().catch(() => null);
+    const errs = (j?.status?.errors || []).map(e => e.error || String(e));
+    if (!res.ok || !j) throw new Error(redact(`${label}: VADEMO answered HTTP ${res.status}${!j ? " (not JSON)" : errs.length ? " — " + errs.join("; ") : ""}`, secrets));
+    if (errs.length) throw new Error(redact(`${label}: ${errs.join("; ")}`, secrets));
+    return j;
+  }
+
   // Upload a class document; strip \r so Windows line endings don't create empty tokens in IRIS.
   async function putClass(name, text) {
-    await callAtelier("PUT", `/doc/${name}?ignoreConflict=1`, { enc: false, content: text.replace(/\r/g, "").split("\n") });
+    await answer(await callAtelier("PUT", `/doc/${name}?ignoreConflict=1`, { enc: false, content: text.replace(/\r/g, "").split("\n") }), `upload ${name}`);
   }
 
   // Compile one or more classes in one round-trip; throws listing all status.errors and console ERRORs.
   async function compile(names) {
-    const res = await callAtelier("POST", "/action/compile", names);
-    const j = await res.json().catch(() => ({}));
-    const errs = (j?.status?.errors || []).map(e => e.error || String(e));
-    const consoleFails = (j?.console || []).filter(l => /ERROR/.test(l));
-    if (errs.length || consoleFails.length)
-      throw new Error(redact("compile errors: " + [...errs, ...consoleFails].join("; "), secrets));
+    const j = await answer(await callAtelier("POST", "/action/compile", names), "compile errors");
+    const consoleFails = (j.console || []).filter(l => /ERROR/.test(l));
+    if (consoleFails.length) throw new Error(redact("compile errors: " + consoleFails.join("; "), secrets));
   }
 
-  // Delete a class document; HTTP 404 means it was already absent.
+  // Delete a class document; HTTP 404 means it was already absent, any other failure throws.
   async function deleteClass(name) {
     const res = await callAtelier("DELETE", `/doc/${name}`);
-    return res.status === 404 ? "absent" : "deleted";
+    if (res.status === 404) return "absent";
+    await answer(res, `delete ${name}`);
+    return "deleted";
   }
 
-  // Run a SQL query via Atelier; throws on status.errors (password redacted).
+  // Run a SQL query via Atelier; throws on an HTTP failure or status.errors (password redacted).
   async function query(sql, parameters = []) {
-    const res = await callAtelier("POST", "/action/query", { query: sql, parameters });
-    const j = await res.json().catch(() => ({}));
-    if ((j?.status?.errors || []).length)
-      throw new Error(redact("query error: " + j.status.errors.map(e => e.error || String(e)).join("; "), secrets));
-    return j?.result?.content || [];
+    const j = await answer(await callAtelier("POST", "/action/query", { query: sql, parameters }), "query error");
+    return j.result?.content || [];
   }
 
   // Direct call to the deployed REST data service (for smoke-testing after deploy).
