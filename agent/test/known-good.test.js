@@ -83,3 +83,39 @@ test("a non-retryable rename error (ENOENT) is thrown at once without retrying",
     assert.equal(calls, 1);
   } finally { for (const d of [root, src]) fs.rmSync(d, { recursive: true, force: true }); }
 });
+
+test("put-back uses retrying rename: staging→final always EPERM, old→final EPERM twice then succeeds → throws, v1 readable", () => {
+  const root = tmp(), v1 = files(tmp(), { "a.cls": "v1" }), v2 = files(tmp(), { "a.cls": "v2" });
+  let putBackCalls = 0;
+  // keyed on from: .new- = staging→final (always fail); .old- = put-back (EPERM x2 then succeed); else final→old (succeed)
+  const _rename = (from, to) => {
+    if (from.includes(".new-")) throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+    if (from.includes(".old-")) { if (++putBackCalls <= 2) throw Object.assign(new Error("EPERM"), { code: "EPERM" }); return fs.renameSync(from, to); }
+    fs.renameSync(from, to);
+  };
+  try {
+    saveKnownGood("ai", { dirs: { classes: v1 } }, root);
+    assert.throws(() => saveKnownGood("ai", { dirs: { classes: v2 }, _rename }, root));
+    assert.ok(putBackCalls >= 3, `put-back must have been retried, got ${putBackCalls}`);
+    assert.equal(fs.readFileSync(path.join(readKnownGood("ai", root).dirs.classes, "a.cls"), "utf8"), "v1");
+  } finally { for (const d of [root, v1, v2]) fs.rmSync(d, { recursive: true, force: true }); }
+});
+
+test("put-back that always fails throws naming the .old path; readKnownGood finds v1 via .old-* fallback", () => {
+  const root = tmp(), v1 = files(tmp(), { "a.cls": "v1" }), v2 = files(tmp(), { "a.cls": "v2" });
+  let thrownErr;
+  // final→old succeeds; staging→final and put-back always fail
+  const _rename = (from, to) => {
+    if (from.includes(".new-") || from.includes(".old-")) throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+    fs.renameSync(from, to);
+  };
+  try {
+    saveKnownGood("ai", { dirs: { classes: v1 } }, root);
+    try { saveKnownGood("ai", { dirs: { classes: v2 }, _rename }, root); assert.fail("should throw"); }
+    catch (e) { thrownErr = e; }
+    assert.ok(thrownErr.message.includes(".old"), `error must name the .old path, got: ${thrownErr.message}`);
+    const kg = readKnownGood("ai", root);
+    assert.ok(kg !== null, "readKnownGood must find v1 via .old-* fallback");
+    assert.equal(fs.readFileSync(path.join(kg.dirs.classes, "a.cls"), "utf8"), "v1");
+  } finally { for (const d of [root, v1, v2]) fs.rmSync(d, { recursive: true, force: true }); }
+});

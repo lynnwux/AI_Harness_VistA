@@ -45,7 +45,11 @@ function saveKnownGood(layer, { dirs = {}, meta = {}, _rename } = {}, root = KNO
     rename(staging, final);
   } catch (e) {
     fs.rmSync(staging, { recursive: true, force: true });
-    if (movedToOld) try { fs.renameSync(old, final); } catch (_) {} // restore previous good copy
+    if (movedToOld) {
+      // Restore previous good copy using the retrying rename; if even that fails, leave .old in place and name it
+      try { rename(old, final); }
+      catch (putBackErr) { throw new Error(`${e.message}; put-back also failed (${putBackErr.message}) — previous copy stranded at ${old}`); }
+    }
     throw e;
   }
   fs.rmSync(old, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -54,9 +58,20 @@ function saveKnownGood(layer, { dirs = {}, meta = {}, _rename } = {}, root = KNO
 
 function readKnownGood(layer, root = KNOWN_GOOD_ROOT) {
   const dir = path.join(root, layer), metaFile = path.join(dir, "meta.json");
-  if (!fs.existsSync(metaFile)) return null;
-  const meta = JSON.parse(fs.readFileSync(metaFile, "utf8"));
-  return { meta, dir, dirs: Object.fromEntries((meta.dirs || []).map(n => [n, path.join(dir, n)])) };
+  if (fs.existsSync(metaFile)) {
+    const meta = JSON.parse(fs.readFileSync(metaFile, "utf8"));
+    return { meta, dir, dirs: Object.fromEntries((meta.dirs || []).map(n => [n, path.join(dir, n)])) };
+  }
+  // Fall back to newest .old-* debris left by a failed swap (put-back stranded)
+  if (!fs.existsSync(root)) return null;
+  const fallback = fs.readdirSync(root)
+    .filter(n => n.startsWith(`${layer}.old-`))
+    .map(n => ({ p: path.join(root, n), ts: parseInt(n.split("-").pop(), 10) || 0 }))
+    .filter(({ p }) => fs.existsSync(path.join(p, "meta.json")))
+    .sort((a, b) => b.ts - a.ts)[0];
+  if (!fallback) return null;
+  const meta = JSON.parse(fs.readFileSync(path.join(fallback.p, "meta.json"), "utf8"));
+  return { meta, dir: fallback.p, dirs: Object.fromEntries((meta.dirs || []).map(n => [n, path.join(fallback.p, n)])) };
 }
 
 module.exports = { LAYERS, KNOWN_GOOD_ROOT, saveKnownGood, readKnownGood };
