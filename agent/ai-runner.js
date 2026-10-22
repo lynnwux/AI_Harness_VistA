@@ -15,6 +15,7 @@ const { saveKnownGood, KNOWN_GOOD_ROOT } = require("./lib/known-good");
 const { chatAppFiles } = require("./lib/chat-app");
 const { buildAngularApp } = require("./lib/angular-build");
 const { DEFAULT_COMPONENT_FILES } = require("./lib/angular-app");
+const { watchParent, sweepWorkspaces, timedFetch } = require("./lib/runner-control");
 
 const STATUS_FILE  = path.join(__dirname, "ai-status.json");
 const CONFIG_FILE  = path.join(__dirname, "interclaw-servers.json");
@@ -342,7 +343,7 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     _chatOut:       chatOut        = CHAT_OUT,
     _knownGoodRoot: knownGoodRoot  = KNOWN_GOOD_ROOT,
     _buildChatApp:  buildChatApp   = _defaultBuildChatApp,
-    _fetch:         fetchFn        = (typeof fetch === "function" ? fetch : null),
+    _fetch:         fetchFn        = (typeof fetch === "function" ? timedFetch(fetch, 120000) : null),
   } = _deps;
 
   const status = { state: "building", step: "", log: [], error: null, startedAt: new Date().toISOString() };
@@ -386,6 +387,7 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     const model   = process.env.BEDROCK_MODEL_ID || DEFAULT_MODEL_ID;
     const classes = aiClasses({ ai, inventory, model });
     const dir = path.join(productionDir, "ai-run-" + new Date().toISOString().replace(/[:.]/g, "-"));
+    sweepWorkspaces(productionDir, { keep: [dir] });
     fs.mkdirSync(dir, { recursive: true });
     for (const c of classes) fs.writeFileSync(path.join(dir, c.name), c.text);
     note(`${classes.length} classes written to ${path.relative(__dirname, dir)}`);
@@ -586,7 +588,7 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
   }
 }
 
-if (require.main === module) main();
+if (require.main === module) { watchParent(); main(); }
 
 module.exports = { readAiSpec, aiSettingsScript, checkSettingsMarkers, main, STATUS_FILE,
                    sameRows, countFrom, countInReply, judgeAi, describeRows, vademoLogin, bedrockToken, _defaultBuildChatApp };

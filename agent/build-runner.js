@@ -14,6 +14,7 @@ const { vademoFromEnv } = require("./lib/vademo");
 const { deployRestService, REST_CLASSES, HARNESS_DIR } = require("./lib/rest-service");
 const { verifyWritePath, runIdOf } = require("./lib/api-verify");
 const { redact } = require("./lib/iris-deploy");
+const { watchParent } = require("./lib/runner-control");
 
 const ROOT = path.join(__dirname, "..");                    // repo root
 const WORK_ROOT = path.join(__dirname, "_build");           // holds per-build workspaces
@@ -176,6 +177,6 @@ async function main(deps = {}) {
   }
 }
 
-if (require.main === module) main();
+if (require.main === module) { watchParent(); main(); }
 
 module.exports = { buildConfig, angularFiles, main, STATUS_FILE: STATUS };

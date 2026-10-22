@@ -9,6 +9,7 @@ const { SERVER, serverEntry, docPath, redact, irisSession, irisScript } = requir
 const { sessionScript, smtpSettings } = require("./production-runner");
 const { aiSettingsScript, checkSettingsMarkers } = require("./ai-runner");
 
+const { watchParent } = require("./lib/runner-control");
 const STATUS_FILE = path.join(__dirname, "restore-status.json");
 const ROOT = path.join(__dirname, "..");
 const SECRET_KEYS = ["IRIS_AI_HUB_PASSWORD", "VADEMO_PASSWORD", "VADEMO_READ_PASSWORD", "AWS_BEARER_TOKEN_BEDROCK", "BULLETIN_SMTP_PASSWORD"];
@@ -95,6 +96,6 @@ async function restoreAll({
   return status;
 }
 
-if (require.main === module) restoreAll().then(s => { if (s.state !== "done") process.exitCode = 1; }, e => { console.error(String(e.message || e)); process.exitCode = 1; });
+if (require.main === module) { watchParent(); restoreAll().then(s => { if (s.state !== "done") process.exitCode = 1; }, e => { console.error(String(e.message || e)); process.exitCode = 1; }); }
 
 module.exports = { restoreAll, STATUS_FILE };

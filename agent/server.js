@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const { runAgent } = require("./lib/bedrock");
+const { killTree } = require("./lib/runner-control");
 const { defaultDecisions, getState, findNode, label } = require("./lib/tools");
 const { loadRecord, saveRecord, diffRecords, normalize } = require("./lib/record");
 const { DEFAULT_PATHS, generate, writeSpecs, stage } = require("./lib/specs");
@@ -15,10 +16,10 @@ const ROOT = path.join(__dirname, "..");                 // repo root (serves ca
 const PORT = process.env.PORT || 8899;
 const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return fallback; } };
 
-// spawnImpl and statusFiles let tests run the build routes without starting a runner or touching agent/ files.
-function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl = spawn, statusFiles = {} } = {}) {
+// spawnImpl, statusFiles and killTreeImpl let tests run the build routes without starting a runner or touching agent/ files.
+function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl = spawn, statusFiles = {}, killTreeImpl = killTree } = {}) {
   let graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
-  const inventory = readJson(paths.inventory || DEFAULT_PATHS.inventory, null);   // the discovery file (null when missing)
+  let inventory = readJson(paths.inventory || DEFAULT_PATHS.inventory, null);     // re-read in regenerate()
   let notice = null;
   const onCorrupt = bak => { notice = `decisions.json could not be read, so the workbench started from the default decisions. The unreadable file was backed up as ${path.basename(bak)} — nothing in it is lost.`; };
   const state = { record: loadRecord(paths.decisions, () => defaultDecisions(graph), { onCorrupt }), specs: null, md: null, stage: null, specsError: null, notice: null };
@@ -40,6 +41,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
   function regenerate() {
     try {
       graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
+      inventory = readJson(paths.inventory || DEFAULT_PATHS.inventory, null);   // re-read; changed file picked up immediately
       const inputs = { graph, record: state.record, implemented: implemented(), inventory };
       const specs = generate(inputs);
       state.md = writeSpecs(paths.specsDir, specs, inputs);
@@ -158,8 +160,8 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
   }).catch(e => { if (!res.headersSent) res.status(500).json({ error: String(e.message || e) }); }));
 
   registerVistaRoutes(app);
-  registerBuildRoutes(app, regenerate, serially, { spawnImpl, buildStatus: statusFiles.build || STATUS_FILE });
-  const runners = { spawnImpl, productionStatus: statusFiles.production || PRODUCTION_STATUS, aiStatus: statusFiles.ai || AI_STATUS_FILE, restoreStatus: statusFiles.restore || RESTORE_STATUS };
+  registerBuildRoutes(app, regenerate, serially, { spawnImpl, buildStatus: statusFiles.build || STATUS_FILE, killTreeImpl });
+  const runners = { spawnImpl, productionStatus: statusFiles.production || PRODUCTION_STATUS, aiStatus: statusFiles.ai || AI_STATUS_FILE, restoreStatus: statusFiles.restore || RESTORE_STATUS, killTreeImpl };
   // Demo reset: the Decide page starts over — every decision back to the defaults, the production and AI build
   // status back to not built. What is deployed keeps running; the Phase 1 services and the known-good copies stay.
   app.post("/api/demo/reset", (_req, res) => serially(() => {
@@ -182,6 +184,19 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
   app.get("/api/restore/status", (_req, res) => {
     try { res.json(JSON.parse(fs.readFileSync(runners.restoreStatus, "utf8"))); }
     catch (e) { res.json({ state: "idle", step: "", log: [], results: [] }); }
+  });
+  app.post("/api/restore/cancel", (_req, res) => {
+    if (!restoreProc) return res.json({ cancelled: false, running: false, note: "no restore running" });
+    killTreeImpl(restoreProc.pid);
+    try {
+      const s = JSON.parse(fs.readFileSync(runners.restoreStatus, "utf8"));
+      if (s.state === "restoring" || s.state === "starting") {
+        s.state = "cancelled"; s.step = "Cancelled by user";
+        (s.log = s.log || []).push("⏹ cancelled by user");
+        fs.writeFileSync(runners.restoreStatus, JSON.stringify(s, null, 2));
+      }
+    } catch (e) { /* no status file */ }
+    res.json({ cancelled: true });
   });
   registerProductionRoutes(app, regenerate, serially, () => state.specs, () => state.stage, runners);
   registerAiRoutes(app, regenerate, serially, () => state.specs, () => state.stage, runners);
@@ -304,7 +319,7 @@ let buildProc = null;
 const PHASE2_CLOSED = "Phase 2 opens after the Phase 1 build — press 🔨 Build on the API tab first";
 const API_OUT_OF_DATE = "the API layer changed since it was built — press 🔨 Build on the API tab to rebuild Phase 1 first";
 
-function registerBuildRoutes(app, regenerate, serially, { spawnImpl = spawn, buildStatus = STATUS_FILE } = {}) {
+function registerBuildRoutes(app, regenerate, serially, { spawnImpl = spawn, buildStatus = STATUS_FILE, killTreeImpl = killTree } = {}) {
   // queued behind any chat turn in flight, so the build reads the record that turn saved
   app.post("/api/build", (_req, res) => serially(() => {
     try {
@@ -336,28 +351,19 @@ function registerBuildRoutes(app, regenerate, serially, { spawnImpl = spawn, bui
     try { res.json(JSON.parse(fs.readFileSync(buildStatus, "utf8"))); }
     catch (e) { res.json({ state: "idle", step: "", log: [], url: null }); }
   });
-  // Cancel a running build and get the environment ready for the next press. Kills the
-  // whole process tree (npm/ng grandchildren) — buildProc.kill() alone leaves them running.
-  // Marks status "cancelled" BEFORE killing so the exit guard doesn't relabel it "error".
-  // The next build's "Preparing workspace" step wipes _build, so no extra cleanup needed here.
-  app.post("/api/build/cancel", (req, res) => {
-    const markCancelled = () => {
-      try {
-        const s = JSON.parse(fs.readFileSync(STATUS_FILE, "utf8"));
-        if (s.state === "building" || s.state === "starting") {
-          s.state = "cancelled"; s.step = "Cancelled by user"; s.etaSec = 0;
-          (s.log = s.log || []).push("⏹ cancelled by user");
-          fs.writeFileSync(STATUS_FILE, JSON.stringify(s, null, 2));
-        }
-      } catch (e) { /* no status file — nothing to mark */ }
-    };
-    if (!buildProc) { markCancelled(); return res.json({ cancelled: false, running: false, note: "no build running" }); }
-    markCancelled();
-    const pid = buildProc.pid;
+  // Cancel a running build — kills the whole process tree first, then marks "cancelled".
+  // reconcileExit leaves "cancelled" alone so the exit does not relabel it "error".
+  app.post("/api/build/cancel", (_req, res) => {
+    if (!buildProc) return res.json({ cancelled: false, running: false, note: "no build running" });
+    killTreeImpl(buildProc.pid);
     try {
-      if (process.platform === "win32") spawn("taskkill", ["/PID", String(pid), "/T", "/F"]);
-      else { try { process.kill(-pid, "SIGKILL"); } catch (e) { try { buildProc.kill("SIGKILL"); } catch (e2) {} } }
-    } catch (e) { return res.status(500).json({ cancelled: false, error: String(e.message || e) }); }
+      const s = JSON.parse(fs.readFileSync(buildStatus, "utf8"));
+      if (s.state === "building" || s.state === "starting") {
+        s.state = "cancelled"; s.step = "Cancelled by user"; s.etaSec = 0;
+        (s.log = s.log || []).push("⏹ cancelled by user");
+        fs.writeFileSync(buildStatus, JSON.stringify(s, null, 2));
+      }
+    } catch (e) { /* no status file */ }
     res.json({ cancelled: true });
   });
 }
@@ -368,10 +374,11 @@ let productionProc = null;
 let aiProc = null;
 
 // Mark a status file errored when its runner died without writing a terminal state.
+// Leaves "cancelled" alone — the cancel route already wrote it before killing.
 function reconcileExit(statusFile, what, code) {
   try {
     const s = JSON.parse(fs.readFileSync(statusFile, "utf8"));
-    if (s.state !== "done" && s.state !== "error") {
+    if (s.state !== "done" && s.state !== "error" && s.state !== "cancelled") {
       s.state = "error"; s.error = `${what} exited unexpectedly (code ${code})`;
       (s.log = s.log || []).push("✗ " + s.error);
       fs.writeFileSync(statusFile, JSON.stringify(s, null, 2));
@@ -379,7 +386,7 @@ function reconcileExit(statusFile, what, code) {
   } catch (e) { /* no status file — nothing to reconcile */ }
 }
 
-function registerProductionRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl = spawn, productionStatus = PRODUCTION_STATUS } = {}) {
+function registerProductionRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl = spawn, productionStatus = PRODUCTION_STATUS, killTreeImpl = killTree } = {}) {
   app.post("/api/build/production", (_req, res) => serially(() => {
     if (productionProc) return res.json({ started: false, running: true, note: "a production build is already running" });
     if (aiProc) return res.status(409).json({ started: false, error: "the AI build is running — wait for it to finish, then build the production" });
@@ -404,6 +411,19 @@ function registerProductionRoutes(app, regenerate, serially, specs, stageOf, { s
     try { res.json(JSON.parse(fs.readFileSync(productionStatus, "utf8"))); }
     catch (e) { res.json({ state: "idle", step: "", log: [] }); }
   });
+  app.post("/api/build/production/cancel", (_req, res) => {
+    if (!productionProc) return res.json({ cancelled: false, running: false, note: "no production build running" });
+    killTreeImpl(productionProc.pid);
+    try {
+      const s = JSON.parse(fs.readFileSync(productionStatus, "utf8"));
+      if (s.state === "building" || s.state === "starting") {
+        s.state = "cancelled"; s.step = "Cancelled by user"; s.etaSec = 0;
+        (s.log = s.log || []).push("⏹ cancelled by user");
+        fs.writeFileSync(productionStatus, JSON.stringify(s, null, 2));
+      }
+    } catch (e) { /* no status file */ }
+    res.json({ cancelled: true });
+  });
 }
 
 const { STATUS_FILE: AI_STATUS_FILE } = require("./ai-runner");
@@ -419,7 +439,7 @@ function startRestore({ spawnImpl = spawn, restoreStatus = RESTORE_STATUS } = {}
   proc.on("exit", code => { if (restoreProc === proc) restoreProc = null; reconcileExit(restoreStatus, "the restore", code); });
   return { reply: "Restoring the last good copy of each deliverable — the entry form, the IRIS production and the AI layer…", restore: { started: true, statusUrl: "/api/restore/status" } };
 }
-function registerAiRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl = spawn, aiStatus = AI_STATUS_FILE } = {}) {
+function registerAiRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl = spawn, aiStatus = AI_STATUS_FILE, killTreeImpl = killTree } = {}) {
   app.post("/api/build/ai", (_req, res) => serially(() => {
     if (aiProc) return res.json({ started: false, running: true, note: "an AI build is already running" });
     if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build the AI layer" });
@@ -444,6 +464,19 @@ function registerAiRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl
   app.get("/api/build/ai/status", (_req, res) => {
     try { res.json(JSON.parse(fs.readFileSync(aiStatus, "utf8"))); }
     catch (e) { res.json({ state: "idle", step: "", log: [] }); }
+  });
+  app.post("/api/build/ai/cancel", (_req, res) => {
+    if (!aiProc) return res.json({ cancelled: false, running: false, note: "no AI build running" });
+    killTreeImpl(aiProc.pid);
+    try {
+      const s = JSON.parse(fs.readFileSync(aiStatus, "utf8"));
+      if (s.state === "building" || s.state === "starting") {
+        s.state = "cancelled"; s.step = "Cancelled by user"; s.etaSec = 0;
+        (s.log = s.log || []).push("⏹ cancelled by user");
+        fs.writeFileSync(aiStatus, JSON.stringify(s, null, 2));
+      }
+    } catch (e) { /* no status file */ }
+    res.json({ cancelled: true });
   });
 }
 

@@ -264,16 +264,16 @@ const ALL_KEPT = {
 };
 
 // A server whose builds are fake processes: nothing is spawned, and the status files are temp files.
-async function buildSetup({ apiBuilt = true, orchestratorVerified = true, aiQuestions = undefined, agentCalls = [] } = {}) {
+async function buildSetup({ apiBuilt = true, orchestratorVerified = true, aiQuestions = undefined, agentCalls = [], killTreeImpl = () => {}, inventory = INVENTORY } = {}) {
   const procs = [];
   const spawnImpl = (_cmd, args) => { const p = new EventEmitter(); p.args = args; p.pid = 0; p.unref = () => {}; procs.push(p); return p; };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-b-"));
-  const paths = { graph: path.join(dir, "graph.json"), decisions: path.join(dir, "decisions.json"), implemented: path.join(dir, "implemented.json"), inventory: INVENTORY, specsDir: path.join(dir, "specs") };
+  const paths = { graph: path.join(dir, "graph.json"), decisions: path.join(dir, "decisions.json"), implemented: path.join(dir, "implemented.json"), inventory, specsDir: path.join(dir, "specs") };
   fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), paths.graph);
   fs.writeFileSync(paths.decisions, JSON.stringify(aiQuestions ? { ...MIN_DEC, aiQuestions } : MIN_DEC));
   fs.writeFileSync(paths.implemented, JSON.stringify({ api: apiBuilt ? builtApi() : emptyImplemented().api, orchestrator: { built: orchestratorVerified, verified: orchestratorVerified } }));
   const statusFiles = { build: path.join(dir, "build-status.json"), production: path.join(dir, "production-status.json"), ai: path.join(dir, "ai-status.json"), restore: path.join(dir, "restore-status.json") };
-  const made = createApp({ paths, runAgentImpl: async m => { agentCalls.push(m); return { reply: "ok", toolTrace: [] }; }, spawnImpl, statusFiles });
+  const made = createApp({ paths, runAgentImpl: async m => { agentCalls.push(m); return { reply: "ok", toolTrace: [] }; }, spawnImpl, statusFiles, killTreeImpl });
   const t = await new Promise(resolve => {
     const srv = made.app.listen(0, "127.0.0.1", () => resolve({ ...made, srv, paths, dir, base: `http://127.0.0.1:${srv.address().port}` }));
   });
@@ -539,4 +539,56 @@ test("the guide is told Phase 1 is not built, and never that it is", async () =>
   try {
     assert.match(t2.systemPrompt(), /The API layer .* is built and verified/);
   } finally { await t2.done(); }
+});
+
+test("stopping a production build kills it first, then marks it cancelled, and the exit leaves it cancelled", async () => {
+  const events = [];
+  let statusFilePath;
+  const killTreeImpl = _pid => {
+    try { events.push({ type: "kill", state: JSON.parse(fs.readFileSync(statusFilePath, "utf8")).state }); }
+    catch (_) { events.push({ type: "kill", state: "unknown" }); }
+  };
+  const t = await buildSetup({ killTreeImpl });
+  statusFilePath = t.statusFiles.production;
+  try {
+    const r = await (await post(t, "/api/build/production")).json();
+    assert.equal(r.started, true);
+    // simulate runner setting the status to "building"
+    fs.writeFileSync(t.statusFiles.production, JSON.stringify({ state: "building", step: "", log: [] }));
+    const cr = await (await post(t, "/api/build/production/cancel")).json();
+    assert.equal(cr.cancelled, true);
+    // kill fired exactly once, and the status was still "building" when it fired (not yet "cancelled")
+    assert.equal(events.length, 1, "kill called once");
+    assert.equal(events[0].state, "building", "kill happened before mark-cancelled");
+    // status is now cancelled
+    const s = JSON.parse(fs.readFileSync(t.statusFiles.production, "utf8"));
+    assert.equal(s.state, "cancelled");
+    // exit does NOT change cancelled to error (reconcileExit leaves cancelled alone)
+    t.procs[0].emit("exit", 1);
+    await new Promise(r => setTimeout(r, 30));
+    const s2 = JSON.parse(fs.readFileSync(t.statusFiles.production, "utf8"));
+    assert.equal(s2.state, "cancelled");
+  } finally { await t.done(); }
+});
+
+test("a changed inventory file is picked up without a restart", async () => {
+  // Use a writable temp copy of the inventory
+  const tempInvDir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-inv-"));
+  const inventoryPath = path.join(tempInvDir, "inventory-fields.json");
+  fs.copyFileSync(INVENTORY, inventoryPath);
+  const t = await buildSetup({ aiQuestions: ALL_KEPT, inventory: inventoryPath });
+  try {
+    // Rewrite the inventory with a minor change
+    const inv = JSON.parse(fs.readFileSync(inventoryPath, "utf8"));
+    inv._testModified = true;
+    fs.writeFileSync(inventoryPath, JSON.stringify(inv));
+    // A chat turn triggers regenerate() which must re-read paths.inventory
+    await say(t, "hi");
+    // The AI spec's inventory hash now matches the modified inventory
+    const aiSpec = JSON.parse(fs.readFileSync(path.join(t.paths.specsDir, "ai.json"), "utf8"));
+    assert.deepEqual(aiSpec.inputs.inventory, inputHashes("ai", loadInputs(t.paths)).inventory);
+  } finally {
+    await t.done();
+    fs.rmSync(tempInvDir, { recursive: true, force: true });
+  }
 });

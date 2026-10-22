@@ -5,6 +5,7 @@
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { watchParent, sweepWorkspaces, timedFetch } = require("./lib/runner-control");
 const { DEFAULT_PATHS, loadInputs, inputHashes } = require("./lib/specs");
 const { productionClasses, PKG, WEB_APP, BULLETIN } = require("./lib/production");
 const { saveKnownGood } = require("./lib/known-good");
@@ -137,6 +138,7 @@ async function main(paths = DEFAULT_PATHS) {
     note(smtp ? `the bulletin sends for real through ${smtp.host}:${smtp.port}; the VistA write stays dry-run` : "no mail server configured (BULLETIN_SMTP_HOST) — the bulletin stays dry-run");
     const classes = productionClasses(specs, { bulletinLive: !!smtp });
     const dir = path.join(__dirname, "_production", "run-" + new Date().toISOString().replace(/[:.]/g, "-"));
+    sweepWorkspaces(path.join(__dirname, "_production"), { keep: [dir] });
     fs.mkdirSync(dir, { recursive: true });
     for (const c of classes) fs.writeFileSync(path.join(dir, c.name), c.text);
     note(`${classes.length} classes written to ${path.relative(__dirname, dir)}`);
@@ -177,7 +179,7 @@ async function main(paths = DEFAULT_PATHS) {
 
     step("Verifying with one dry-run request");
     const base = url.replace(/\/+$/, "");
-    const resp = await fetch(`${base}${WEB_APP}/equipment`, {
+    const resp = await timedFetch(fetch, 60000)(`${base}${WEB_APP}/equipment`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Basic " + Buffer.from(`${user}:${pass}`).toString("base64") },
       body: JSON.stringify(samplePayload(specs.api)),
@@ -202,7 +204,7 @@ async function main(paths = DEFAULT_PATHS) {
       let found = null;
       for (let i = 0; i < 10 && !found; i++) {
         if (i) await new Promise(r => setTimeout(r, 1000));
-        const list = await (await fetch(`${catcher}/api/v1/messages?limit=50`)).json();
+        const list = await (await timedFetch(fetch, 10000)(`${catcher}/api/v1/messages?limit=50`)).json();
         found = findDelivered(list.messages, { subject: status.bulletin && status.bulletin.Subject, recipients, since });
       }
       if (!found) throw new Error(`the bulletin reported sent, but it did not arrive in the mail catcher (${catcher}) for ${recipients}`);
@@ -228,6 +230,6 @@ async function main(paths = DEFAULT_PATHS) {
   }
 }
 
-if (require.main === module) main();
+if (require.main === module) { watchParent(); main(); }
 
 module.exports = { readSpecs, serverEntry, samplePayload, judge, sessionScript, portalUrl, docPath, smtpSettings, bulletinSettingsScript, findDelivered, STATUS_FILE, CREDENTIAL_ID };

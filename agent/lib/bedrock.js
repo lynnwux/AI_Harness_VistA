@@ -10,7 +10,7 @@ const DEFAULT_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
 const REGION = process.env.AWS_DEFAULT_REGION || DEFAULT_REGION;
 const MODEL = process.env.BEDROCK_MODEL_ID || DEFAULT_MODEL_ID;
 
-async function converse({ system, messages, tools }) {
+async function converse({ system, messages, tools }, { fetchImpl = fetch, timeoutMs = 120000 } = {}) {
   const token = process.env.AWS_BEARER_TOKEN_BEDROCK;
   if (!token) throw new Error("AWS_BEARER_TOKEN_BEDROCK not set");
   const url = `https://bedrock-runtime.${REGION}.amazonaws.com/model/${encodeURIComponent(MODEL)}/converse`;
@@ -20,10 +20,11 @@ async function converse({ system, messages, tools }) {
     inferenceConfig: { maxTokens: 1200, temperature: 0.2 },
   };
   if (tools) body.toolConfig = { tools };
-  const res = await fetch(url, {
+  const res = await fetchImpl(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`Bedrock ${res.status}: ${(await res.text()).slice(0, 500)}`);
   return res.json();
