@@ -1,8 +1,27 @@
 {
   "api": [
-    { "id": "write:6914", "endpoint": "POST /equipment", "what": "create a file-6914 record; body = the request contract; returns { status, equipmentIEN, lifecycleStatus }" },
-    { "id": "read:next-ien", "endpoint": "GET /equipment/next-ien", "what": "returns { status, ien } — shown display-only; the POST allocates authoritatively" },
-    { "id": "read:lookup", "endpoint": "GET /lookup/{file}?q=", "what": "pointer-file search; returns { items: [{ ien, display }], total }; &all=1 returns every row" }
+    {
+      "id": "write:6914",
+      "endpoint": "POST /equipment",
+      "what": "create a file-6914 record; body = the request contract; returns { status, equipmentIEN, lifecycleStatus }"
+    },
+    {
+      "id": "read:next-ien",
+      "endpoint": "GET /equipment/next-ien",
+      "what": "returns { status, ien } — shown display-only; the POST allocates authoritatively"
+    },
+    {
+      "id": "read:lookup",
+      "endpoint": "GET /lookup/{file}?q=",
+      "what": "pointer-file search; returns { items: [{ ien, display }], total }; &all=1 returns every row"
+    }
   ],
-  "orchestrator": { "built": false, "verified": false }
+  "orchestrator": {
+    "built": false,
+    "verified": false
+  },
+  "ai": {
+    "built": false,
+    "verified": false
+  }
 }

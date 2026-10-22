@@ -11,6 +11,7 @@ const { DEFAULT_PATHS, loadInputs, inputHashes } = require("./lib/specs");
 const { aiClasses, PKG, WEB_APP, CREDENTIALS, GUARD_CASES } = require("./lib/ai-hub");
 const { serverEntry, docPath, redact, irisSession, irisScript } = require("./lib/iris-deploy");
 const { DEFAULT_REGION, DEFAULT_MODEL_ID } = require("./lib/bedrock");
+const { saveKnownGood, KNOWN_GOOD_ROOT } = require("./lib/known-good");
 const { chatAppFiles } = require("./lib/chat-app");
 const { buildAngularApp } = require("./lib/angular-build");
 const { DEFAULT_COMPONENT_FILES } = require("./lib/angular-app");
@@ -110,6 +111,8 @@ function aiSettingsScript(env) {
     // Secrets live only in the SetCredential calls below — never in a log line or status file.
     `set sc=##class(Ens.Config.Credentials).SetCredential(${osq(CREDENTIALS.vademo)},${osq(vuser)},${osq(vpass)},1) write "VADEMO:",$select(sc=1:"stored",1:$system.Status.GetErrorText(sc)),!`,
     `set sc=##class(Ens.Config.Credentials).SetCredential(${osq(CREDENTIALS.bedrock)},"",${osq(btoken)},1) write "BEDROCK:",$select(sc=1:"stored",1:$system.Status.GetErrorText(sc)),!`,
+    // a stored session keeps the agent settings it was created with, so a new build starts every conversation fresh
+    `set n=0,k="" for { set k=$order(^${PKG}.Sessions(k)) quit:k=""  set id=$get(^${PKG}.Sessions(k)) do:id'="" ##class(%AI.Agent.Session).%DeleteId(id) set n=n+1 } kill ^${PKG}.Sessions write "SESSIONS:cleared ",n,!`,
     `halt`,
     "",
   ].join("\n");
@@ -176,6 +179,8 @@ function countInReply(reply, n) {
 }
 
 const COUNT_QUESTION = "How many pieces of equipment do we have?";
+// asked in one session, so the second and third turns reload the stored conversation
+const CONVERSATION_TURNS = [COUNT_QUESTION, "Which equipment category has the most items?", "How many items are in that category?"];
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const cell = v => String(v == null ? "" : v).trim();
 
@@ -208,7 +213,7 @@ function describeRows(rows, { truncated = false } = {}) {
 // Count rule: BOTH countFrom(result) === reference AND countInReply(reply, reference) must hold;
 //             a chatbot.error on the count result fails it.
 // items is the status.verification array (single source of truth — not duplicated in main()).
-function judgeAi({ quick = [], count = null, guard = [], rowCap = 200 }) {
+function judgeAi({ quick = [], count = null, guard = [], conversation = [], rowCap = 200 }) {
   const problems = [];
   const items = [];
 
@@ -289,6 +294,17 @@ function judgeAi({ quick = [], count = null, guard = [], rowCap = 200 }) {
     items.push({ question: "The read-only guard (general SQL)", chatbot: `${guard.length - guardFail} of ${guard.length} cases as expected`, vista: `${guard.length} cases`, ok: guardFail === 0 });
   }
 
+  // A multi-turn conversation in one session: a reloaded session must keep working (it once lost max_tokens).
+  if (conversation.length) {
+    let answered = 0;
+    conversation.forEach((turn, i) => {
+      if (turn.error != null) problems.push(`conversation turn ${i + 1}: chatbot error — ${turn.error || "(empty)"}`);
+      else if (!String(turn.reply || "").trim()) problems.push(`conversation turn ${i + 1}: no reply`);
+      else answered++;
+    });
+    items.push({ question: `A ${conversation.length}-turn conversation in one session`, chatbot: `${answered} of ${conversation.length} turns answered`, vista: "—", ok: answered === conversation.length });
+  }
+
   return { ok: problems.length === 0, problems, items };
 }
 
@@ -323,6 +339,8 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     _statusFile:    statusFile     = STATUS_FILE,
     _configFile:    configFile     = CONFIG_FILE,
     _productionDir: productionDir  = path.join(__dirname, "_production"),
+    _chatOut:       chatOut        = CHAT_OUT,
+    _knownGoodRoot: knownGoodRoot  = KNOWN_GOOD_ROOT,
     _buildChatApp:  buildChatApp   = _defaultBuildChatApp,
     _fetch:         fetchFn        = (typeof fetch === "function" ? fetch : null),
   } = _deps;
@@ -406,7 +424,7 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
 
     // ── Task 7: build the chat app ──────────────────────────────────────────
     step("Building the chat app");
-    await buildChatApp(d.questions, CHAT_OUT, safeNote);
+    await buildChatApp(d.questions, chatOut, safeNote);
     note("chat app built → " + CHAT_HREF);
 
     // ── Task 8: verify the chatbot against VistA ─────────────────────────────────
@@ -487,6 +505,18 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
       if (countResultOk(retryChat)) countChat = retryChat;
     }
 
+    // 2b. A three-turn conversation in one session — each later turn reloads the stored conversation.
+    const convId = "verify-conversation-" + Date.now();
+    const conversation = [];
+    for (const message of CONVERSATION_TURNS) {
+      try {
+        const turn = await hubPost("/equipmentai/chat", { sessionId: convId, message });
+        conversation.push({ reply: turn.reply, error: turn.error == null ? undefined : redact(String(turn.error), secrets) });
+      } catch (e) {
+        conversation.push({ error: redact(String(e.message || e), secrets) || "request failed" });
+      }
+    }
+
     // 3. Guard cases: replay every GUARD_CASES entry through /guard; capture HTTP errors as error entries.
     const guardInput = [];
     for (const gc of GUARD_CASES) {
@@ -522,6 +552,7 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
       quick:  quickInput,
       count:  { question: countQ, result: countChat, reply: redact(countChat.reply || "", secrets), reference: countRef },
       guard:  guardInput,
+      conversation,
       rowCap: 200,
     });
 
@@ -537,6 +568,8 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
     implData.ai = { built: true, verified: true, verifiedAt: new Date().toISOString() };
     fs.writeFileSync(paths.implemented, JSON.stringify(implData, null, 2) + "\n");
     note("implemented.ai marked verified");
+    saveKnownGood("ai", { dirs: { classes: dir, chat: chatOut }, meta: { container: d.container, namespace: d.namespace, classes: classes.map(c => c.name) } }, knownGoodRoot);
+    note("saved as the known-good AI layer (restore last good)");
 
     status.state   = "done";
     status.step    = "Deployed and verified";

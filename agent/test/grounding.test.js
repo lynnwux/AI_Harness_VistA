@@ -215,3 +215,23 @@ test("capability-graph replies do not focus AI groups (false-positive prevention
     userMessage: "", record: { oqPolicy: {} }, currentId: "SIDE.Bulletin" });
   assert.ok(!r2.focus.some(id => id.startsWith("AIQ.")), "no AI group should be focused by a bulletin reply");
 });
+
+test("an AI question's evidence is only the fields that question uses, not every column of its tables", () => {
+  const fs = require("fs"), path = require("path");
+  const inventory = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json"), "utf8"));
+  const { buildIndex } = require("../lib/grounding");
+  const g = buildIndex(require("./helpers").graph, inventory).groups.find(x => x.id === "AIQ.AgingOutFY");
+  const ev = g.evidence.join("\n");
+  assert.match(ev, /REPLACEMENT DATE/i);
+  assert.doesNotMatch(ev, /YALD CODE/i);
+  assert.ok(g.evidence.length <= 20, `${g.evidence.length} evidence lines`);
+});
+
+test("file 6914's own field names are shared vocabulary for the AI questions, never 'borrowed' (TOTAL_ASSET_VALUE)", () => {
+  const fs = require("fs"), path = require("path");
+  const inventory = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json"), "utf8"));
+  const { checkReply } = require("../lib/grounding");
+  const reply = "Recorded for the JCAHO-regulated equipment items with a pending inspection work order: the value column is TOTAL_ASSET_VALUE and the TOTAL ASSET VALUE field.";
+  const r = checkReply({ graph: require("./helpers").graph, reply, userMessage: "", record: {}, currentId: "AIQ.JCAHOPendingInspection", inventory, index: require("../lib/grounding").buildIndex(require("./helpers").graph, inventory) });
+  assert.ok(!r.borrowed.some(b => b.term === "TOTAL"), JSON.stringify(r.borrowed));
+});

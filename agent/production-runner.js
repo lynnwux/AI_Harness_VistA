@@ -7,6 +7,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { DEFAULT_PATHS, loadInputs, inputHashes } = require("./lib/specs");
 const { productionClasses, PKG, WEB_APP, BULLETIN } = require("./lib/production");
+const { saveKnownGood } = require("./lib/known-good");
 const { serverEntry, docPath } = require("./lib/iris-deploy");
 
 const SERVER = "iris-ai-hub";
@@ -212,6 +213,9 @@ async function main(paths = DEFAULT_PATHS) {
     const im = readJson(paths.implemented);
     im.orchestrator = { built: true, verified: true, production: `${PKG}.Production`, namespace: d.namespace, mode: smtp ? "VistA write dry-run, bulletin live" : "dry-run", verifiedAt: new Date().toISOString() };
     fs.writeFileSync(paths.implemented, JSON.stringify(im, null, 2) + "\n");
+
+    saveKnownGood("orchestrator", { dirs: { classes: dir }, meta: { container: d.container, namespace: d.namespace, production: `${PKG}.Production`, classes: classes.map(c => c.name) } });
+    note("saved as the known-good production (restore last good)");
 
     status.state = "done"; status.step = smtp ? "Production running and verified — the bulletin was sent" : "Production running and verified (dry-run)";
     status.log.push("✅ " + status.step); save();

@@ -8,6 +8,9 @@ prototype/build/
 agent/server.log
 agent/build-status.json
 agent/production-status.json
+agent/restore-status.json
+# last known-good copy of each deliverable (restore last good)
+agent/_known-good/
 agent/ai-status.json
 agent/build-decisions.json
 agent/decisions.backup-*.json

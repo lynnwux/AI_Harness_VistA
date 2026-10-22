@@ -11,6 +11,7 @@ const IM = {
     { id: "read:next-ien", endpoint: "GET /equipment/next-ien", what: "next IEN, display-only" },
     { id: "read:lookup", endpoint: "GET /lookup/{file}?q=", what: "pointer-file search" },
   ],
+  entryForm: { built: true },
   orchestrator: { built: false, verified: false },
 };
 // a fresh, normalized default record with sections patched in, e.g. rec({ dec: { … }, oqPolicy: { … } })

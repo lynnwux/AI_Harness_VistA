@@ -31,7 +31,10 @@ async function converse({ system, messages, tools }) {
 
 // Run one agent turn: userText + prior text history, looping over tool calls.
 // ctx = { graph, decisions, system }. Mutates ctx.decisions via tools.
-async function runAgent(userText, history, ctx) {
+// Recording a whole quick-access question takes several tool calls, and a grounding retry repeats them.
+const MAX_TOOL_ROUNDS = 12;
+
+async function runAgent(userText, history, ctx, { converseImpl = converse } = {}) {
   const messages = [];
   for (const h of history || []) {
     if (!h.text) continue;
@@ -40,8 +43,8 @@ async function runAgent(userText, history, ctx) {
   messages.push({ role: "user", content: [{ text: userText }] });
 
   const toolTrace = [];
-  for (let i = 0; i < 6; i++) {
-    const resp = await converse({ system: ctx.system, messages, tools: TOOL_SPECS });
+  for (let i = 0; i < MAX_TOOL_ROUNDS; i++) {
+    const resp = await converseImpl({ system: ctx.system, messages, tools: TOOL_SPECS });
     const out = resp.output.message;
     messages.push(out);
     if (resp.stopReason === "tool_use") {
@@ -59,7 +62,11 @@ async function runAgent(userText, history, ctx) {
     const text = (out.content || []).filter(c => c.text).map(c => c.text).join("\n").trim();
     return { reply: text || "(no text)", toolTrace };
   }
-  return { reply: "(stopped: too many tool iterations)", toolTrace };
+  const recorded = toolTrace.filter(t => t.result && t.result.ok).length;
+  return {
+    reply: `I ran out of steps before I could write a reply.${recorded ? ` ${recorded} change${recorded === 1 ? " was" : "s were"} recorded — the cards show exactly what.` : ""} Say "continue" and I'll pick up from the current item.`,
+    toolTrace,
+  };
 }
 
 module.exports = { converse, runAgent, REGION, MODEL, DEFAULT_REGION, DEFAULT_MODEL_ID };

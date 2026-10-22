@@ -373,4 +373,13 @@ function invalidParams(template, recordedParams, inventory) {
     });
 }
 
+// The fields each question reads — its legacy evidence in the Decide chat is these fields' DD text only.
+const EVIDENCE_COLUMNS = {
+  "AIQ.AgingOutFY":             ["EQUIPMENT_INV_6914.REPLACEMENT_DATE", "EQUIPMENT_INV_6914.INVESTMENT_CATEGORY", "EQUIPMENT_INV_6914.TYPE_OF_ENTRY", "EQUIPMENT_INV_6914.USE_STATUS"],
+  "AIQ.HighValueNoContract":    ["EQUIPMENT_INV_6914.TOTAL_ASSET_VALUE", "EQUIPMENT_INV_6914.ORIGINAL_ASSET_VALUE", "EQUIPMENT_INV_6914.SERVICE_CONTRACT", "EQUIPMENT_INV_6914.USE_STATUS"],
+  "AIQ.JCAHOPendingInspection": ["EQUIPMENT_INV_6914.JCAHO", "EQUIPMENT_INV_6914.USE_STATUS", "WORK_ORDER_6920.EQUIPMENT_ID", "WORK_ORDER_6920.STATUS", "WORK_ORDER_6920.PM_STATUS"],
+  "AIQ.CapitalPlanningTotals":  ["EQUIPMENT_INV_6914.TOTAL_ASSET_VALUE", "EQUIPMENT_INV_6914.ORIGINAL_ASSET_VALUE", "EQUIPMENT_INV_6914.INVESTMENT_CATEGORY", "EQUIPMENT_INV_6914.USE_STATUS"],
+};
+for (const t of TEMPLATES) t.evidenceColumns = EVIDENCE_COLUMNS[t.id];
+
 module.exports = { TEMPLATES, validateParams, missingFor, sqlFor, validateOne, invalidParams, codeLabel, fmDateIso };

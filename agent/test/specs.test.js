@@ -55,3 +55,20 @@ test("stage walks decide → the bulletin's recipients → ready → ai (discove
   assert.equal(aiStage.layer, "ai");
   assert.equal(aiStage.step, "discovery");
 });
+
+test("stage starts at Phase 1 — 🔨 Build on the API tab — until the entry form has been built from its spec", () => {
+  const { entryForm: _e, ...noForm } = IM;
+  for (const im of [noForm, { ...IM, entryForm: { built: false } }]) {
+    const st = stage(generate(inputs(rec(), im)), im);
+    assert.deepEqual(st, { layer: "api", step: "build", next: null });
+  }
+  // the entry form comes first even when the production is already built
+  const orchDone = { ...noForm, orchestrator: { built: true, verified: true } };
+  assert.equal(stage(generate(inputs(rec(), orchDone)), orchDone).layer, "api");
+  assert.equal(stage(generate(inputs(rec())), IM).layer, "orchestrator");
+});
+
+test("building the entry form never makes the API spec look stale", () => {
+  const { entryForm: _e, ...noForm } = IM;
+  assert.deepEqual(inputHashes("api", inputs(rec(), IM)), inputHashes("api", inputs(rec(), noForm)));
+});

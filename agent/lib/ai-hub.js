@@ -8,6 +8,7 @@
 const { TEMPLATES } = require("./ai-templates");
 
 const PKG = "EquipmentAI";
+const MAX_OUTPUT_TOKENS = 4096;   // a chat answer is a short summary; the rows travel separately
 const WEB_APP = "/equipmentai";
 const CREDENTIALS = { vademo: "EquipmentAIVademo", bedrock: "EquipmentAIBedrock" };
 const CONFIG_KEYS = ["vademoServer", "vademoPort", "vademoPath", "bedrockRegion"];
@@ -495,13 +496,36 @@ ClassMethod AgingOutFYSQL(fiscalYear As %String) As %String
 `;
 }
 
-function toolDescription(q) {
-  const base = `${line(q.wording)} Runs the developer's decided query on VistA and returns its columns and rows (at most 200, with rowCount and truncated).`;
+// The developer's decided parameters, in words — so the model knows the tool's fixed scope (e.g. "only use status 1 IN USE").
+function scopeText(q, inventory) {
+  const t = TEMPLATES.find(x => x.id === q.id);
+  if (!t) return "";
+  const labelOf = (table, column, code) => {
+    const col = (((inventory && inventory.tables && inventory.tables[table]) || {}).columns || []).find(c => c.column === column);
+    const hit = col && (col.codes || []).find(([c]) => String(c) === String(code));
+    return hit ? `${code} ${hit[1]}` : String(code);
+  };
+  const parts = t.params.map(p => {
+    const v = (q.params || {})[p.key];
+    if (v === undefined) return null;
+    const name = p.key === "useStatuses" ? "use status" : p.key;
+    if (Array.isArray(v) && v.length === 1 && v[0] === "ALL") return `${name}: any`;
+    if (p.type === "codes") {
+      const column = p.key === "workOrderStatuses" ? (q.params || {}).workOrderStatusColumn : p.column;
+      return `${name}: only ${[].concat(v).map(c => labelOf(p.table || "EQUIPMENT_INV_6914", column, c)).join(", ")}`;
+    }
+    return `${name}: ${[].concat(v).join(", ")}`;
+  }).filter(Boolean);
+  return parts.length ? ` Built-in filters (the developer's decisions): ${parts.join("; ")}.` : "";
+}
+
+function toolDescription(q, inventory) {
+  const base = `${line(q.wording)} Runs the developer's decided query on VistA and returns its columns and rows (at most 200, with rowCount and truncated).${scopeText(q, inventory)} Use it only for this question — not for a broader or different one.`;
   return q.id === AGING ? `${base} Optional fiscalYear: the federal fiscal year (Oct 1 to Sep 30), default ${Number(q.params.fiscalYear)}; pass another year only when the user names one.` : base;
 }
 
 function tools(questions, rowCap, inventory) {
-  const decls = questions.map(q => `  <Tool Name="${method(q.id)}" Method="${method(q.id)}">\n    <Description>${xml(toolDescription(q))}</Description>\n  </Tool>`);
+  const decls = questions.map(q => `  <Tool Name="${method(q.id)}" Method="${method(q.id)}">\n    <Description>${xml(toolDescription(q, inventory))}</Description>\n  </Tool>`);
   decls.push(`  <Tool Name="RunQuery" Method="RunQuery">\n    <Description>${xml(`Runs one read-only SELECT over the allow-listed VISTA tables in the schema guide (schema-qualified, e.g. VISTA.EQUIPMENT_INV_6914) and returns its columns and rows (at most ${rowCap}, with rowCount and truncated). Anything else is rejected by the guard.`)}</Description>\n  </Tool>`);
   const methods = questions.map(q => (q.id === AGING ? agingTool(q, inventory) : quickTool(q)));
   return cls(`${PKG}.Tools`, `/// The chatbot's tools: one per kept quick-access question (its decided SQL), plus RunQuery for general
@@ -614,7 +638,7 @@ You answer questions about the equipment inventory in VistA: FileMan file 6914 (
 ## Rules — follow every one
 
 1. Answer only from a tool result. Every number, name, date and total in your answer must come from a query you ran for this question: never estimate, never guess, and never fill a gap from general knowledge.
-2. When a question matches a quick-access question below, call its tool. For any other question, write one read-only SELECT and call \`RunQuery\`.
+2. Call a quick-access tool only when the question asks exactly that quick-access question. Each one has the developer's decided filters built in (listed in its description), so never use one to answer a broader or different question — a plain "how many pieces of equipment do we have?" is a count of all of file 6914, not of one use status. For any other question, write one read-only SELECT with only the filters the question asks for and call \`RunQuery\`; if you add a filter the question did not ask for, say which filter in your answer.
 3. When a tool returns an error: if it says \"rejected by the read-only guard\" or \"VistA rejected the query\", the query itself was wrong — correct the SQL and call \`RunQuery\` again (twice at most). Any other error means VistA could not be reached: say so plainly and stop — do not retry and do not answer another way.
 4. Show names, not pointer entry numbers: select a pointer's name column — ${names.join(", ")} and the others the schema guide names ("use … for the name"). For a coded column, show the code's meaning from the guide.
 5. A result holds at most ${rowCap} rows. When \`truncated\` is true, say that only the first ${rowCap} rows are shown and the full list is longer — never present it as complete. Count and total with COUNT(*) and SUM(column) in SQL, not by counting rows.
@@ -746,33 +770,24 @@ ClassMethod Agent() As ${PKG}.Agent
     Return tAgent
 }
 
-/// The session for pId (a new id when it is empty): the stored one with its context restored, or a new one.
+/// The session for pId (a new id when it is empty): always a new session with the reply cap, with the stored
+/// conversation imported. A reloaded session object loses max_tokens and falls back to AI Hub's default (65536),
+/// which is above Claude Haiku 4.5's output limit (64000) and rejected by Bedrock.
 ClassMethod Session(ByRef pId As %String, pAgent As ${PKG}.Agent) As %AI.Agent.Session
 {
     Set:$get(pId)="" pId = $system.Util.CreateGUID()
     Set pId = $extract(pId, 1, 200)
-    Set tStored = $get(^${PKG}.Sessions(pId))
-    If tStored '= "" {
-        Set tSession = ##class(%AI.Agent.Session).Load(tStored, pAgent.Provider)
-        If $isobject(tSession) {
-            // Load alone gives an empty context: restore it from the export
-            Set tExport = $get(^${PKG}.Sessions(pId, "export"))
-            If tExport '= "" { $$$ThrowOnError(tSession.Import(tExport)) }
-            Return tSession
-        }
-    }
-    Set tSession = pAgent.CreateSession({"temperature": 0})
-    $$$ThrowOnError(tSession.%Save())
-    Set ^${PKG}.Sessions(pId) = tSession.%Id()
+    Set tSession = pAgent.CreateSession({"temperature": 0, "max_tokens": ${MAX_OUTPUT_TOKENS}})
+    Set tExport = $get(^${PKG}.Sessions(pId, "export"))
+    If tExport '= "" { $$$ThrowOnError(tSession.Import(tExport)) }
     Return tSession
 }
 
-/// Saves the session and its exported context.
+/// Stores the session's exported conversation for the next turn.
 ClassMethod Keep(pId As %String, pSession As %AI.Agent.Session)
 {
     Set tExport = pSession.Export()
     Set:tExport'="" ^${PKG}.Sessions(pId, "export") = tExport
-    $$$ThrowOnError(pSession.%Save())
 }
 
 /// One agent turn; long sessions are summarized first, keeping the 8 most recent messages.

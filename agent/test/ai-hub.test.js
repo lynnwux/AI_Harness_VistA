@@ -200,7 +200,7 @@ test("Chat: Reply and Quick follow the session pattern and return the last tool 
   const t = byName(classes())["EquipmentAI.Chat"];
   assert.match(t, /ClassMethod Reply\(sessionId As %String, message As %String\) As %DynamicObject/);
   assert.match(t, /ClassMethod Quick\(sessionId As %String, id As %String, fiscalYear As %String = ""\) As %DynamicObject/);
-  assert.match(t, /%AI\.Agent\.Session\)\.Load\(/);
+  assert.doesNotMatch(t, /%AI\.Agent\.Session\)\.Load\(/, "a reloaded session loses max_tokens — the conversation is imported into a new one");
   assert.match(t, /\.Import\(/);
   assert.match(t, /\.Export\(\)/);
   assert.match(t, /\^EquipmentAI\.Sessions\(/);
@@ -371,4 +371,35 @@ test("an auth failure shows the fixed token message followed by the provider's o
   for (const n of ["EquipmentAI.Chat", "EquipmentAI.REST.Dispatch"]) {
     assert.match(list[n], /\.\.#TOKENEXPIRED_" \(provider said: "_tText_"\)"/, `${n} appends the original text`);
   }
+});
+
+test("new chat sessions cap the reply length below the model's output limit (Bedrock rejects AI Hub's default of 65536 for Claude Haiku 4.5)", () => {
+  const chat = classes().find(c => c.name === "EquipmentAI.Chat.cls").text;
+  const m = chat.match(/CreateSession\(\{[^}]*"max_tokens":\s*(\d+)/);
+  assert.ok(m, "CreateSession sets max_tokens");
+  assert.ok(Number(m[1]) > 0 && Number(m[1]) <= 64000, m[1]);
+});
+
+test("a quick tool carries its decided filters and is for its own question only; general questions get their own SELECT", () => {
+  const inUse = { ...decided, "AIQ.CapitalPlanningTotals": { ...decided["AIQ.CapitalPlanningTotals"], params: { useStatuses: ["1"], valueColumns: ["TOTAL_ASSET_VALUE"], groupBy: "none" } } };
+  const list = classes(aiSpec(inUse));
+  const tools = list.find(c => c.name === "EquipmentAI.Tools.cls").text;
+  const desc = (tools.match(/<Tool Name="CapitalPlanningTotals"[\s\S]*?<Description>([\s\S]*?)<\/Description>/) || [])[1] || "";
+  assert.match(desc, /use status/i, desc);
+  assert.match(desc, /IN USE/, desc);
+  assert.match(desc, /only for this question/i, desc);
+  const agent = list.find(c => c.name === "EquipmentAI.Agent.cls").text;
+  assert.match(agent, /never use one to answer a broader or different question/i);
+  assert.match(agent, /all of file 6914/i);
+  assert.match(agent, /say which filter/i);
+});
+
+test("every turn starts a session with the reply cap and imports the stored conversation — a reloaded session loses max_tokens", () => {
+  const chat = classes().find(c => c.name === "EquipmentAI.Chat.cls").text;
+  const session = chat.slice(chat.indexOf("ClassMethod Session("), chat.indexOf("ClassMethod Keep("));
+  assert.doesNotMatch(session, /%AI\.Agent\.Session\)\.Load\(/, "never reloads the stored session object");
+  assert.match(session, /CreateSession\(\{[^}]*"max_tokens"/);
+  assert.match(session, /\.Import\(/);
+  const keep = chat.slice(chat.indexOf("ClassMethod Keep("), chat.indexOf("ClassMethod Keep(") + 400);
+  assert.match(keep, /Export\(\)/);
 });

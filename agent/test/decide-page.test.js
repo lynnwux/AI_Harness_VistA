@@ -13,7 +13,7 @@ const HTML = fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph"
 const SCRIPT = HTML.split("<script>")[1].split("</script>")[0];
 const inventory = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json"), "utf8"));
 
-function page() {
+function page(extra) {
   const el = () => ({ style: {}, dataset: {}, classList: { toggle() {}, add() {}, remove() {} }, addEventListener() {}, appendChild() {}, remove() {}, insertAdjacentHTML() {} });
   const ctx = vm.createContext({
     document: { getElementById: el, querySelectorAll: () => [], createElement: el },
@@ -21,9 +21,11 @@ function page() {
     fetch: () => new Promise(() => {}),   // the boot waits forever: nothing is loaded
     setTimeout, setInterval, clearInterval, console, URL, Blob: function () {},
   });
-  vm.runInContext(SCRIPT + "\n;globalThis.__page = { openingMessages, defaultTab, serverLooksOld, OLD_SERVER_NOTICE };", ctx);
+  vm.runInContext(SCRIPT + "\n;globalThis.__page = { openingMessages, defaultTab, serverLooksOld, OLD_SERVER_NOTICE" + (extra ? ", " + extra : "") + " };", ctx);
   return ctx.__page;
 }
+
+const pageWith = name => page(name);
 
 // /api/specs as the server builds it
 function apiSpecs(record, implemented, inv = inventory) {
@@ -53,6 +55,8 @@ test("in the AI stage the opening says the production is built and verified, lis
   assert.doesNotMatch(text, /working on the \*\*Orchestrator\*\* layer/);
   assert.doesNotMatch(text, /ready for the production build/);
   assert.match(text, /production[^\n]*built and verified/i);
+  assert.match(text, /Phase 1[^\n]*Phase 2[^\n]*built and verified/);
+  assert.match(text, /Phase 3/);
   assert.match(text, /\*\*AI\*\* layer/);
   assert.match(text, /Still to decide for the AI layer/);
   assert.ok(text.includes(s.layers.ai.missing[0].what), "the first AI item is named");
@@ -77,6 +81,7 @@ test("in the orchestrator stage the opening is the orchestrator's and the orches
   assert.equal(s.stage.layer, "orchestrator");
   const text = p.openingMessages(s).join("\n\n");
   assert.match(text, /\*\*Orchestrator\*\* layer/);
+  assert.match(text, /Phase 2/);
   assert.doesNotMatch(text, /Build AI/);
   assert.equal(p.defaultTab(s), "orchestrator");
   assert.match(p.openingMessages({ error: "x" }).join(""), /could not be generated/);
@@ -104,4 +109,60 @@ test("agent/README.md documents the AI layer and says to restart the server afte
                    "VADEMO_URL_FROM_IRIS", "VADEMO_READ_USER", "VADEMO_READ_PASSWORD", "AWS_BEARER_TOKEN_BEDROCK", "restart the workbench server"]) {
     assert.ok(md.includes(s), s);
   }
+});
+
+test("the status line shows the orchestrator as built once the production is verified, and ready to build only before that", () => {
+  const p = pageWith("agendaHtml");
+  const built = p.agendaHtml(apiSpecs(rec(DONE), VERIFIED), false);
+  assert.match(built, /Orchestrator <span class="rdy">built ✓<\/span>/);
+  assert.doesNotMatch(built, /Orchestrator <span class="rdy">✓ ready to build/);
+  const ready = p.agendaHtml(apiSpecs(rec(DONE), IM), false);
+  assert.match(ready, /Orchestrator <span class="rdy">✓ ready to build<\/span>/);
+});
+
+test("after a chat turn the cards come first and the reply — with the next question — comes last", () => {
+  const send = SCRIPT.slice(SCRIPT.indexOf("async function sendChat"), SCRIPT.indexOf("async function sendChat") + 1500);
+  const reply = send.indexOf('addMsg("assistant",res.reply)');
+  assert.ok(reply > 0, "the reply is added");
+  assert.ok(send.indexOf("addEvidenceCard(res.evidence)") < reply, "evidence card before the reply");
+  assert.ok(send.indexOf("addRecordedCards(res.recorded)") < reply, "recorded card before the reply");
+});
+
+test("the restore summary names each deliverable and its outcome, escaped", () => {
+  const p = pageWith("restoreSummary");
+  const html = p.restoreSummary({ state: "error", results: [
+    { layer: "api", outcome: "restored", savedAt: "2026-10-21T10:00:00.000Z" },
+    { layer: "orchestrator", outcome: "failed: compile errors: <b>x</b>" },
+    { layer: "ai", outcome: "no good copy yet" },
+  ] });
+  assert.match(html, /Angular entry form[\s\S]*restored/);
+  assert.match(html, /IRIS production[\s\S]*failed: compile errors: &lt;b&gt;x&lt;\/b&gt;/);
+  assert.match(html, /AI chat interface[\s\S]*no good copy yet/);
+  assert.match(html, /2026-10-21/);
+  assert.match(SCRIPT, /res\.restore/, "the chat send handler follows a restore");
+  assert.match(SCRIPT, /\/api\/restore\/status/);
+});
+
+test("the demo reset is a small icon in the top bar, needs the word 'reset' typed, then calls the route and reloads", () => {
+  assert.match(HTML, /Layer Map<\/button>\s*<button[^>]*id="resetBtn"[^>]*>↺<\/button>/, "an icon-only button next to Layer Map");
+  assert.match(HTML, /id="resetBtn"[^>]*title="[^"]*[Dd]emo reset/, "the tooltip says what it is");
+  assert.doesNotMatch(HTML, /\.demo-reset\{[^}]*position:fixed/, "no longer floating over the chat");
+  const p = pageWith("confirmReset");
+  assert.equal(p.confirmReset(() => "reset"), true);
+  assert.equal(p.confirmReset(() => "  RESET "), true);
+  assert.equal(p.confirmReset(() => "yes"), false);
+  assert.equal(p.confirmReset(() => ""), false);
+  assert.equal(p.confirmReset(() => null), false, "Cancel");
+  const h = SCRIPT.slice(SCRIPT.indexOf('getElementById("resetBtn").onclick')).slice(0, 900);
+  assert.match(h, /confirmReset\(/);
+  assert.match(h, /\/api\/demo\/reset/);
+  assert.match(h, /location\.reload\(\)/);
+});
+
+test("the status line shows the AI layer as built only when the stage says so, not from a leftover build status", () => {
+  const p = pageWith("agendaHtml");
+  const reset = apiSpecs(rec(), IM);   // what a demo reset leaves
+  assert.doesNotMatch(p.agendaHtml(reset, true), /AI <span class="rdy">built ✓/, "a stale 'done' AI status must not show built");
+  const done = apiSpecs(rec({ ...DONE, aiQuestions: ALL_KEPT }), { ...VERIFIED, ai: { built: true, verified: true } });
+  assert.match(p.agendaHtml(done, true), /AI <span class="rdy">built ✓/);
 });

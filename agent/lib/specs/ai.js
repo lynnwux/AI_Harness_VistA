@@ -20,7 +20,7 @@ function buildAiSpec(graph, record, implemented, inventory) {
 
       // keep not yet decided
       if (recKeep === undefined || recKeep === null) {
-        missing.push({ kind: "keep", id: t.id, what: `decide whether to include "${t.id}" on the quick-access page` });
+        missing.push({ kind: "keep", id: t.id, what: `decide whether to include "${t.defaultWording}" on the quick-access page` });
         continue;
       }
       // keep: false — no missing items (ruling 2)
@@ -29,19 +29,20 @@ function buildAiSpec(graph, record, implemented, inventory) {
       // keep: true
       const recParams  = (recEntry && recEntry.params) || {};
       const recWording = recEntry && recEntry.wording ? String(recEntry.wording) : null;
+      const label      = recWording || t.defaultWording;
 
       if (!recWording) {
-        missing.push({ kind: "wording", id: t.id, what: `set a wording for "${t.id}" (or confirm the template default)` });
+        missing.push({ kind: "wording", id: t.id, what: `set a wording for "${t.defaultWording}" (or confirm that default)` });
       }
 
       // params: absent → "param" with description; present-but-invalid → "param" with validation error (ruling 1)
       for (const p of t.params) {
         if (recParams[p.key] === undefined || recParams[p.key] === null) {
-          missing.push({ kind: "param", id: t.id, key: p.key, what: p.describe });
+          missing.push({ kind: "param", id: t.id, key: p.key, what: `${label}: ${p.describe}` });
         }
       }
       for (const { key, what } of invalidParams(t, recParams, inventory)) {
-        missing.push({ kind: "param", id: t.id, key, what });
+        missing.push({ kind: "param", id: t.id, key, what: `${label}: ${what}` });
       }
     }
   }

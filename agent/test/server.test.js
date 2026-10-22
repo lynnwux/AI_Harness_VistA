@@ -228,6 +228,7 @@ test("when the orchestrator is verified, the system prompt guides the AI layer a
     const tempImpl = path.join(path.dirname(paths.decisions), "implemented.json");
     fs.writeFileSync(tempImpl, JSON.stringify({
       api: [{ id: "read:lookup", endpoint: "GET /lookup/{file}" }],
+      entryForm: { built: true },
       orchestrator: { built: true, verified: true },
     }));
     paths.implemented = tempImpl;
@@ -236,6 +237,7 @@ test("when the orchestrator is verified, the system prompt guides the AI layer a
     const p = t.systemPrompt();
     assert.match(p, /AI layer/i);
     assert.match(p, /setQuickQuestion/);
+    assert.match(p, /Build AI button stays disabled until the AI spec is complete/);
     assert.doesNotMatch(p, /Never start or offer the AI layer/);
   } finally { t.srv.close(); }
 });
@@ -258,16 +260,18 @@ const ALL_KEPT = {
 };
 
 // A server whose builds are fake processes: nothing is spawned, and the status files are temp files.
-async function buildSetup({ orchestratorVerified = true, aiQuestions = undefined } = {}) {
+async function buildSetup({ orchestratorVerified = true, entryFormBuilt = true, aiQuestions = undefined, agentCalls = [] } = {}) {
   const procs = [];
   const spawnImpl = (_cmd, args) => { const p = new EventEmitter(); p.args = args; p.pid = 0; p.unref = () => {}; procs.push(p); return p; };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-b-"));
   const paths = { graph: path.join(dir, "graph.json"), decisions: path.join(dir, "decisions.json"), implemented: path.join(dir, "implemented.json"), inventory: INVENTORY, specsDir: path.join(dir, "specs") };
   fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), paths.graph);
   fs.writeFileSync(paths.decisions, JSON.stringify(aiQuestions ? { ...MIN_DEC, aiQuestions } : MIN_DEC));
-  fs.writeFileSync(paths.implemented, JSON.stringify({ api: [{ id: "read:lookup", endpoint: "GET /lookup/{file}" }], orchestrator: { built: orchestratorVerified, verified: orchestratorVerified } }));
-  const statusFiles = { production: path.join(dir, "production-status.json"), ai: path.join(dir, "ai-status.json") };
-  const made = createApp({ paths, runAgentImpl: async () => ({ reply: "ok", toolTrace: [] }), spawnImpl, statusFiles });
+  fs.writeFileSync(paths.implemented, JSON.stringify({ api: [{ id: "read:lookup", endpoint: "GET /lookup/{file}" }], entryForm: { built: entryFormBuilt }, orchestrator: { built: orchestratorVerified, verified: orchestratorVerified } }));
+  const statusFiles = { build: path.join(dir, "build-status.json"), production: path.join(dir, "production-status.json"), ai: path.join(dir, "ai-status.json"), restore: path.join(dir, "restore-status.json") };
+  const publishedDir = path.join(dir, "published-entry-form");
+  fs.mkdirSync(publishedDir); fs.writeFileSync(path.join(publishedDir, "index.html"), "<app-root></app-root>");
+  const made = createApp({ paths, runAgentImpl: async m => { agentCalls.push(m); return { reply: "ok", toolTrace: [] }; }, spawnImpl, statusFiles, publishedDir });
   const t = await new Promise(resolve => {
     const srv = made.app.listen(0, "127.0.0.1", () => resolve({ ...made, srv, paths, dir, base: `http://127.0.0.1:${srv.address().port}` }));
   });
@@ -277,7 +281,7 @@ async function buildSetup({ orchestratorVerified = true, aiQuestions = undefined
     t.srv.close();
     fs.rmSync(dir, { recursive: true, force: true });
   };
-  return { ...t, procs, statusFiles, done };
+  return { ...t, procs, statusFiles, publishedDir, done };
 }
 const post = (t, p) => fetch(t.base + p, { method: "POST" });
 
@@ -369,4 +373,108 @@ test("the server reads the inventory from paths.inventory and /api/state carries
     const sp = await (await fetch(t2.base + "/api/specs")).json();
     assert.ok(sp.layers.ai.missing.some(m => /inventory-fields\.json not loaded/.test(m.what)), "the AI spec reports the missing discovery file");
   } finally { t2.srv.close(); }
+});
+
+test("a recorded AI decision's card names the question by its wording, not its id", async () => {
+  const { TEMPLATES } = require("../lib/ai-templates");
+  const fake = async (_m, _h, ctx) => { runTool("setQuickQuestion", { id: "AIQ.AgingOutFY", keep: true }, ctx); return { reply: "ok", toolTrace: [] }; };
+  const t = await setup(fake);
+  try {
+    const r = await (await chat(t, "keep it")).json();
+    const card = r.recorded.find(c => c.id === "AIQ.AgingOutFY");
+    assert.ok(card, JSON.stringify(r.recorded));
+    assert.equal(card.label, TEMPLATES.find(x => x.id === "AIQ.AgingOutFY").defaultWording);
+  } finally { t.srv.close(); }
+});
+
+const say = (t, message) => fetch(t.base + "/api/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, history: [] }) });
+
+test("'restore last good' in the chat starts the restore without asking the model — the fallback must work when Bedrock doesn't", async () => {
+  const agentCalls = [];
+  const t = await buildSetup({ agentCalls });
+  try {
+    const r = await (await say(t, "  Restore Last Good. ")).json();
+    assert.equal(agentCalls.length, 0, "the model is not called");
+    assert.equal(r.restore && r.restore.started, true, JSON.stringify(r));
+    assert.equal(r.restore.statusUrl, "/api/restore/status");
+    assert.equal(t.procs.length, 1);
+    assert.ok(t.procs[0].args.some(a => /restore-runner\.js$/.test(a)), t.procs[0].args.join(" "));
+    assert.match(r.reply, /restor/i);
+    assert.deepEqual(r.recorded, []);
+    // while it runs: a second restore and both builds are refused
+    const again = await (await say(t, "restore last good")).json();
+    assert.equal(again.restore.started, false);
+    assert.match(again.reply, /already running/i);
+    assert.equal((await post(t, "/api/build/ai")).status, 409);
+    assert.equal((await post(t, "/api/build/production")).status, 409);
+    assert.equal(t.procs.length, 1, "nothing else was started");
+  } finally { await t.done(); }
+});
+
+test("restore is refused while a build runs, and its status route answers idle before any restore", async () => {
+  const t = await buildSetup({ aiQuestions: ALL_KEPT });
+  try {
+    assert.deepEqual(await (await fetch(t.base + "/api/restore/status")).json(), { state: "idle", step: "", log: [], results: [] });
+    assert.equal((await (await post(t, "/api/build/ai")).json()).started, true);
+    const r = await (await say(t, "restore last good")).json();
+    assert.equal(r.restore.started, false);
+    assert.match(r.reply, /build is running/i);
+    assert.equal(t.procs.length, 1);
+  } finally { await t.done(); }
+});
+
+test("only the exact command restores: a sentence that merely mentions it goes to the chat as usual", async () => {
+  const agentCalls = [];
+  const t = await buildSetup({ agentCalls });
+  try {
+    await say(t, "what does restore last good do?");
+    assert.equal(agentCalls.length >= 1, true);
+    assert.equal(t.procs.length, 0);
+  } finally { await t.done(); }
+});
+
+test("demo reset: every decision back to the defaults, production and AI build status back to not built, a backup kept", async () => {
+  const t = await buildSetup({ aiQuestions: ALL_KEPT });
+  try {
+    const before = fs.readFileSync(t.paths.decisions, "utf8");
+    const r = await (await post(t, "/api/demo/reset")).json();
+    assert.equal(r.ok, true, JSON.stringify(r));
+    // the record is the defaults: nothing decided
+    const rec = JSON.parse(fs.readFileSync(t.paths.decisions, "utf8"));
+    assert.deepEqual(rec.aiQuestions, {});
+    assert.deepEqual(rec.targets, {});
+    assert.deepEqual(rec.oqPolicy, {});
+    // the old record is kept beside it
+    assert.ok(r.backup && fs.existsSync(path.join(path.dirname(t.paths.decisions), r.backup)), r.backup);
+    assert.equal(fs.readFileSync(path.join(path.dirname(t.paths.decisions), r.backup), "utf8"), before);
+    // the production and AI layers read as not built; the Phase 1 services stay
+    const im = JSON.parse(fs.readFileSync(t.paths.implemented, "utf8"));
+    assert.deepEqual(im.orchestrator, { built: false, verified: false });
+    assert.deepEqual(im.ai, { built: false, verified: false });
+    assert.ok(im.api.some(s => s.id === "read:lookup"));
+    // and the specs start over
+    const s = await (await fetch(t.base + "/api/specs")).json();
+    assert.equal(s.stage.layer, "orchestrator");
+    assert.equal(s.stage.step, "decide");
+  } finally { await t.done(); }
+});
+
+test("demo reset is refused while a build or a restore is running", async () => {
+  const t = await buildSetup({ aiQuestions: ALL_KEPT });
+  try {
+    assert.equal((await (await post(t, "/api/build/ai")).json()).started, true);
+    const r = await post(t, "/api/demo/reset");
+    assert.equal(r.status, 409);
+    assert.match((await r.json()).error, /running/);
+  } finally { await t.done(); }
+});
+
+test("demo reset also clears the production, AI and restore build status, so the page shows nothing as built or run", async () => {
+  const t = await buildSetup({ aiQuestions: ALL_KEPT });
+  try {
+    for (const f of [t.statusFiles.production, t.statusFiles.ai, t.statusFiles.restore]) fs.writeFileSync(f, JSON.stringify({ state: "done" }));
+    assert.equal((await (await post(t, "/api/demo/reset")).json()).ok, true);
+    for (const f of [t.statusFiles.production, t.statusFiles.ai, t.statusFiles.restore]) assert.ok(!fs.existsSync(f), f);
+    assert.deepEqual(await (await fetch(t.base + "/api/build/ai/status")).json(), { state: "idle", step: "", log: [] });
+  } finally { await t.done(); }
 });

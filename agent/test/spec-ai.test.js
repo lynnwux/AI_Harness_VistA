@@ -222,3 +222,24 @@ test("the AI spec's uses name the 6914 SQL projection on VADEMO, never the produ
   assert.ok(!ai.uses.some(u => /Orchestrator|production|front door/i.test(u)), JSON.stringify(ai.uses));
   assert.ok(ai.uses.some(u => /6914 SQL projection on VADEMO/.test(u)), JSON.stringify(ai.uses));
 });
+
+const buildAiSpecFor = aiq => buildAiSpec(graph, rec({ aiQuestions: aiq }), IM, inventory);
+
+test("missing AI items name each question by its wording, not its internal id", () => {
+  const s = buildAiSpecFor({});
+  for (const m of s.missing) assert.doesNotMatch(m.what, /AIQ\./, m.what);
+  const aging = TEMPLATES.find(t => t.id === "AIQ.AgingOutFY");
+  assert.ok(s.missing[0].what.includes(aging.defaultWording), s.missing[0].what);
+  const p = buildAiSpecFor({ "AIQ.AgingOutFY": { keep: true, wording: "Which assets age out?", params: {} } });
+  const param = p.missing.find(m => m.kind === "param" && m.id === "AIQ.AgingOutFY");
+  assert.ok(param.what.startsWith("Which assets age out?: "), param.what);
+});
+
+test("the AI stage finishes one question — keep, wording, then each parameter — before moving to the next", () => {
+  const record = rec({ ...orchDecided, aiQuestions: { "AIQ.AgingOutFY": { keep: true, params: { fiscalYear: 2031 } } } });
+  const specs = generate(inputsWithInv(record, IM_orch_done));
+  const st = stage(specs, IM_orch_done);
+  assert.equal(st.layer, "ai");
+  assert.equal(st.next.id, "AIQ.AgingOutFY", JSON.stringify(st.next));
+  assert.equal(st.step, "wording");
+});

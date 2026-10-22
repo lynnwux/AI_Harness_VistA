@@ -79,12 +79,10 @@ function stage(specs, implemented) {
   if (unmet) return { layer: "orchestrator", step: "needs", next: unmet };
   const p = (implemented && implemented.orchestrator) || {};
   if (!(p.built && p.verified)) return { layer: "orchestrator", step: "ready", next: null };
-  // Orchestrator is built and verified — walk the AI layer.
-  const a = specs.ai;
-  for (const kind of ["discovery", "keep", "wording", "param"]) {
-    const m = a.missing.find(x => x.kind === kind);
-    if (m) return { layer: "ai", step: kind, next: m };
-  }
+  // Orchestrator is built and verified — walk the AI layer one question at a time: the AI spec lists
+  // its missing items question by question (keep, wording, then each parameter), so take them in order.
+  const m = specs.ai.missing[0];
+  if (m) return { layer: "ai", step: m.kind, next: m };
   const pa = (implemented && implemented.ai) || {};
   if (!(pa.built && pa.verified)) return { layer: "ai", step: "ready", next: null };
   return { layer: "ai", step: "done", next: null };

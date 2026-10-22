@@ -70,14 +70,17 @@ function buildIndex(graph, inventory) {
   for (const d of c.data || []) { tokens(d.name).forEach(t => common.add(t)); if (d.file) common.add(String(d.file)); }
   if (c.entryPoint) tokens(`${c.entryPoint.dispatch || ""} ${c.entryPoint.name || ""}`).forEach(t => common.add(t));
   tokens((graph.workflow && graph.workflow.name) || "").forEach(t => common.add(t));
+  // every field of file 6914 (its SQL column and DD name) is the capability's own vocabulary too, not only the form's
+  if (inventory && inventory.tables && inventory.tables.EQUIPMENT_INV_6914) {
+    for (const col of inventory.tables.EQUIPMENT_INV_6914.columns || []) {
+      tokens(String(col.column || "").replace(/_+/g, " ")).forEach(t => common.add(t));
+      tokens(col.ddName || "").forEach(t => common.add(t));
+    }
+  }
   // AI template groups — one per template, evidence from inventory columns
   if (inventory) {
     for (const t of TEMPLATES) {
-      const evLines = t.tables.flatMap(tbl =>
-        Object.entries(inventory.evidence || {})
-          .filter(([k]) => k.split(".")[0] === tbl)
-          .flatMap(([, lines]) => lines)
-      );
+      const evLines = (t.evidenceColumns || []).flatMap(k => (inventory.evidence || {})[k] || []);
       const text = [t.defaultWording, ...evLines].join("\n");
       // Strip trailing punctuation (e.g. "contract?" → "contract") so alias tokens
       // behave as whole words. need=4: AI wordings share common terms like "inspection",
@@ -115,7 +118,8 @@ function checkReply({ graph, reply, userMessage = "", record = {}, currentId = n
   const focusVocab = new Set(focus.flatMap(g => [...g.vocab])), focusLex = new Set(focus.flatMap(g => [...g.lex]));
   const others = ix.groups.filter(g => !focus.includes(g));
   const borrowed = [];
-  for (const t of tokens(text)) {
+  // dollar amounts are judged by the threshold rule below, never as borrowed legacy terms ("$50,000" is not the term "000")
+  for (const t of tokens(text.replace(THRESH, " "))) {
     if (focusVocab.has(t) || ix.common.has(t)) continue;
     const from = others.filter(g => g.vocab.has(t)).map(g => g.id);
     if (from.length) borrowed.push({ term: t, from });

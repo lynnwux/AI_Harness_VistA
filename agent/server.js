@@ -5,9 +5,10 @@ const path = require("path");
 const { spawn } = require("child_process");
 const { runAgent } = require("./lib/bedrock");
 const { defaultDecisions, getState, findNode, label } = require("./lib/tools");
-const { loadRecord, saveRecord, diffRecords } = require("./lib/record");
+const { loadRecord, saveRecord, diffRecords, normalize } = require("./lib/record");
 const { DEFAULT_PATHS, generate, writeSpecs, stage } = require("./lib/specs");
 const { groundedTurn } = require("./lib/grounding");
+const { TEMPLATES } = require("./lib/ai-templates");
 
 const ROOT = path.join(__dirname, "..");                 // repo root (serves capability-graph/, workbench-demo.html, …)
 const PORT = process.env.PORT || 8899;
@@ -24,7 +25,11 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
   // the file is the single truth builds read: write it when missing, or when it was unreadable (now backed up)
   if (!fs.existsSync(paths.decisions) || state.notice) saveRecord(paths.decisions, state.record);
   const implemented = () => readJson(paths.implemented, { api: [], orchestrator: { built: false, verified: false }, ai: { built: false, verified: false } });
-  const labelOf = id => { const n = findNode(graph, id); return n ? label(n) : id; };
+  const labelOf = id => {
+    const q = TEMPLATES.find(t => t.id === id);
+    if (q) return ((state.record.aiQuestions || {})[id] || {}).wording || q.defaultWording;
+    const n = findNode(graph, id); return n ? label(n) : id;
+  };
   const restore = snap => { for (const k of Object.keys(state.record)) delete state.record[k]; Object.assign(state.record, JSON.parse(JSON.stringify(snap))); };
   // one chat turn or build at a time, so each turn's diff, prompt and history see only its own changes
   let queue = Promise.resolve();
@@ -59,7 +64,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
       "THIS PRODUCTION IS BUILT STUB-FIRST. The mandatory side effects are real operations; every other decided side effect is a stub — a Business Operation registered in the production, not wired — that carries the decision and its legacy evidence. Wiring a stub (field bindings, target details, Phase 1 services) is LATER work, listed under each stub in the spec: do not ask for it now unless the developer raises it.",
       "",
       isAiStage
-        ? "AI LAYER — quick-access question design. The production is built and verified; now walk the AI missing list one question at a time. For each question in order: (1) ASK keep/drop — should this question appear on the AI quick-access page? Record immediately with setQuickQuestion(id, keep). (2) If keeping: show the template's defaultWording and ASK whether to confirm it or supply a custom wording — record with setQuickQuestion(id, wording). (3) For each param in sequence: show its evidence lines and its options/codes from getState().ai.questions[].params, then ASK the developer to supply the value — never propose a value yourself, including never citing values from any earlier prototype — record with setQuickQuestion(id, params). Move to the next item only after the current one is fully recorded. When getState().ai shows all questions configured (configured === total), say the AI spec is complete and ready for 🔨 Build AI on the AI tab (the button is on the AI tab)."
+        ? "AI LAYER — quick-access question design. The production is built and verified; now walk the AI missing list one question at a time. For each question in order: (1) ASK keep/drop — should this question appear on the AI quick-access page? Record immediately with setQuickQuestion(id, keep). (2) If keeping: show the template's defaultWording and ASK whether to confirm it or supply a custom wording — record with setQuickQuestion(id, wording). (3) For each param in sequence (a question is done only when getState().ai.questions[].missing is empty — that includes its wording): show its evidence lines and its options/codes from getState().ai.questions[].params, then ASK the developer to supply the value — never propose a value yourself, including never citing values from any earlier prototype — record with setQuickQuestion(id, params). Move to the next item only after the current one is fully recorded. Only when getState().ai.stage.complete is true, say the AI spec is complete and ready for 🔨 Build AI on the AI tab (the button is on the AI tab). If the developer asks to build while items are still missing, do not send them to the button: say the 🔨 Build AI button stays disabled until the AI spec is complete, list what is still missing from getState() (the current item first), and continue with the current item."
         : "WORK FROM THE MISSING LIST, one item at a time. The current stage and the next item are below. Order: decide the open questions → confirm the details of each real operation → when nothing is missing, say the orchestrator spec is complete and ready for the production build. Never start or offer the AI layer until the production has been built and verified.",
       "",
       "For each open question explain the three resolution modes before asking, because they produce different architecture once its stub is wired:",
@@ -117,6 +122,8 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
   app.post("/api/agent/chat", (req, res) => serially(async () => {
     const { message, history } = req.body || {};
     if (!message) return res.status(400).json({ error: "message required" });
+    // the fallback never depends on the model: the server handles the exact command itself
+    if (RESTORE_COMMAND.test(String(message))) return res.json({ ...startRestore(runners), recorded: [], evidence: [] });
     const before = JSON.parse(JSON.stringify(state.record));
     let out = null, err = null;
     try {
@@ -146,7 +153,30 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
 
   registerVistaRoutes(app);
   registerBuildRoutes(app, regenerate, serially);
-  const runners = { spawnImpl, productionStatus: statusFiles.production || PRODUCTION_STATUS, aiStatus: statusFiles.ai || AI_STATUS_FILE };
+  const runners = { spawnImpl, productionStatus: statusFiles.production || PRODUCTION_STATUS, aiStatus: statusFiles.ai || AI_STATUS_FILE, restoreStatus: statusFiles.restore || RESTORE_STATUS };
+  // Demo reset: the Decide page starts over — every decision back to the defaults, the production and AI build
+  // status back to not built. What is deployed keeps running; the Phase 1 services and the known-good copies stay.
+  app.post("/api/demo/reset", (_req, res) => serially(() => {
+    if (buildProc || productionProc || aiProc || restoreProc) return res.status(409).json({ ok: false, error: "a build or restore is running — wait for it to finish, then reset" });
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+    const backup = `decisions.backup-${stamp}.json`;
+    if (fs.existsSync(paths.decisions)) fs.copyFileSync(paths.decisions, path.join(path.dirname(paths.decisions), backup));
+    restore(normalize(defaultDecisions(graph)));
+    saveRecord(paths.decisions, state.record);
+    const im = implemented();
+    im.orchestrator = { built: false, verified: false };
+    im.ai = { built: false, verified: false };
+    fs.writeFileSync(paths.implemented, JSON.stringify(im, null, 2) + "\n");
+    // the last production, AI and restore runs are build logs the page reads — a fresh start shows none of them
+    for (const f of [runners.productionStatus, runners.aiStatus, runners.restoreStatus]) fs.rmSync(f, { force: true });
+    const g = regenerate();
+    if (g.error) return res.status(500).json({ ok: false, error: "spec generation failed: " + g.error, backup });
+    res.json({ ok: true, backup });
+  }));
+  app.get("/api/restore/status", (_req, res) => {
+    try { res.json(JSON.parse(fs.readFileSync(runners.restoreStatus, "utf8"))); }
+    catch (e) { res.json({ state: "idle", step: "", log: [], results: [] }); }
+  });
   registerProductionRoutes(app, regenerate, serially, () => state.specs, runners);
   registerAiRoutes(app, regenerate, serially, () => state.specs, () => state.stage, runners);
   registerAiProxyRoutes(app);
@@ -269,6 +299,7 @@ function registerBuildRoutes(app, regenerate, serially) {
   app.post("/api/build", (_req, res) => serially(() => {
     try {
       if (buildProc) return res.json({ started: false, running: true, note: "a build is already running" });
+      if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build" });
       const g = regenerate();   // the build always reads the latest specs; it ignores any request body
       if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
       fs.writeFileSync(STATUS_FILE, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], url: null, error: null, startedAt: new Date().toISOString() }, null, 2));
@@ -341,6 +372,7 @@ function registerProductionRoutes(app, regenerate, serially, specs, { spawnImpl 
   app.post("/api/build/production", (_req, res) => serially(() => {
     if (productionProc) return res.json({ started: false, running: true, note: "a production build is already running" });
     if (aiProc) return res.status(409).json({ started: false, error: "the AI build is running — wait for it to finish, then build the production" });
+    if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build the production" });
     const g = regenerate();
     if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
     const o = specs().orchestrator;
@@ -361,9 +393,22 @@ function registerProductionRoutes(app, regenerate, serially, specs, { spawnImpl 
 }
 
 const { STATUS_FILE: AI_STATUS_FILE } = require("./ai-runner");
+const { STATUS_FILE: RESTORE_STATUS } = require("./restore-runner");
+const RESTORE_COMMAND = /^\s*restore last good\s*[.!]?\s*$/i;
+let restoreProc = null;
+// "restore last good": one job that puts back the known-good copy of each deliverable (restore-runner.js).
+function startRestore({ spawnImpl = spawn, restoreStatus = RESTORE_STATUS } = {}) {
+  if (restoreProc) return { reply: "A restore is already running — its progress is shown below.", restore: { started: false, running: true, statusUrl: "/api/restore/status" } };
+  if (buildProc || productionProc || aiProc) return { reply: "A build is running — wait for it to finish, then say \"restore last good\" again.", restore: { started: false } };
+  fs.writeFileSync(restoreStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], results: [], error: null, startedAt: new Date().toISOString() }, null, 2));
+  const proc = restoreProc = spawnImpl(process.execPath, [path.join(__dirname, "restore-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
+  proc.on("exit", code => { if (restoreProc === proc) restoreProc = null; reconcileExit(restoreStatus, "the restore", code); });
+  return { reply: "Restoring the last good copy of each deliverable — the entry form, the IRIS production and the AI layer…", restore: { started: true, statusUrl: "/api/restore/status" } };
+}
 function registerAiRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl = spawn, aiStatus = AI_STATUS_FILE } = {}) {
   app.post("/api/build/ai", (_req, res) => serially(() => {
     if (aiProc) return res.json({ started: false, running: true, note: "an AI build is already running" });
+    if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build the AI layer" });
     if (productionProc) return res.status(409).json({ started: false, error: "the production build is running — wait for it to finish, then build the AI layer" });
     const g = regenerate();
     if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });

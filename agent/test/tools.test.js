@@ -229,7 +229,7 @@ test("getState.ai: a recorded-but-invalid param (STATUS codes under PM_STATUS) a
   const r = rec();
   // Construct the invalid state directly (STATUS code "2" is invalid for PM_STATUS)
   r.aiQuestions["AIQ.JCAHOPendingInspection"] = {
-    params: { workOrderStatusColumn: "PM_STATUS", workOrderStatuses: ["2"] },
+    keep: true, params: { workOrderStatusColumn: "PM_STATUS", workOrderStatuses: ["2"] },
   };
   const st = runTool("getState", {}, ctxWithInv(r));
   const q = st.ai.questions.find(q => q.id === "AIQ.JCAHOPendingInspection");
@@ -239,4 +239,22 @@ test("getState.ai: a recorded-but-invalid param (STATUS codes under PM_STATUS) a
   );
   // sqlPreview must be null (params not fully valid)
   assert.equal(q.sqlPreview, null, "sqlPreview null when a param is invalid");
+});
+
+test("getState.ai agrees with the AI spec: a question with every parameter but no wording is not configured, and the AI state is not complete", () => {
+  const fs = require("fs"), path = require("path");
+  const inventory = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json"), "utf8"));
+  const record = rec({ aiQuestions: {
+    "AIQ.AgingOutFY":            { keep: true, wording: "Ages out?", params: { fiscalYear: 2031, capitalizedMeans: "INVESTMENT_CATEGORY = 1", useStatuses: ["1"] } },
+    "AIQ.HighValueNoContract":   { keep: false },
+    "AIQ.JCAHOPendingInspection":{ keep: true, params: { workOrderStatusColumn: "STATUS", workOrderStatuses: ["ALL"], useStatuses: ["1"] } },
+    "AIQ.CapitalPlanningTotals": { keep: true, wording: "Totals?", params: { groupBy: "none", useStatuses: ["1"], valueColumns: ["TOTAL_ASSET_VALUE"] } },
+  } });
+  const st = runTool("getState", {}, { graph, decisions: record, inventory, implemented: { ...IM, orchestrator: { built: true, verified: true } } });
+  const jcaho = st.ai.questions.find(q => q.id === "AIQ.JCAHOPendingInspection");
+  assert.ok(jcaho.missing.some(m => m.kind === "wording"), JSON.stringify(jcaho.missing));
+  assert.equal(st.ai.stage.complete, false);
+  assert.equal(st.ai.stage.configured, 2, "AgingOutFY and CapitalPlanningTotals");
+  assert.equal(st.ai.stage.kept, 3);
+  assert.equal(st.ai.stage.missing, 1);
 });

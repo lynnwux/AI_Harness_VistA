@@ -41,3 +41,30 @@ Smoke test (no UI): `npm run smoke`.
 - **Build** — 🔨 **Build AI** on the AI tab calls `POST /api/build/ai` (409 unless the stage is the AI layer and its spec is complete; never while a production build runs, and vice versa); progress at `GET /api/build/ai/status` (`agent/ai-status.json`). `ai-runner.js` generates the `EquipmentAI.*` classes (`lib/ai-hub.js`), pushes and compiles them into `iris-ai-hub`/`INTEROP`, stores the VADEMO login and the Bedrock token as IRIS credentials, creates the `/equipmentai` web app, builds the Angular chat app (`lib/chat-app.js`) to `prototype/chat/`, verifies the chatbot against direct VADEMO queries, and records `ai` in `implemented.json`.
 - **Chat proxy** — the chat app at `/prototype/chat/` calls `POST /ai/chat` and `POST /ai/quick/:id`, which the server forwards to `${IRIS_AI_HUB_URL}/equipmentai/…` with the IRIS login from `.env` (the browser never sees it).
 - **Settings** (in `agent/.env`; placeholders in `.env.example`): `AWS_BEARER_TOKEN_BEDROCK` (required for the AI build), `IRIS_AI_HUB_URL` / `IRIS_AI_HUB_USER` / `IRIS_AI_HUB_PASSWORD`, `INTERCLAW_SCRIPTS`; optional `VADEMO_URL_FROM_IRIS` (VADEMO as `iris-ai-hub` sees it; default `VADEMO_URL`) and the read-only pair `VADEMO_READ_USER` + `VADEMO_READ_PASSWORD` (set both or neither; default `VADEMO_USER` / `VADEMO_PASSWORD`).
+
+## Restore last good (fallback)
+
+Every fully successful build saves a known-good copy of its deliverable in `agent/_known-good/` (git-ignored):
+the API build saves the published entry form (`prototype/build/`), the production build saves the generated
+`EquipmentEntry` classes once its verification passes, and the AI build saves the generated `EquipmentAI` classes
+and the chat app (`prototype/chat/`) once its verification passes. A failed build never replaces a copy.
+
+Type **`restore last good`** in the Decide chat to put all three back. The server handles that exact command itself —
+the model is not involved, so it works when Bedrock doesn't — and runs `restore-runner.js`, which:
+
+- copies the entry form back to `prototype/build/`;
+- uploads and compiles the production classes in INTEROP and restarts `EquipmentEntry.Production`;
+- uploads and compiles the AI classes, re-applies the AI settings from `agent/.env`, clears stored conversations,
+  and copies the chat app back to `prototype/chat/`.
+
+Logins and hosts always come from `agent/.env`; copies hold no credentials. The decisions record, the specs and
+`implemented.json` are not changed. A restore and a build never run at the same time. Progress:
+`GET /api/restore/status` (status file `agent/restore-status.json`).
+
+## Demo reset
+
+The small **↺** icon in the Decide page's top bar (tooltip: Demo reset) starts the page over — only after you type `reset` to confirm: every decision in
+`agent/decisions.json` goes back to the defaults — a copy is kept as `agent/decisions.backup-<time>.json` — and
+`implemented.json` marks the production and the AI layer not built, so the stage starts again at the first decision.
+What is deployed keeps running (the entry form, the IRIS production, the AI chatbot), the Phase 1 services stay, and
+"restore last good" still works. Refused while a build or restore is running. Route: `POST /api/demo/reset`.

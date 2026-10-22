@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const { angularFiles, DEFAULT_COMPONENT_FILES } = require("./lib/angular-app");
 const { buildAngularApp } = require("./lib/angular-build");
+const { saveKnownGood } = require("./lib/known-good");
 const { DEFAULT_PATHS, loadInputs, inputHashes, canon } = require("./lib/specs");
 const API_SPEC = path.join(DEFAULT_PATHS.specsDir, "api.json");
 
@@ -98,6 +99,8 @@ async function main(){
 
     clearInterval(ticker); phaseIdx = -1;
     status.state = "done"; status.pct = 100; status.etaSec = 0; status.url = "/prototype/build/"; status.finishedAt = new Date().toISOString();
+    saveKnownGood("api", { dirs: { site: OUT }, meta: { url: "/prototype/build/" } });
+    log("  saved as the known-good entry form (restore last good)");
     status.step = "Done — built and published"; log("✅ Done — built and published"); save();
   }catch(e){
     clearInterval(ticker); phaseIdx = -1;

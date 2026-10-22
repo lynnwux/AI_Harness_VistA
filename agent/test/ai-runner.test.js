@@ -18,6 +18,7 @@ function setupAiSpecs(record) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "air-"));
   const im = {
     api: [{ id: "read:lookup", endpoint: "GET /lookup/{file}" }],
+    entryForm: { built: true },
     orchestrator: { built: true, verified: true },
     ai: { built: false, verified: false },
   };
@@ -704,7 +705,9 @@ function makeVerifyMainDeps(paths, overrides = {}) {
     deps: {
       _irisSession:   () => "WEBAPP:exists\nCONFIG:set\nVADEMO:stored\nBEDROCK:stored\n",
       _irisScript:    () => (method) => method === "POST" ? { console: [] } : "ok",
-      _buildChatApp:  async () => {},
+      _buildChatApp:  async (_q, out) => { fs.mkdirSync(out, { recursive: true }); fs.writeFileSync(path.join(out, "index.html"), "chat"); },
+      _chatOut:       path.join(tmpDir, "chat"),
+      _knownGoodRoot: path.join(tmpDir, "_known-good"),
       _statusFile:    fakeStatus,
       _configFile:    fakeConfig,
       _productionDir: fakeProd,
@@ -743,7 +746,11 @@ async function runMain(pathsObj, fetchOverride) {
     const statusFile = deps._statusFile;
     const status     = fs.existsSync(statusFile) ? JSON.parse(fs.readFileSync(statusFile, "utf8")) : null;
     const implContent = fs.existsSync(paths.implemented) ? fs.readFileSync(paths.implemented, "utf8") : null;
-    return { status, implContent };
+    const kgDir = path.join(deps._knownGoodRoot, "ai");
+    const knownGood = fs.existsSync(path.join(kgDir, "meta.json"))
+      ? { meta: JSON.parse(fs.readFileSync(path.join(kgDir, "meta.json"), "utf8")), classes: fs.readdirSync(path.join(kgDir, "classes")), chat: fs.readdirSync(path.join(kgDir, "chat")) }
+      : null;
+    return { status, implContent, knownGood };
   } finally {
     process.exitCode = savedExitCode;
     for (const [k, v] of Object.entries(savedEnv)) {
@@ -828,7 +835,7 @@ test("main() verification: count retry — first try fails, second passes → ok
   };
   const { status } = await runMain(setupCompleteAiSpecs(), retryFetch);
   assert.equal(status.state, "done", `expected done after retry; error: ${status && status.error}`);
-  assert.equal(chatCallCount, 2, "should have made exactly 2 chat calls (first fail + retry)");
+  assert.equal(chatCallCount, 2 + 3, "the count question twice (first fail + retry), then the three-turn conversation");
 });
 
 // ── I7b: hub (IRIS) HTTP error through main() → run fails with error named ────
@@ -1012,4 +1019,43 @@ test("main() passes each question's wording to the finish table", async () => {
   const qs = status.verification.map(v => v.question);
   for (const w of ["Ages out?", "High value?", "JCAHO?", "Totals?", "How many pieces of equipment do we have?"]) assert.ok(qs.includes(w), w);
   assert.ok(!qs.some(q => /^AIQ\./.test(q)), "no template ids");
+});
+
+test("each AI build clears the stored chat sessions — a session keeps the settings it was created with (an old one kept AI Hub's rejected max_tokens default)", () => {
+  const s = aiSettingsScript({ VADEMO_URL: "http://vademo:80", VADEMO_USER: "fake-user-1", VADEMO_PASSWORD: "fake-vademo-pass-123", AWS_BEARER_TOKEN_BEDROCK: "fake-bedrock-tok-456" });
+  assert.match(s, /%AI\.Agent\.Session\)\.%DeleteId\(/);
+  assert.match(s, /kill \^EquipmentAI\.Sessions/);
+  assert.match(s, /write "SESSIONS:cleared /);
+  assert.ok(s.indexOf("kill ^EquipmentAI.Sessions") < s.indexOf("halt"));
+});
+
+test("verification includes a three-turn conversation in one session — every turn must answer without an error", () => {
+  const ok = judgeAi({ conversation: [{ reply: "a" }, { reply: "b" }, { reply: "c" }] });
+  const item = ok.items.find(i => /conversation/i.test(i.question));
+  assert.ok(item && item.ok, JSON.stringify(ok));
+  assert.equal(item.chatbot, "3 of 3 turns answered");
+  const bad = judgeAi({ conversation: [{ reply: "a" }, { reply: "b" }, { error: "max_tokens: 65536 > 64000" }] });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.problems.some(p => /turn 3/.test(p) && /max_tokens/.test(p)), JSON.stringify(bad.problems));
+  assert.equal(judgeAi({ conversation: [{ reply: "a" }, { reply: "" }] }).ok, false, "an empty reply is not an answer");
+});
+
+test("a verified AI build saves the known-good copy (classes + chat app); a failed one does not", async () => {
+  const good = await runMain(setupCompleteAiSpecs(), makeVerifyFetch());
+  assert.equal(good.status.state, "done", good.status.error);
+  assert.ok(good.knownGood, "known-good copy saved");
+  assert.ok(good.knownGood.classes.includes("EquipmentAI.Agent.cls"), good.knownGood.classes.join(","));
+  assert.ok(good.knownGood.chat.includes("index.html"));
+  assert.equal(good.knownGood.meta.namespace, "INTEROP");
+  const bad = await runMain(setupCompleteAiSpecs(), makeVerifyFetch({ countReplyWrong: true }));
+  assert.equal(bad.status.state, "error");
+  assert.equal(bad.knownGood, null);
+});
+
+// Evaluated at load, before any test runs; asserted last, after every main() test in this file.
+const REAL_KNOWN_GOOD = path.join(__dirname, "..", "_known-good");
+const knownGoodBefore = fs.existsSync(REAL_KNOWN_GOOD) ? fs.readdirSync(REAL_KNOWN_GOOD).sort().join(",") : null;
+test("guard (last): no main() test wrote the real agent/_known-good", () => {
+  const now = fs.existsSync(REAL_KNOWN_GOOD) ? fs.readdirSync(REAL_KNOWN_GOOD).sort().join(",") : null;
+  assert.equal(now, knownGoodBefore);
 });

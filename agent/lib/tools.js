@@ -5,7 +5,7 @@ const { normalize } = require("./record");
 const { cap: C, isBlocking, isMandatory, allowedTargetKeys, VIA } = require("./rules");
 const { generate, stage } = require("./specs");
 const { requestContract } = require("./specs/api");
-const { TEMPLATES, validateParams, missingFor, sqlFor, validateOne, invalidParams } = require("./ai-templates");
+const { TEMPLATES, validateParams, sqlFor, validateOne } = require("./ai-templates");
 
 const CAT_OPTS = {
   oq:   ["Business rule", "Required input", "Defer"],
@@ -85,15 +85,12 @@ function invEvidenceFor(inventory, table, column) {
   return (inventory.evidence || {})[`${table}.${column}`] || [];
 }
 
-function buildAiState(record, inventory) {
+// The chat's view of the AI layer. Its missing items come from the AI spec itself, so the two can never disagree.
+function buildAiState(record, inventory, aiSpec) {
   const questions = TEMPLATES.map(t => {
     const recEntry  = (record.aiQuestions || {})[t.id] || null;
     const recParams = recEntry ? (recEntry.params || {}) : {};
-    // Start with absent params, then add recorded-but-invalid params so completeness
-    // can never be true while sqlFor would throw.
-    const absentMissing  = missingFor(t, recParams);
-    const invalidMissing = invalidParams(t, recParams, inventory);
-    const missing = [...absentMissing, ...invalidMissing];
+    const missing = ((aiSpec && aiSpec.missing) || []).filter(m => m.id === t.id).map(({ kind, key, what }) => ({ kind, key, what }));
 
     // Build param descriptors for the UI: key, describe, options|codes, evidence.
     const paramDescs = t.params.map(p => {
@@ -119,9 +116,9 @@ function buildAiState(record, inventory) {
       return desc;
     });
 
-    // SQL preview: generated only when all params are recorded and valid.
+    // SQL preview: whenever the recorded params are all present and valid — it helps while the rest is still being decided.
     let sqlPreview = null;
-    if (missing.length === 0 && inventory) {
+    if (inventory) {
       try {
         const v = validateParams(t, recParams, inventory);
         if (v.ok) sqlPreview = sqlFor(t, recParams, inventory);
@@ -131,8 +128,10 @@ function buildAiState(record, inventory) {
     return { id: t.id, defaultWording: t.defaultWording, recorded: recEntry, params: paramDescs, missing, sqlPreview };
   });
 
-  const configured = questions.filter(q => q.recorded && q.recorded.keep && q.missing.length === 0).length;
-  return { questions, stage: { total: TEMPLATES.length, configured } };
+  const kept = questions.filter(q => q.recorded && q.recorded.keep === true).length;
+  const configured = questions.filter(q => q.recorded && q.recorded.keep === true && q.missing.length === 0).length;
+  const missing = ((aiSpec && aiSpec.missing) || []).length;
+  return { questions, stage: { total: TEMPLATES.length, kept, configured, missing, complete: !!(aiSpec && aiSpec.complete) } };
 }
 
 function getState(graph, decisions, extra = {}) {
@@ -155,7 +154,7 @@ function getState(graph, decisions, extra = {}) {
     requestContract: specs.api.request,
     mandatory: (c.sideEffects || []).filter(isMandatory).map(s => s.id),
     stage: stage(specs, implemented),
-    ai: buildAiState(record, extra.inventory || null),
+    ai: buildAiState(record, extra.inventory || null, specs.ai),
   };
 }
 

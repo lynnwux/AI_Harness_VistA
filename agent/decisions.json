@@ -62,5 +62,8 @@
     "DEP.XLFSTR": "Platform (reuse)"
   },
   "oqPolicy": {},
-  "integration": {}
+  "scope": {},
+  "targets": {},
+  "ruleBindings": {},
+  "aiQuestions": {}
 }

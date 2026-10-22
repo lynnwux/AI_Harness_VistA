@@ -134,6 +134,7 @@ function setupCompleteAiSpecs() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-air-"));
   const im = {
     api: [{ id: "read:lookup", endpoint: "GET /lookup/{file}" }],
+    entryForm: { built: true },
     orchestrator: { built: true, verified: true },
     ai: { built: false, verified: false },
   };
@@ -161,6 +162,8 @@ const beforeStatusContent = beforeStatusExists ? fs.readFileSync(REAL_STATUS_FIL
 
 const REAL_CHAT_DIR     = path.join(__dirname, "..", "..", "prototype", "chat");
 const beforeChatExists  = fs.existsSync(REAL_CHAT_DIR);
+const REAL_KNOWN_GOOD   = path.join(__dirname, "..", "_known-good");
+const beforeKnownGood   = fs.existsSync(REAL_KNOWN_GOOD);
 
 test("main() calls _buildChatApp with the spec's questions and ends Deployed — not yet verified", async () => {
   const { paths, dir: tmpSetup } = setupCompleteAiSpecs();
@@ -197,7 +200,7 @@ test("main() calls _buildChatApp with the spec's questions and ends Deployed —
   try {
     const fakeIrisScript = () => method => method === "POST" ? { console: [] } : "ok";
     const fakeSession    = () => "WEBAPP:exists\nCONFIG:set\nVADEMO:stored\nBEDROCK:stored\n";
-    const fakeBuildChat  = async (questions, _outDir) => { capturedQuestions = questions; };
+    const fakeBuildChat  = async (questions, outDir) => { capturedQuestions = questions; fs.mkdirSync(outDir, { recursive: true }); fs.writeFileSync(path.join(outDir, "index.html"), "chat"); };
 
     // Minimal success fake for the Task-8 verification step (no real HTTP calls).
     const FAKE_ROWS = [{ IEN: "1", NAME: "Ventilator" }, { IEN: "2", NAME: "Pump" }];
@@ -230,6 +233,8 @@ test("main() calls _buildChatApp with the spec's questions and ends Deployed —
       _configFile:    fakeConfig,
       _productionDir: fakeProdDir,
       _buildChatApp:  fakeBuildChat,
+      _chatOut:       path.join(fakeProdDir, "chat-out"),
+      _knownGoodRoot: path.join(fakeProdDir, "known-good"),
       _fetch:         fakeFetch,
     });
 
@@ -279,6 +284,7 @@ test("guard: chat-app tests do not write to agent/ai-status.json or prototype/ch
       "agent/ai-status.json must be unchanged after tests — main() must use injected _statusFile path"
     );
   }
+  if (!beforeKnownGood) assert.ok(!fs.existsSync(REAL_KNOWN_GOOD), "agent/_known-good/ must not be created by tests — main() must use the injected _knownGoodRoot");
   if (!beforeChatExists) {
     assert.ok(!fs.existsSync(REAL_CHAT_DIR),
       "prototype/chat/ must not be created by tests — _buildChatApp must use injected path");
