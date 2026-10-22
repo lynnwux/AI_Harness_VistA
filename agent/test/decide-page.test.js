@@ -8,6 +8,7 @@ const path = require("path");
 const vm = require("vm");
 const { graph, rec, IM } = require("./helpers");
 const { generate, render, stage } = require("../lib/specs");
+const { emptyImplemented, builtApi } = require("../lib/implemented");
 
 const HTML = fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "decide.html"), "utf8");
 const SCRIPT = HTML.split("<script>")[1].split("</script>")[0];
@@ -21,7 +22,7 @@ function page(extra) {
     fetch: () => new Promise(() => {}),   // the boot waits forever: nothing is loaded
     setTimeout, setInterval, clearInterval, console, URL, Blob: function () {},
   });
-  vm.runInContext(SCRIPT + "\n;globalThis.__page = { openingMessages, defaultTab, serverLooksOld, OLD_SERVER_NOTICE" + (extra ? ", " + extra : "") + " };", ctx);
+  vm.runInContext(SCRIPT + "\n;globalThis.__page = { openingMessages, defaultTab, serverLooksOld, OLD_SERVER_NOTICE, RESET_PROMPT, resetSummary" + (extra ? ", " + extra : "") + " };", ctx);
   return ctx.__page;
 }
 
@@ -165,4 +166,67 @@ test("the status line shows the AI layer as built only when the stage says so, n
   assert.doesNotMatch(p.agendaHtml(reset, true), /AI <span class="rdy">built ✓/, "a stale 'done' AI status must not show built");
   const done = apiSpecs(rec({ ...DONE, aiQuestions: ALL_KEPT }), { ...VERIFIED, ai: { built: true, verified: true } });
   assert.match(p.agendaHtml(done, true), /AI <span class="rdy">built ✓/);
+});
+
+test("in the api stage the opening says Phase 1 is not built, offers the build, and opens the API tab", () => {
+  const p = page();
+  const s = apiSpecs(rec(), emptyImplemented());
+  assert.equal(s.stage.layer, "api", "stage is api");
+  const text = p.openingMessages(s).join("\n\n");
+  assert.match(text, /Phase 1, the API layer: designed, not built/);
+  assert.match(text, /🔨 Build on the API tab/);
+  assert.doesNotMatch(text, /built and verified/);
+  assert.equal(p.defaultTab(s), "api");
+});
+
+test("the orchestrator opening is only shown once Phase 1 is built", () => {
+  const p = page();
+  const s = apiSpecs(rec(), IM);
+  const text = p.openingMessages(s).join("\n\n");
+  assert.match(text, /Phase 1 is built and verified/);
+});
+
+test("an out-of-date API layer is announced first", () => {
+  const p = page();
+  const ood = { ...IM, api: builtApi(undefined, { builtFrom: "x" }) };
+  const s = apiSpecs(rec(), ood);
+  assert.ok(s.stage.apiOutOfDate, "stage has apiOutOfDate");
+  const text = p.openingMessages(s).join("\n\n");
+  assert.match(text, /changed since it was built/);
+  // out-of-date message is first (before the orchestrator text)
+  assert.ok(text.indexOf("changed since it was built") < text.indexOf("Orchestrator"), "ood warning precedes orchestrator text");
+});
+
+test("the agenda says API not built and later phases wait", () => {
+  const p = pageWith("agendaHtml");
+  const s = apiSpecs(rec(), emptyImplemented());
+  const html = p.agendaHtml(s, false);
+  assert.match(html, /API <b>not built<\/b>/);
+  assert.match(html, /waiting for Phase 1/);
+});
+
+test("the reset prompt says every phase is torn down and what is kept", () => {
+  const p = page();
+  assert.match(p.RESET_PROMPT, /tears down every phase/);
+  assert.match(p.RESET_PROMPT, /known-good/);
+  assert.match(p.RESET_PROMPT, /6914/);
+  // confirmReset still requires the word reset
+  const p2 = pageWith("confirmReset");
+  assert.equal(p2.confirmReset(() => "reset"), true);
+  assert.equal(p2.confirmReset(() => "yes"), false);
+});
+
+test("resetSummary lists every result and the verdict", () => {
+  const p = page();
+  const s = {
+    state: "error", error: "VADEMO unreachable",
+    results: [
+      { where: "VADEMO", item: "Harness.Equipment.REST.cls", outcome: "removed" },
+      { where: "IRIS", item: "package EquipmentEntry", outcome: "failed: timeout" },
+    ],
+  };
+  const html = p.resetSummary(s);
+  assert.match(html, /✅.*VADEMO.*removed/s);
+  assert.match(html, /✗.*IRIS.*failed: timeout/s);
+  assert.match(html, /Reset finished with failures/);
 });

@@ -9,7 +9,7 @@ const { killTree } = require("./lib/runner-control");
 const { defaultDecisions, getState, findNode, label } = require("./lib/tools");
 const { loadRecord, saveRecord, diffRecords, normalize } = require("./lib/record");
 const { DEFAULT_PATHS, generate, writeSpecs, stage } = require("./lib/specs");
-const { emptyImplemented } = require("./lib/implemented");
+const { emptyImplemented, apiRecord } = require("./lib/implemented");
 const { localTeardown } = require("./lib/teardown");
 const { KNOWN_GOOD_ROOT } = require("./lib/known-good");
 const { groundedTurn } = require("./lib/grounding");
@@ -128,7 +128,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
 
   app.get("/api/specs", (_req, res) => {
     if (!state.specs) return res.status(500).json({ error: state.specsError || "specs not generated", notice: state.notice });
-    const layer = l => ({ md: state.md[l], complete: state.specs[l].complete, missing: state.specs[l].missing, needs: state.specs[l].needs, owns: state.specs[l].owns });
+    const layer = l => ({ md: state.md[l], complete: state.specs[l].complete, missing: state.specs[l].missing, needs: state.specs[l].needs, owns: state.specs[l].owns, ...(l==="api" ? { verifiedRecord: apiRecord(implemented()).verifiedRecord } : {}) });
     res.json({ error: state.specsError, notice: state.notice, stage: state.stage, layers: { api: layer("api"), orchestrator: layer("orchestrator"), ai: layer("ai") } });
   });
 

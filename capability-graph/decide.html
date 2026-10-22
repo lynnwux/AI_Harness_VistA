@@ -200,6 +200,11 @@ let AI_CHAT_URL = null, AI_BUILT = false, AI_STATUS_JSON = true;
 // A server started before the AI layer was added answers /api/build/ai/status with an HTML page and serves the
 // old AI placeholder spec; the page then asks for a restart instead of failing in odd ways.
 const OLD_SERVER_NOTICE = "This page is newer than the running workbench server — restart the workbench server (npm start) in agent/ to load the AI layer.";
+// Route refusal messages (also used as button titles in locked states).
+const PHASE2_CLOSED = "Phase 2 opens after the Phase 1 build — press 🔨 Build on the API tab first";
+const API_OUT_OF_DATE = "the API layer changed since it was built — press 🔨 Build on the API tab to rebuild Phase 1 first";
+// Banner / opening message when the API layer is built but its spec changed.
+const API_OOD_NOTICE = "**⚠ The API layer changed since it was built.** Press 🔨 Build on the API tab to rebuild Phase 1 — the production and AI builds stay disabled until then.";
 function serverLooksOld(specs, aiStatusIsJson){
   if(aiStatusIsJson===false) return true;
   if(!specs||!specs.layers) return false;            // unreachable or failed: shown by its own message
@@ -208,7 +213,7 @@ function serverLooksOld(specs, aiStatusIsJson){
   return (ai.missing||[]).some(m=>m.kind==="design") || !/^# AI layer spec — Equipment inventory chatbot/.test(ai.md||"");
 }
 // The tab the page opens on: the layer the stage is working on.
-function defaultTab(specs){ return specs&&specs.stage&&specs.stage.layer==="ai" ? "ai" : "orchestrator"; }
+function defaultTab(specs){ const l=specs&&specs.stage&&specs.stage.layer; return l==="api"?"api":l==="ai"?"ai":"orchestrator"; }
 // the last successful production build's Management Portal page, if any
 async function loadPortal(){
   try{ const s=await (await fetch("/api/build/production/status",{cache:"no-store"})).json(); PORTAL = s.state==="done" ? s.portalUrl||null : PORTAL; }catch(e){}
@@ -267,15 +272,25 @@ function renderRight(){
   const prod=document.getElementById("prodBtn"), oDone=SPECS&&SPECS.layers&&SPECS.layers.orchestrator.complete;
   prod.style.display = TAB==="orchestrator" ? "" : "none";
   document.getElementById("irisBtn").style.display = TAB==="orchestrator" && PORTAL && SPECS && SPECS.stage && SPECS.stage.layer==="ai" ? "" : "none";
-  if(!prod.dataset.busy){ prod.disabled=!oDone; prod.title=oDone?"Generate the IRIS production from the orchestrator spec, deploy it and verify it with one dry-run request":"Finish the orchestrator spec's missing items in the chat first"; }
+  // Phase 2 locked: api not yet built, or api spec changed since it was built.
+  const ph2locked = SPECS && SPECS.stage && (SPECS.stage.layer==="api" || SPECS.stage.apiOutOfDate);
+  const ph2title = SPECS && SPECS.stage && SPECS.stage.layer==="api" ? PHASE2_CLOSED : API_OUT_OF_DATE;
+  if(!prod.dataset.busy){
+    if(ph2locked){ prod.disabled=true; prod.title=ph2title; }
+    else { prod.disabled=!oDone; prod.title=oDone?"Generate the IRIS production from the orchestrator spec, deploy it and verify it with one dry-run request":"Finish the orchestrator spec's missing items in the chat first"; }
+  }
   const aiBtn=document.getElementById("aiBtn"), chatAppBtn=document.getElementById("chatAppBtn");
   const aDone=SPECS&&SPECS.layers&&SPECS.layers.ai&&SPECS.layers.ai.complete;
   aiBtn.style.display = TAB==="ai" ? "" : "none";
   chatAppBtn.style.display = TAB==="ai" && AI_BUILT && aiStageDone(SPECS) ? "" : "none";
-  if(!aiBtn.dataset.busy){ aiBtn.disabled=!aDone; aiBtn.title=aDone?"Generate the AI layer from the AI spec, deploy it to IRIS and verify it against VistA":"Finish the AI spec's missing items in the Decide chat first"; }
+  if(!aiBtn.dataset.busy){
+    if(ph2locked){ aiBtn.disabled=true; aiBtn.title=ph2title; }
+    else { aiBtn.disabled=!aDone; aiBtn.title=aDone?"Generate the AI layer from the AI spec, deploy it to IRIS and verify it against VistA":"Finish the AI spec's missing items in the Decide chat first"; }
+  }
   const doc=document.getElementById("doc");
   if(!SPECS||!SPECS.layers){ doc.innerHTML=`<div class="specerr">${esc((SPECS&&SPECS.error)||"Specs not available")}</div>`; return; }
   const banner = (serverLooksOld(SPECS, AI_STATUS_JSON) ? `<div class="specerr">⚠ ${esc(OLD_SERVER_NOTICE)}</div>` : "")
+    + (SPECS.stage && SPECS.stage.apiOutOfDate ? `<div class="specerr">⚠ The API layer changed since it was built. Press 🔨 Build on the API tab to rebuild Phase 1 — the production and AI builds stay disabled until then.</div>` : "")
     + (SPECS.notice ? `<div class="specerr">⚠ ${esc(SPECS.notice)}</div>` : "")
     + (SPECS.error ? `<div class="specerr">⚠ Spec generation failed — showing the last good version. ${esc(SPECS.error)}</div>` : "");
   doc.innerHTML = banner + mdToHtml(SPECS.layers[TAB].md);
@@ -286,11 +301,13 @@ function renderRight(){
 const aiStageDone = specs => !!(specs && specs.stage && specs.stage.layer==="ai" && specs.stage.step==="done");
 function agendaHtml(specs, aiBuilt){
   const a=specs.layers.api, o=specs.layers.orchestrator, ai=specs.layers.ai;
+  const st=specs.stage||{}, apiStage=st.layer==="api", apiOod=!!st.apiOutOfDate;
   const unmet=o.needs.filter(n=>!n.met).length;
-  const orchBuilt=!!(specs.stage && specs.stage.layer==="ai");
-  return `<span>API <b>${a.owns.built.length}</b> services built · ${a.owns.proposed.length} proposed</span>`
-    + `<span>Orchestrator ${orchBuilt?'<span class="rdy">built ✓</span>':o.complete?'<span class="rdy">✓ ready to build</span>':`<b>${o.missing.length}</b> items missing${unmet?` · <span class="blk">${unmet} unmet need${unmet>1?"s":""}</span>`:""}`}</span>`
-    + (ai?`<span>AI ${aiBuilt&&aiStageDone(specs)?'<span class="rdy">built ✓</span>':ai.complete?'<span class="rdy">ready to build</span>':`<b>${(ai.missing||[]).length}</b> items missing`}</span>`:'<span>AI <b>not available</b></span>');
+  const orchBuilt=!!(st.layer==="ai");
+  const apiSpan=apiStage?`API <b>not built</b> · ${a.owns.proposed.length} proposed`:apiOod?`API <span class="blk">changed since build</span>`:`API <span class="rdy">built ✓</span>`;
+  const orchSpan=apiStage?`Orchestrator <span class="blk">waiting for Phase 1</span>`:`Orchestrator ${orchBuilt?'<span class="rdy">built ✓</span>':o.complete?'<span class="rdy">✓ ready to build</span>':`<b>${o.missing.length}</b> items missing${unmet?` · <span class="blk">${unmet} unmet need${unmet>1?"s":""}</span>`:""}`}`;
+  const aiSpan=apiStage?`AI <span class="blk">waiting for Phase 1</span>`:ai?`AI ${aiBuilt&&aiStageDone(specs)?'<span class="rdy">built ✓</span>':ai.complete?'<span class="rdy">ready to build</span>':`<b>${(ai.missing||[]).length}</b> items missing`}`:`AI <b>not available</b>`;
+  return `<span>${apiSpan}</span><span>${orchSpan}</span><span>${aiSpan}</span>`;
 }
 function updateAgenda(){
   const el=document.getElementById("agenda"); if(!el||!SPECS||!SPECS.layers) return;
@@ -318,22 +335,35 @@ function capabilityOverview(){
 function openingMessages(specs){
   if(!specs||!specs.layers) return ["⚠ The layer specs could not be generated — see the right pane."];
   const st=specs.stage||{};
+  // Phase 1 not yet built — direct the developer to the API tab.
+  if(st.layer==="api"){
+    return [
+      "**Where we are — Phase 1, the API layer: designed, not built.** The REST service on VADEMO (file 6914) and the Angular entry app are specified on the API tab; nothing is deployed yet.",
+      "**Next: 🔨 Build on the API tab.** It deploys the REST service to VADEMO, proves the write path with a real test record in file 6914 (read back field by field), then publishes the entry app. Phase 2, the **Orchestrator** layer, opens after that build succeeds. You can review the form fields first — tell me which to include or omit.",
+    ];
+  }
+  // IEN of the test record written during the API build, if the server included it.
+  const ien=(specs.layers.api&&specs.layers.api.verifiedRecord)?` (test record IEN ${specs.layers.api.verifiedRecord})`:"";
   if(st.layer==="ai"){
     const ai=specs.layers.ai, miss=(ai&&ai.missing)||[];
-    const where="**Where we are — ✅ Phase 1 (API) and Phase 2 (the IRIS production) are built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/), and the IRIS production (the orchestrator layer) is running.\n\nWe're working on Phase 3, the **AI** layer, now — the equipment inventory chatbot on IRIS AI Hub; its spec is on the AI tab.";
+    const where=`**Where we are — ✅ Phase 1 (API) and Phase 2 (the IRIS production) are built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/), and the IRIS production (the orchestrator layer) is running.\n\nWe're working on Phase 3, the **AI** layer, now — the equipment inventory chatbot on IRIS AI Hub; its spec is on the AI tab.`;
     const next = st.step==="done" ? "**The AI layer is built and verified.** Open the chat app from the AI tab (💬 Open chat app). To change a quick-access question, tell me here, then press 🔨 Build AI again."
       : st.step==="ready" ? "**The AI spec is complete** — ready for 🔨 Build AI on the AI tab."
       : st.step==="discovery" ? "⚠ The inventory discovery file (capability-graph/inventory-fields.json) is missing — run the discovery step (agent/discover-inventory.js) before designing the AI layer."
       : `**Still to decide for the AI layer (${miss.length}):** ${miss.slice(0,6).map((m,i)=>`${i+1}. ${m.what}`).join(" · ")}${miss.length>6?" · …":""}.\n\nI'll take the quick-access questions one at a time — keep or drop, the wording, then each parameter — showing the legacy field meanings as evidence and asking you for every value; I never propose one. After each decision a card shows exactly what was recorded.\n\nReady to start with the first one?`;
-    return [where, next];
+    const msgs=[where, next];
+    if(st.apiOutOfDate) msgs.unshift(API_OOD_NOTICE);
+    return msgs;
   }
   const o=specs.layers.orchestrator;
   const pend=o.missing.filter(m=>m.kind==="decide");
-  const where="**Where we are — ✅ Phase 1 is built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/) and the write path is proven end-to-end against VADEMO file 6914.\n\nWe're working on Phase 2, the **Orchestrator** layer (the IRIS production), now; Phase 3, the **AI** layer, comes after the production is built and verified.";
+  const where=`**Where we are — ✅ Phase 1 is built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/) and the write path is proven end-to-end against VADEMO file 6914${ien}.\n\nWe're working on Phase 2, the **Orchestrator** layer (the IRIS production), now; Phase 3, the **AI** layer, comes after the production is built and verified.`;
   const next = pend.length ? `**Still to decide for the orchestrator layer:** ${pend.map((m,i)=>`${i+1}. ${m.what.replace(/^decide: /,"")}`).join(" · ")}.\n\nFor each one I'll work the same way: **show you what the legacy code actually does** — quoting the MUMPS and breaking a compound condition into its individual parts — **explain it**, and then **you decide how to modernize** each part: keep it, change it, move it to a different layer, or drop it. Anything that departs from the legacy gets flagged, and after each decision a card shows exactly what was recorded.\n\nReady to start with the first one?`
     : o.complete ? "**The orchestrator spec is complete** — ready for the production build."
     : `**The open questions are decided.** Next: ${(st.next&&(st.next.what||st.next.service))||""}`;
-  return [where, next];
+  const msgs=[where, next];
+  if(st.apiOutOfDate) msgs.unshift(API_OOD_NOTICE);
+  return msgs;
 }
 
 /* ---------- state + events ---------- */
@@ -454,6 +484,16 @@ function followRestore(){
   };
   poll();
 }
+// Verification table: API build shape {check,result}; AI build shape {question,chatbot,vista,ok}.
+function vtbl(verification){
+  if(!verification||!verification.length) return "";
+  if("check" in verification[0]){
+    const rows=verification.map(v=>`<tr><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.check)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.result)}</td></tr>`).join("");
+    return `<table style="margin-top:8px;border-collapse:collapse;font-size:11px;width:100%"><thead><tr><th style="text-align:left;padding:3px 8px;color:var(--dim)">Check</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">Result</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  const rows=verification.map(v=>`<tr><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.question)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.chatbot)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.vista)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge);color:${v.ok?"var(--accent2)":"var(--question)"}">${v.ok?"✓":"✗"}</td></tr>`).join("");
+  return `<table style="margin-top:8px;border-collapse:collapse;font-size:11px;width:100%"><thead><tr><th style="text-align:left;padding:3px 8px;color:var(--dim)">Question</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">Chatbot</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">VistA</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">✓/✗</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
 function wireChat(){
   document.getElementById("chatSend").onclick=sendChat;
   document.getElementById("chatInp").addEventListener("keydown",e=>{ if(e.key==="Enter") sendChat(); });
@@ -470,16 +510,33 @@ function wireChat(){
   const sel=document.getElementById("voiceSel");
   sel.onchange=()=>{ chosenVoice=voices.find(v=>v.name===sel.value)||chosenVoice; if(chosenVoice) localStorage.setItem("decideVoice",chosenVoice.name); speak("Voice set to "+ (chosenVoice?chosenVoice.name:"default")+".", null, true); };
 }
-// A reset clears every decision, so it needs the word typed — a click-through OK is not enough.
-const RESET_PROMPT="DEMO RESET — this clears all three phases on this page.\n\nEvery decision goes back to the defaults, and the production and AI layers are marked not built. What is deployed keeps running, \"restore last good\" still works, and a backup of your decisions is kept.\n\nType  reset  to confirm:";
+// A reset tears down every phase — needs the word typed, not just a click-through OK.
+const RESET_PROMPT="DEMO RESET — this tears down every phase.\n\nThe REST service and its web app are removed from VADEMO, the IRIS production and the AI layer are removed from IRIS, the published apps and build logs are deleted, and every decision goes back to the defaults. Kept: the known-good copies (\"restore last good\" still works), a backup of your decisions, and the test records in file 6914.\n\nType  reset  to confirm:";
 function confirmReset(ask){ const typed=ask(RESET_PROMPT); return typed!=null && String(typed).trim().toLowerCase()==="reset"; }
+// One line per teardown result; verdict on last line; called by the reset poll and used by tests.
+function resetSummary(s){
+  const rows=(s.results||[]).map(r=>{ const f=/^failed/.test(r.outcome),mark=r.outcome==="removed"?"✅":f?"✗":"—"; return `<div>${mark} ${esc(r.where)} · ${esc(r.item)} — ${esc(r.outcome)}</div>`; }).join("");
+  const hadFail=(s.results||[]).some(r=>/^failed/.test(r.outcome));
+  const v=hadFail?`<b>✗ Reset finished with failures — ${esc(s.error||"")}. Nothing is marked built; the next build replaces what is left.</b>`:`<b>✅ Reset finished — nothing is built; Phase 1 is next.</b>`;
+  return rows+`<div style="margin-top:6px">${v}</div>`;
+}
 document.getElementById("resetBtn").onclick=async ()=>{
   if(!confirmReset(m=>prompt(m,""))) return;
   const btn=document.getElementById("resetBtn"), label=btn.textContent; btn.disabled=true; btn.textContent="…";
   try{
-    const r=await fetch("/api/demo/reset",{method:"POST"}); const res=await r.json();
+    const res=await(await fetch("/api/demo/reset",{method:"POST"})).json();
     if(!res.ok){ addMsg("assistant","⚠ Demo reset refused: "+(res.error||"unknown")); btn.disabled=false; btn.textContent=label; return; }
-    location.reload();
+    await loadSpecs(); chatHistory=[];
+    const bx=document.getElementById("chatMsgs"),bl=document.createElement("div"); bl.className="cmsg assistant"; bx.appendChild(bl);
+    const upd=h=>{ bl.innerHTML=h; bx.scrollTop=bx.scrollHeight; };
+    const done=s=>{ upd(resetSummary(s)); btn.disabled=false; btn.textContent=label; location.reload(); };
+    upd("<b>↺ Tearing down…</b>");
+    const poll=async()=>{
+      let s; try{ s=await(await fetch("/api/demo/reset/status",{cache:"no-store"})).json(); }catch(e){ setTimeout(poll,2000); return; }
+      if(s.state==="done"||s.state==="error"){ done(s); return; }
+      upd("<b>↺ Tearing down…</b> "+esc(s.step||s.state||"")); setTimeout(poll,2000);
+    };
+    poll();
   }catch(e){ addMsg("assistant","⚠ Demo reset failed: "+e.message); btn.disabled=false; btn.textContent=label; }
 };
 document.getElementById("dlBtn").onclick=()=>{
@@ -507,8 +564,8 @@ document.getElementById("buildBtn").onclick=async ()=>{
     const poll=async ()=>{
       let s; try{ s=await (await fetch("/api/build/status",{cache:"no-store"})).json(); }catch(e){ setTimeout(poll,3000); return; }
       const tail=(s.log||[]).slice(-8).join("\n");
-      if(s.state==="done"){ upd("<b>✅ Build complete.</b> Opening <a href='/prototype/build/' target='_blank' style='color:var(--accent)'>/prototype/build/</a> in a new tab."+bar(s)+pre(tail)); window.open("/prototype/build/?t="+Date.now(),"_blank"); reset(); return; }
-      if(s.state==="error"){ upd("<b>✗ Build failed:</b> "+esc(s.error||"")+bar(s)+pre(tail)); reset(); return; }
+      if(s.state==="done"){ upd("<b>✅ Build complete.</b> Opening <a href='/prototype/build/' target='_blank' style='color:var(--accent)'>/prototype/build/</a> in a new tab."+vtbl(s.verification)+bar(s)+pre(tail)); window.open("/prototype/build/?t="+Date.now(),"_blank"); loadSpecs(); reset(); return; }
+      if(s.state==="error"){ upd("<b>✗ Build failed:</b> "+esc(s.error||"")+vtbl(s.verification)+bar(s)+pre(tail)); reset(); return; }
       if(s.state==="cancelled"){ upd("<b>⏹ Build cancelled.</b> Environment reset — ready for the next build."+bar(s)+pre(tail)); reset(); return; }
       upd("<b>🔨 Building…</b> "+esc(s.step||s.state||"")+bar(s)+pre(tail));
       setTimeout(poll, 2500);
@@ -560,11 +617,6 @@ document.getElementById("aiBtn").onclick=async ()=>{
   const bubble=document.createElement("div"); bubble.className="cmsg assistant"; boxEl.appendChild(bubble);
   const upd=(html)=>{ bubble.innerHTML=html; boxEl.scrollTop=boxEl.scrollHeight; };
   const pre=(t)=>`<pre style="margin-top:6px;max-height:220px;overflow:auto;background:#0a0e14;border:1px solid var(--edge);border-radius:6px;padding:8px;font-size:11px;white-space:pre-wrap">${esc(t)}</pre>`;
-  const vtbl=(verification)=>{
-    if(!verification||!verification.length) return "";
-    const rows=verification.map(v=>`<tr><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.question)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.chatbot)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge)">${esc(v.vista)}</td><td style="padding:3px 8px;border-bottom:1px solid var(--edge);color:${v.ok?"var(--accent2)":"var(--question)"}">${v.ok?"✓":"✗"}</td></tr>`).join("");
-    return `<table style="margin-top:8px;border-collapse:collapse;font-size:11px;width:100%"><thead><tr><th style="text-align:left;padding:3px 8px;color:var(--dim)">Question</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">Chatbot</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">VistA</th><th style="text-align:left;padding:3px 8px;color:var(--dim)">✓/✗</th></tr></thead><tbody>${rows}</tbody></table>`;
-  };
   try{
     const r=await fetch("/api/build/ai",{method:"POST"}); const res=await r.json();
     if(res.running){ upd("An AI build is already running — streaming its progress…"); }
@@ -608,9 +660,10 @@ document.getElementById("killBtn").onclick=async ()=>{
   await loadSpecs(); TAB=defaultTab(SPECS); renderRight(); loadPortal(); loadAiStatus();
   addMsg("assistant", capabilityOverview());
   for(const m of openingMessages(SPECS)) addMsg("assistant", m);
-  const st=SPECS&&SPECS.stage, layer=st&&st.layer==="ai"?"ai":"orchestrator";
-  const pend=SPECS&&SPECS.layers ? (layer==="ai" ? SPECS.layers.ai.missing : SPECS.layers.orchestrator.missing.filter(m=>m.kind==="decide")) : [];
-  chatHistory.push({role:"assistant",text:`[intro: ${layer==="ai"?"Phase 1 (API) and Phase 2 (production) built+verified; working on Phase 3, the AI layer":"Phase 1 (API) built+verified; working on Phase 2, the orchestrator"}; stage=${st?st.layer+"/"+st.step:"unknown"}; still to decide: ${pend.map(m=>m.id||m.what).join(", ")||"none"}; approach = show legacy evidence, explain, developer decides]`});
+  const st=SPECS&&SPECS.stage, layer=st&&st.layer==="ai"?"ai":st&&st.layer==="api"?"api":"orchestrator";
+  const pend=SPECS&&SPECS.layers ? (layer==="ai" ? SPECS.layers.ai.missing : layer==="api" ? [] : SPECS.layers.orchestrator.missing.filter(m=>m.kind==="decide")) : [];
+  const histIntro=layer==="ai"?"Phase 1 (API) and Phase 2 (production) built+verified; working on Phase 3, the AI layer":layer==="api"?"Phase 1 (API) not built; working on Phase 1":"Phase 1 (API) built+verified; working on Phase 2, the orchestrator";
+  chatHistory.push({role:"assistant",text:`[intro: ${histIntro}; stage=${st?st.layer+"/"+st.step:"unknown"}; still to decide: ${pend.map(m=>m.id||m.what).join(", ")||"none"}; approach = show legacy evidence, explain, developer decides]`});
 })();
 </script>
 </body>
