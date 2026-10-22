@@ -242,3 +242,40 @@ test("nothing secret in the status", async () => {
 
   fs.rmSync(ctx.dir, { recursive: true, force: true });
 });
+
+test("a missing VADEMO setting fails before the record is touched", async () => {
+  const ctx = setupCtx({ impl: { api: builtApi(), orchestrator: { built: false, verified: false }, ai: { built: false, verified: false } } });
+  const before = fs.readFileSync(ctx.paths.implemented, "utf8");
+  const st = await main({
+    paths: ctx.paths, statusFile: ctx.statusFile, outDir: ctx.outDir, workRoot: ctx.workRoot, knownGoodRoot: ctx.knownGoodRoot,
+    env: { VADEMO_USER: "u", VADEMO_PASSWORD: "p" }, buildApp: fakeBuildApp, now: () => FIXED_DATE,
+  });
+  assert.equal(st.state, "error");
+  assert.match(st.error, /VADEMO connection not configured/);
+  assert.equal(fs.readFileSync(ctx.paths.implemented, "utf8"), before, "implemented.json unchanged — still built");
+  fs.rmSync(ctx.dir, { recursive: true, force: true });
+});
+
+test("the known-good REST copy is what was deployed, not harness/ after the Angular build", async () => {
+  const ctx = setupCtx();
+  const harnessDir = path.join(ctx.dir, "harness");
+  fs.mkdirSync(harnessDir);
+  for (const cls of REST_CLASSES) fs.writeFileSync(path.join(harnessDir, cls), "deployed " + cls);
+  const put = {};
+  const vademo = fakeVademo({ storedRow: ctx.storedRow });
+  vademo.putClass = async (n, text) => { put[n] = text; };
+  // harness/ is edited while the Angular build runs
+  const buildApp = async o => { for (const cls of REST_CLASSES) fs.writeFileSync(path.join(harnessDir, cls), "edited later"); return fakeBuildApp(o); };
+  const st = await main({
+    paths: ctx.paths, statusFile: ctx.statusFile, outDir: ctx.outDir, workRoot: ctx.workRoot, knownGoodRoot: ctx.knownGoodRoot,
+    vademo, buildApp, harnessDir, now: () => FIXED_DATE,
+  });
+  assert.equal(st.state, "done", st.error || "");
+  const kg = readKnownGood("api", ctx.knownGoodRoot);
+  for (const cls of REST_CLASSES) {
+    assert.equal(put[cls], "deployed " + cls, "deployed from the snapshot");
+    assert.equal(fs.readFileSync(path.join(kg.dirs.rest, cls), "utf8"), "deployed " + cls, "known-good is the deployed text");
+  }
+  assert.deepEqual(fs.readdirSync(ctx.workRoot).filter(n => n.startsWith("rest-")), [], "the snapshot is removed");
+  fs.rmSync(ctx.dir, { recursive: true, force: true });
+});

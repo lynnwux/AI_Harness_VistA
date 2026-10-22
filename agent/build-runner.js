@@ -56,6 +56,7 @@ async function main(deps = {}) {
     env = process.env,
     buildApp = buildAngularApp,
     now = () => new Date(),
+    harnessDir = HARNESS_DIR,
   } = deps;
   const saveKG = deps.saveKnownGood || saveKnownGoodLib;
 
@@ -81,6 +82,7 @@ async function main(deps = {}) {
   save(); // write "starting" before anything else
 
   ticker = setInterval(tick, 1000);
+  let restDir = null;
   try {
     setStep("Reading spec");
     const apiSpec = JSON.parse(fs.readFileSync(path.join(paths.specsDir, "api.json"), "utf8"));
@@ -89,17 +91,24 @@ async function main(deps = {}) {
     const cfg = apiSpec.detail;
     log(`spec → ${cfg.pages.length} screens, ${cfg.pages.reduce((n, p) => n + p.fields.length, 0)} fields`);
 
+    // Lazy: a missing setting becomes a status error, not a module-load crash — and it fails before the record
+    // is touched, so a build that cannot reach VADEMO changes nothing
+    const vademo = deps.vademo || vademoFromEnv(env);
+    const RUN_ID = now().toISOString().replace(/[:.]/g, "-");
+    // snapshot of the REST classes: the deploy reads it and it becomes the known-good copy, so what is saved is
+    // exactly what was deployed (the snapshot holds only REST_CLASSES; harness/ has extras)
+    restDir = path.join(workRoot, "rest-" + RUN_ID);
+    fs.mkdirSync(restDir, { recursive: true });
+    for (const cls of REST_CLASSES) fs.copyFileSync(path.join(harnessDir, cls), path.join(restDir, cls));
+
     // A rebuild in flight is not the verified thing: clear the record before any VADEMO call
     const prevImpl = readJson(paths.implemented, emptyImplemented());
     if (apiRecord(prevImpl).built) {
       fs.writeFileSync(paths.implemented, JSON.stringify({ ...prevImpl, api: emptyImplemented().api }, null, 2));
     }
 
-    // Lazy: missing setting becomes a status error, not a module-load crash
-    const vademo = deps.vademo || vademoFromEnv(env);
-
     setStep("Deploying the REST service to VADEMO");
-    const deploy = await deployRestService(vademo, { log });
+    const deploy = await deployRestService(vademo, { sourceDir: restDir, log });
     status.verification.push({ check: "REST service deployed", result: "ok" });
     status.verification.push({ check: `web app /Harness/Equipment ${deploy.webApp}`, result: "ok" });
     save();
@@ -114,14 +123,13 @@ async function main(deps = {}) {
     log(`  test record IEN ${verify.ien}, serial ${verify.serial}`);
 
     setStep("Preparing workspace");
-    const RUN_ID = now().toISOString().replace(/[:.]/g, "-");
     const WORK = path.join(workRoot, "run-" + RUN_ID);
     // Guarantee a clean start: sweep leftover workspaces. A dir still locked by a just-killed npm/ng
     // is skipped — harmless, because this run never touches it and the next sweep clears it.
     try {
       for (const d of fs.readdirSync(workRoot)) {
         const p = path.join(workRoot, d);
-        if (p === WORK) continue;
+        if (p === WORK || p === restDir) continue;
         try { fs.rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); log("· removed old workspace " + d); }
         catch (_) { log("· old workspace " + d + " is in use — skipping (will sweep next build)"); }
       }
@@ -147,17 +155,8 @@ async function main(deps = {}) {
     // tidy this run's workspace now that its output is published (best-effort)
     try { fs.rmSync(WORK, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch (_) {}
 
-    // copy REST_CLASSES to a temp dir so known-good has only those files (HARNESS_DIR has extras)
-    const restDir = path.join(workRoot, "rest-" + RUN_ID);
-    fs.mkdirSync(restDir, { recursive: true });
-    for (const cls of REST_CLASSES) fs.copyFileSync(path.join(HARNESS_DIR, cls), path.join(restDir, cls));
     const verifiedRecord = { ien: verify.ien, serial: verify.serial, at: now().toISOString() };
-    try {
-      saveKG("api", { dirs: { site: outDir, rest: restDir }, meta: { url: "/prototype/build/", restClasses: REST_CLASSES } }, knownGoodRoot);
-    } finally {
-      // clean up on every path — saveKnownGood atomically copied the dir before this runs
-      try { fs.rmSync(restDir, { recursive: true, force: true }); } catch (_) {}
-    }
+    saveKG("api", { dirs: { site: outDir, rest: restDir }, meta: { url: "/prototype/build/", restClasses: REST_CLASSES } }, knownGoodRoot);
     // implemented.json is the last committed side effect: written only after known-good succeeds
     const freshImpl = readJson(paths.implemented, emptyImplemented());
     freshImpl.api = { ...builtApi(PHASE1_SERVICES, { verifiedRecord, builtFrom: designHash(apiSpec) }) };
@@ -174,6 +173,9 @@ async function main(deps = {}) {
     save();
     log("✗ BUILD FAILED: " + status.error);
     return status;
+  } finally {
+    // the snapshot goes on every path — saveKnownGood has already copied it
+    if (restDir) try { fs.rmSync(restDir, { recursive: true, force: true }); } catch (_) {}
   }
 }
 
