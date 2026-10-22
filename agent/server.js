@@ -193,6 +193,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     const proc = teardownProc = spawnImpl(process.execPath, [path.join(__dirname, "teardown-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
     // a teardown killed by the next reset must not touch the status file the new one owns
     proc.on("exit", code => { if (teardownProc === proc) { teardownProc = null; reconcileExit(runners.teardownStatus, "the demo reset teardown", code); } });
+    proc.on("error", e => { if (teardownProc === proc) teardownProc = null; failSpawn(runners.teardownStatus, "the demo reset teardown", e); });
     const teardown = { started: true, statusUrl: "/api/demo/reset/status" };
     const localFailed = local.filter(r => String(r.outcome).startsWith("failed")).length;
     const out = { backup, local, ...(localFailed ? { localFailed } : {}), teardown };
@@ -350,6 +351,7 @@ let buildProc = null;
 const PHASE2_CLOSED = "Phase 2 opens after the Phase 1 build — press 🔨 Build on the API tab first";
 const API_OUT_OF_DATE = "the API layer changed since it was built — press 🔨 Build on the API tab to rebuild Phase 1 first";
 const TEARING_DOWN = "the demo reset is still tearing down — wait for it to finish";
+const API_BUILD_RUNNING = "the API build is running — wait for it to finish, then ";
 
 function registerBuildRoutes(app, regenerate, serially, { spawnImpl = spawn, buildStatus = STATUS_FILE, killTreeImpl = killTree } = {}) {
   // queued behind any chat turn in flight, so the build reads the record that turn saved
@@ -358,16 +360,20 @@ function registerBuildRoutes(app, regenerate, serially, { spawnImpl = spawn, bui
       if (teardownProc) return res.status(409).json({ started: false, error: TEARING_DOWN });
       if (buildProc) return res.json({ started: false, running: true, note: "a build is already running" });
       if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build" });
+      // the API build redeploys the REST service and writes implemented.json, like the production and AI builds
+      if (productionProc) return res.status(409).json({ started: false, error: "the production build is running — wait for it to finish, then build the API layer" });
+      if (aiProc) return res.status(409).json({ started: false, error: "the AI build is running — wait for it to finish, then build the API layer" });
       const g = regenerate();   // the build always reads the latest specs; it ignores any request body
       if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
       fs.writeFileSync(buildStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], url: null, error: null, startedAt: new Date().toISOString() }, null, 2));
-      buildProc = spawnImpl(process.execPath, [path.join(__dirname, "build-runner.js")], { cwd: __dirname, detached: true, stdio: "ignore" });
-      buildProc.on("exit", (code) => {
-        buildProc = null;
+      const proc = buildProc = spawnImpl(process.execPath, [path.join(__dirname, "build-runner.js")], { cwd: __dirname, detached: true, stdio: "ignore" });
+      proc.on("error", e => { if (buildProc === proc) buildProc = null; failSpawn(buildStatus, "the build", e); });
+      proc.on("exit", (code) => {
+        if (buildProc === proc) buildProc = null;
         reconcileExit(buildStatus, "build process", code);   // safety net for crash / kill
         serially(() => regenerate());   // implemented.json may now say built + verified
       });
-      buildProc.unref();
+      proc.unref();
       res.json({ started: true, statusUrl: "/api/build/status" });
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
   }));
@@ -417,12 +423,25 @@ function reconcileExit(statusFile, what, code) {
   } catch (e) { /* no status file — nothing to reconcile */ }
 }
 
+// A runner that could not be spawned ('error' event) ends its status in error, so the page's poll stops and the
+// server, which would otherwise crash on an unhandled 'error', keeps running.
+function failSpawn(statusFile, what, e) {
+  try {
+    const s = JSON.parse(fs.readFileSync(statusFile, "utf8"));
+    if (s.state === "done" || s.state === "error" || s.state === "cancelled") return;
+    s.state = "error"; s.error = `${what} could not start: ${e && e.message || e}`;
+    (s.log = s.log || []).push("✗ " + s.error);
+    fs.writeFileSync(statusFile, JSON.stringify(s, null, 2));
+  } catch (_) { /* no status file — nothing to mark */ }
+}
+
 function registerProductionRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl = spawn, productionStatus = PRODUCTION_STATUS, killTreeImpl = killTree } = {}) {
   app.post("/api/build/production", (_req, res) => serially(() => {
     if (teardownProc) return res.status(409).json({ started: false, error: TEARING_DOWN });
     if (productionProc) return res.json({ started: false, running: true, note: "a production build is already running" });
     if (aiProc) return res.status(409).json({ started: false, error: "the AI build is running — wait for it to finish, then build the production" });
     if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build the production" });
+    if (buildProc) return res.status(409).json({ started: false, error: API_BUILD_RUNNING + "build the production" });
     const g = regenerate();
     if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
     const st = stageOf();
@@ -432,6 +451,7 @@ function registerProductionRoutes(app, regenerate, serially, specs, stageOf, { s
     if (!o.complete) return res.status(409).json({ started: false, error: "the orchestrator spec is not complete — finish its missing items in the Decide chat first", missing: o.missing.map(m => m.what) });
     fs.writeFileSync(productionStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], error: null, startedAt: new Date().toISOString() }, null, 2));
     const proc = productionProc = spawnImpl(process.execPath, [path.join(__dirname, "production-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
+    proc.on("error", e => { if (productionProc === proc) productionProc = null; failSpawn(productionStatus, "the production build", e); });
     proc.on("exit", code => {
       if (productionProc === proc) productionProc = null;
       reconcileExit(productionStatus, "the production build", code);
@@ -465,6 +485,7 @@ function startRestore({ spawnImpl = spawn, restoreStatus = RESTORE_STATUS } = {}
   fs.writeFileSync(restoreStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], results: [], error: null, startedAt: new Date().toISOString() }, null, 2));
   const proc = restoreProc = spawnImpl(process.execPath, [path.join(__dirname, "restore-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
   proc.on("exit", code => { if (restoreProc === proc) restoreProc = null; reconcileExit(restoreStatus, "the restore", code); });
+  proc.on("error", e => { if (restoreProc === proc) restoreProc = null; failSpawn(restoreStatus, "the restore", e); });
   return { reply: "Restoring the last good copy of each deliverable — the entry form, the IRIS production and the AI layer…", restore: { started: true, statusUrl: "/api/restore/status" } };
 }
 function registerAiRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl = spawn, aiStatus = AI_STATUS_FILE, killTreeImpl = killTree } = {}) {
@@ -473,6 +494,7 @@ function registerAiRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl
     if (aiProc) return res.json({ started: false, running: true, note: "an AI build is already running" });
     if (restoreProc) return res.status(409).json({ started: false, error: "a restore is running — wait for it to finish, then build the AI layer" });
     if (productionProc) return res.status(409).json({ started: false, error: "the production build is running — wait for it to finish, then build the AI layer" });
+    if (buildProc) return res.status(409).json({ started: false, error: API_BUILD_RUNNING + "build the AI layer" });
     const g = regenerate();
     if (g.error) return res.status(500).json({ started: false, error: "spec generation failed: " + g.error });
     const st = stageOf();
@@ -483,6 +505,7 @@ function registerAiRoutes(app, regenerate, serially, specs, stageOf, { spawnImpl
     if (!a || !a.complete) return res.status(409).json({ started: false, error: "the AI spec is not complete — finish its missing items in the Decide chat first", missing: (a && a.missing || []).map(m => m.what) });
     fs.writeFileSync(aiStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], error: null, startedAt: new Date().toISOString() }, null, 2));
     const proc = aiProc = spawnImpl(process.execPath, [path.join(__dirname, "ai-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
+    proc.on("error", e => { if (aiProc === proc) aiProc = null; failSpawn(aiStatus, "the AI build", e); });
     proc.on("exit", code => {
       if (aiProc === proc) aiProc = null;
       reconcileExit(aiStatus, "the AI build", code);

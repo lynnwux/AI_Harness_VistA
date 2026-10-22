@@ -700,3 +700,58 @@ test("createApp over a building production status marks it error with restart me
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("the API build and the production or AI build never run at the same time", async () => {
+  const t = await buildSetup({ aiQuestions: ALL_KEPT });
+  try {
+    assert.equal((await (await post(t, "/api/build/production")).json()).started, true);
+    const r = await post(t, "/api/build");
+    assert.equal(r.status, 409);
+    assert.match((await r.json()).error, /production build is running/);
+    t.procs[0].emit("exit", 0);
+    await new Promise(res => setTimeout(res, 20));
+    assert.equal((await (await post(t, "/api/build/ai")).json()).started, true);
+    const r1 = await post(t, "/api/build");
+    assert.equal(r1.status, 409);
+    assert.match((await r1.json()).error, /AI build is running/);
+    t.procs[1].emit("exit", 0);
+    await new Promise(res => setTimeout(res, 20));
+    assert.equal((await (await post(t, "/api/build")).json()).started, true);
+    for (const p of ["/api/build/production", "/api/build/ai"]) {
+      const r2 = await post(t, p);
+      assert.equal(r2.status, 409, p);
+      assert.match((await r2.json()).error, /the API build is running/, p);
+    }
+    assert.equal(t.procs.length, 3, "nothing else was started");
+  } finally { await t.done(); }
+});
+
+test("a runner that cannot be spawned ends its status in error and blocks nothing", async () => {
+  const t = await buildSetup({ aiQuestions: ALL_KEPT });
+  const st = f => JSON.parse(fs.readFileSync(f, "utf8"));
+  try {
+    // without an 'error' listener each of these would crash the server
+    assert.equal((await (await post(t, "/api/build/production")).json()).started, true);
+    t.procs[0].emit("error", new Error("spawn ENOENT"));
+    assert.match(st(t.statusFiles.production).error, /the production build could not start: spawn ENOENT/);
+    assert.equal(st(t.statusFiles.production).state, "error");
+    assert.equal((await (await post(t, "/api/build/ai")).json()).started, true, "the failed production no longer blocks the AI build");
+    t.procs[1].emit("error", new Error("spawn EPERM"));
+    assert.equal(st(t.statusFiles.ai).state, "error");
+    assert.equal((await (await post(t, "/api/build")).json()).started, true, "the failed AI build no longer blocks the API build");
+    t.procs[2].emit("error", new Error("x"));
+    const b = await (await fetch(t.base + "/api/build/status")).json();
+    assert.equal(b.state, "error");
+    assert.match(b.error, /the build could not start: x/);
+    const rs = await (await say(t, "restore last good")).json();
+    assert.equal(rs.restore.started, true, JSON.stringify(rs));
+    t.procs[3].emit("error", new Error("y"));
+    assert.equal(st(t.statusFiles.restore).state, "error");
+    assert.equal((await (await post(t, "/api/demo/reset")).json()).ok, true);
+    t.procs[4].emit("error", new Error("z"));
+    const s = await (await fetch(t.base + "/api/demo/reset/status")).json();
+    assert.equal(s.state, "error");
+    assert.match(s.error, /the demo reset teardown could not start: z/);
+    assert.equal((await (await post(t, "/api/build")).json()).started, true, "the teardown no longer blocks a build");
+  } finally { await t.done(); }
+});
