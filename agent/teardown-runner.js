@@ -18,11 +18,14 @@ const VADEMO_ITEMS = [`web app ${REST_WEB_APP}`, ...REST_TEARDOWN_CLASSES.map(c 
 async function teardownAll({ statusFile = STATUS_FILE, env = process.env, vademoImpl = () => vademoFromEnv(env), irisSessionImpl = irisSession } = {}) {
   const secrets = SECRET_KEYS.map(k => env[k]).filter(Boolean);
   const hide = t => redact(String(t), secrets);
+  // the server seeds the status file with the reset's local results; they count toward done/error like the rest
+  const seeded = (() => { try { return (JSON.parse(fs.readFileSync(statusFile, "utf8")).results || []).filter(r => r.where === "local"); } catch (_) { return []; } })();
   const status = { state: "tearing down", step: "", log: [], results: [], error: null, startedAt: new Date().toISOString() };
   const save = () => fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
   const note = s => { status.log.push(hide(s)); save(); };
   const record = (where, rows) => { for (const r of rows) { const outcome = hide(r.outcome); status.results.push({ where, item: r.item, outcome }); note(`  ${outcome.startsWith("failed") ? "✗" : "✅"} ${r.item} — ${outcome}`); } };
   save();
+  if (seeded.length) { status.step = "Removed the local leftovers"; note("▶ " + status.step); record("local", seeded); }
 
   status.step = "Removing the REST service from VADEMO"; note("▶ " + status.step);
   try { record("VADEMO", await removeRestService(vademoImpl())); }

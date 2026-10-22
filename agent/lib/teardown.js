@@ -104,7 +104,7 @@ function localTeardown({ agentDir, repoRoot, knownGoodRoot, statusFiles = {}, de
     ...removeEntries(path.join(agentDir, "_production"), "_production", () => true, "*"),
     ...removeEntries(knownGoodRoot, path.basename(knownGoodRoot), n => debris.test(n), "<layer>.new-*, <layer>.old-*"),
     ...removeEntries(tmpDir, "%TEMP%", n => n.startsWith("eqchat-"), "eqchat-*"),
-    removePath(path.join(agentDir, "decisions.json.tmp"), "decisions.json.tmp"),
+    removePath(decisionsFile + ".tmp", path.basename(decisionsFile) + ".tmp"),   // the save's temp file (lib/record.js)
     removePath(path.join(agentDir, "interclaw-servers.json"), "interclaw-servers.json"),
     ...(prune.length ? prune.map(n => removePath(path.join(backupDir, n), n)) : [{ item: `decisions backups beyond the newest ${keepBackups}`, outcome: "absent" }]),
   ];

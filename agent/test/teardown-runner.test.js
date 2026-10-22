@@ -61,6 +61,20 @@ test("an IRIS failure is one failed result per IRIS item, with no secret anywher
   } finally { w.cleanup(); }
 });
 
+test("a local item the reset could not remove makes the teardown end error, naming it", async () => {
+  const w = world();
+  try {
+    const local = [{ where: "local", item: "prototype/build", outcome: "failed: EBUSY: resource busy or locked" }, { where: "local", item: "prototype/chat", outcome: "removed" }];
+    fs.writeFileSync(w.statusFile, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], results: local, error: null }));
+    const s = await teardownAll({ statusFile: w.statusFile, env: ENV, vademoImpl: emptyVademo, irisSessionImpl: () => IRIS_ALL_ABSENT });
+    assert.deepEqual(s.results.slice(0, 2), local, "the local results are kept, first");
+    assert.ok(s.results.filter(r => r.where !== "local").every(r => r.outcome === "absent"));
+    assert.equal(s.state, "error");
+    assert.match(s.error, /local prototype\/build \(failed: EBUSY/);
+    assert.doesNotMatch(s.error, /prototype\/chat/);
+  } finally { w.cleanup(); }
+});
+
 test("teardown of an empty world is done", async () => {
   const w = world();
   try {

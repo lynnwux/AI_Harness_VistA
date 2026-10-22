@@ -140,3 +140,18 @@ test("localTeardown removes leftovers and keeps the known-good copies", () => {
     for (const f of kept) assert.ok(fs.existsSync(f), path.relative(root, f));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test("localTeardown removes the decisions save's temp file beside the decisions file", () => {
+  const fs = require("fs"), os = require("os"), path = require("path");
+  const { localTeardown } = require("../lib/teardown");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ltd-"));
+  try {
+    const dataDir = path.join(root, "data"), agentDir = path.join(root, "agent");
+    fs.mkdirSync(dataDir); fs.mkdirSync(agentDir);
+    fs.writeFileSync(path.join(dataDir, "decisions.json"), "{}"); fs.writeFileSync(path.join(dataDir, "decisions.json.tmp"), "{");
+    const r = localTeardown({ agentDir, repoRoot: root, knownGoodRoot: path.join(agentDir, "_known-good"), decisionsFile: path.join(dataDir, "decisions.json"), tmpDir: path.join(root, "tmp") });
+    assert.deepEqual(r.find(x => x.item === "decisions.json.tmp"), { item: "decisions.json.tmp", outcome: "removed" });
+    assert.ok(!fs.existsSync(path.join(dataDir, "decisions.json.tmp")));
+    assert.ok(fs.existsSync(path.join(dataDir, "decisions.json")));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

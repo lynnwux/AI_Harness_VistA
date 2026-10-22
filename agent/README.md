@@ -82,6 +82,6 @@ type `reset` to confirm — so the page opens in Phase 1 with nothing built:
 Kept: the known-good copies (`agent/_known-good/<layer>/`, so "restore last good" still works), the decisions
 backups and the 6914 test records. The local part finishes before `POST /api/demo/reset` answers; the VADEMO and
 IRIS part runs as a job (`teardown-runner.js`) — progress at `GET /api/demo/reset/status` (status file
-`agent/teardown-status.json`), one result per item. It ends `done` only if every item was removed or already absent,
+`agent/teardown-status.json`), one result per item — local, VADEMO and IRIS. It ends `done` only if every item was removed or already absent,
 otherwise `error` naming each item it could not remove; either way the next 🔨 Build deploys over whatever is left.
 Builds and restore wait until the teardown finishes.

@@ -264,7 +264,7 @@ const ALL_KEPT = {
 };
 
 // A server whose builds are fake processes: nothing is spawned, and every file it writes or removes is a temp file.
-async function buildSetup({ apiBuilt = true, orchestratorVerified = true, aiQuestions = undefined, agentCalls = [], killTreeImpl = () => {}, inventory = INVENTORY, vademoFetch } = {}) {
+async function buildSetup({ apiBuilt = true, orchestratorVerified = true, aiQuestions = undefined, agentCalls = [], killTreeImpl = () => {}, inventory = INVENTORY, vademoFetch, localTeardownImpl } = {}) {
   const procs = [];
   const spawnImpl = (_cmd, args) => { const p = new EventEmitter(); p.args = args; p.pid = 1000 + procs.length; p.unref = () => {}; procs.push(p); return p; };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-b-"));
@@ -275,7 +275,7 @@ async function buildSetup({ apiBuilt = true, orchestratorVerified = true, aiQues
   const statusFiles = { build: path.join(dir, "build-status.json"), production: path.join(dir, "production-status.json"), ai: path.join(dir, "ai-status.json"), restore: path.join(dir, "restore-status.json"), teardown: path.join(dir, "teardown-status.json") };
   // the reset's local teardown works only inside dir
   const roots = { agentDir: path.join(dir, "agent"), repoRoot: path.join(dir, "repo"), knownGoodRoot: path.join(dir, "agent", "_known-good"), tmpDir: path.join(dir, "tmp") };
-  const made = createApp({ paths, runAgentImpl: async m => { agentCalls.push(m); return { reply: "ok", toolTrace: [] }; }, spawnImpl, statusFiles, killTreeImpl, ...roots, ...(vademoFetch ? { vademoFetch } : {}) });
+  const made = createApp({ paths, runAgentImpl: async m => { agentCalls.push(m); return { reply: "ok", toolTrace: [] }; }, spawnImpl, statusFiles, killTreeImpl, ...roots, ...(vademoFetch ? { vademoFetch } : {}), ...(localTeardownImpl ? { localTeardownImpl } : {}) });
   const t = await new Promise(resolve => {
     const srv = made.app.listen(0, "127.0.0.1", () => resolve({ ...made, srv, paths, dir, base: `http://127.0.0.1:${srv.address().port}` }));
   });
@@ -514,6 +514,7 @@ test("reset: nothing built anywhere, the page opens in Phase 1", async () => {
     assert.ok(Array.isArray(r.local) && r.local.some(x => x.item === "ai-status.json" && x.outcome === "removed"), JSON.stringify(r.local));
     // the remote teardown is a job the page follows
     assert.deepEqual(r.teardown, { started: true, statusUrl: "/api/demo/reset/status" });
+    assert.equal(r.localFailed, undefined, "nothing failed locally");
     assert.match(t.procs.at(-1).args.at(-1), /teardown-runner\.js$/);
     assert.equal((await (await fetch(t.base + "/api/demo/reset/status")).json()).state, "starting");
   } finally { await t.done(); }
@@ -559,6 +560,21 @@ test("builds wait while the reset tears down", async () => {
     t.procs[0].emit("exit", 0);
     await new Promise(res => setTimeout(res, 30));
     assert.equal((await (await post(t, "/api/build")).json()).started, true);
+  } finally { await t.done(); }
+});
+
+test("a local item the reset could not remove is counted and handed to the teardown job", async () => {
+  const local = [{ item: "prototype/build", outcome: "failed: EBUSY: resource busy or locked" }, { item: "prototype/chat", outcome: "removed" }];
+  const seen = [];
+  const t = await buildSetup({ localTeardownImpl: opts => { seen.push(opts); return local; } });
+  try {
+    const r = await (await post(t, "/api/demo/reset")).json();
+    assert.equal(r.ok, true, "the reset itself ran");
+    assert.equal(r.localFailed, 1);
+    assert.deepEqual(r.local, local);
+    assert.equal(seen[0].decisionsFile, t.paths.decisions);
+    const s = await (await fetch(t.base + "/api/demo/reset/status")).json();
+    assert.deepEqual(s.results, local.map(x => ({ where: "local", ...x })), "the job's status starts with the local results");
   } finally { await t.done(); }
 });
 

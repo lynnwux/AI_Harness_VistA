@@ -20,9 +20,10 @@ const PORT = process.env.PORT || 8899;
 const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return fallback; } };
 
 // spawnImpl, statusFiles and killTreeImpl let tests run the build routes without starting a runner or touching agent/ files;
-// agentDir, repoRoot, knownGoodRoot and tmpDir are where the demo reset removes leftovers; vademoFetch serves the lookups.
+// agentDir, repoRoot, knownGoodRoot and tmpDir are where the demo reset removes leftovers (localTeardownImpl does it);
+// vademoFetch serves the lookups.
 function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl = spawn, statusFiles = {}, killTreeImpl = killTree,
-                     agentDir = __dirname, repoRoot = ROOT, knownGoodRoot = KNOWN_GOOD_ROOT, tmpDir = os.tmpdir(), vademoFetch = fetch } = {}) {
+                     agentDir = __dirname, repoRoot = ROOT, knownGoodRoot = KNOWN_GOOD_ROOT, tmpDir = os.tmpdir(), vademoFetch = fetch, localTeardownImpl = localTeardown } = {}) {
   let graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
   let inventory = readJson(paths.inventory || DEFAULT_PATHS.inventory, null);     // re-read in regenerate()
   let notice = null;
@@ -182,17 +183,21 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     restore(normalize(defaultDecisions(graph)));
     saveRecord(paths.decisions, state.record);
     fs.writeFileSync(paths.implemented, JSON.stringify(emptyImplemented(), null, 2) + "\n");
-    const local = localTeardown({ agentDir, repoRoot, knownGoodRoot, tmpDir, decisionsFile: paths.decisions,
+    const local = localTeardownImpl({ agentDir, repoRoot, knownGoodRoot, tmpDir, decisionsFile: paths.decisions,
       statusFiles: { build: runners.buildStatus, production: runners.productionStatus, ai: runners.aiStatus, restore: runners.restoreStatus, teardown: runners.teardownStatus } });
     vista.clearCache();
     const g = regenerate();   // re-reads the inventory too
-    fs.writeFileSync(runners.teardownStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], results: [], error: null, startedAt: new Date().toISOString() }, null, 2));
+    // the job's status starts with the local results, so its done/error verdict covers them too
+    const localResults = local.map(r => ({ where: "local", item: r.item, outcome: r.outcome }));
+    fs.writeFileSync(runners.teardownStatus, JSON.stringify({ state: "starting", step: "queued", log: ["▶ queued"], results: localResults, error: null, startedAt: new Date().toISOString() }, null, 2));
     const proc = teardownProc = spawnImpl(process.execPath, [path.join(__dirname, "teardown-runner.js")], { cwd: __dirname, stdio: "ignore", windowsHide: true });
     // a teardown killed by the next reset must not touch the status file the new one owns
     proc.on("exit", code => { if (teardownProc === proc) { teardownProc = null; reconcileExit(runners.teardownStatus, "the demo reset teardown", code); } });
     const teardown = { started: true, statusUrl: "/api/demo/reset/status" };
-    if (g.error) return res.status(500).json({ ok: false, error: "spec generation failed: " + g.error, backup, local, teardown });
-    res.json({ ok: true, backup, local, teardown });
+    const localFailed = local.filter(r => String(r.outcome).startsWith("failed")).length;
+    const out = { backup, local, ...(localFailed ? { localFailed } : {}), teardown };
+    if (g.error) return res.status(500).json({ ok: false, error: "spec generation failed: " + g.error, ...out });
+    res.json({ ok: true, ...out });
   }).catch(e => { if (!res.headersSent) res.status(500).json({ ok: false, error: String(e.message || e) }); }));
   app.get("/api/demo/reset/status", (_req, res) => {
     try { res.json(JSON.parse(fs.readFileSync(runners.teardownStatus, "utf8"))); }
