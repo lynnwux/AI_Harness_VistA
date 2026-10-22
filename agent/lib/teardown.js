@@ -24,25 +24,26 @@ function irisTeardownScript() {
 
   return [
     `zn "INTEROP"`,
-    // STOP — only when GetProductionStatus names EquipmentEntry.Production
-    `try { do ##class(Ens.Director).GetProductionStatus(.pn,.ps) if pn=${osq(prod)} { set sc=##class(Ens.Director).StopProduction(10,1) if $$$ISOK(sc) { do ##class(Ens.Director).CleanProduction() write "STOP:stopped",! } else { write "STOP:ERROR ",$system.Status.GetErrorText(sc),! } } else { write "STOP:not running",! } } catch e { write "STOP:ERROR ",e.DisplayString(),! }`,
-    // MESSAGES — delete message header rows for both packages (SQL single-quotes inside OS double-quoted string)
-    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens.MessageHeader WHERE MessageBodyClassName %STARTSWITH '${prodPfx}' OR MessageBodyClassName %STARTSWITH '${aiPfx}'") write "MESSAGES:",st.%ROWCOUNT,! } catch e { write "MESSAGES:ERROR ",e.DisplayString(),! }`,
+    // STOP — only when GetProductionStatus names EquipmentEntry.Production in state 1/3/4 (running/suspended/troubled; 2 = stopped)
+    `try { do ##class(Ens.Director).GetProductionStatus(.pn,.ps) if ($get(pn)=${osq(prod)})&&(($get(ps)=1)!($get(ps)=3)!($get(ps)=4)) { set sc=##class(Ens.Director).StopProduction(10,1) if $system.Status.IsOK(sc) { do ##class(Ens.Director).CleanProduction() write "STOP:stopped",! } else { write "STOP:ERROR ",$system.Status.GetErrorText(sc),! } } else { write "STOP:not running",! } } catch e { write "STOP:ERROR ",e.DisplayString(),! }`,
+    // MESSAGES — delete message header rows for both packages (SQL single-quotes inside OS double-quoted string).
+    // %ExecDirect does not throw on an SQL error: a negative %SQLCODE is reported, otherwise the row count.
+    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens.MessageHeader WHERE MessageBodyClassName %STARTSWITH '${prodPfx}' OR MessageBodyClassName %STARTSWITH '${aiPfx}'") if st.%SQLCODE<0 { write "MESSAGES:ERROR ",st.%Message,! } else { write "MESSAGES:",st.%ROWCOUNT,! } } catch e { write "MESSAGES:ERROR ",e.DisplayString(),! }`,
     // EVENTLOG — delete event log rows for both packages
-    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens_Util.Log WHERE SourceClass %STARTSWITH '${prodPfx}' OR SourceClass %STARTSWITH '${aiPfx}'") write "EVENTLOG:",st.%ROWCOUNT,! } catch e { write "EVENTLOG:ERROR ",e.DisplayString(),! }`,
-    // SETTINGS — delete production default settings; SQLCODE 0 = success
-    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens_Config.DefaultSettings WHERE ProductionName='${prod}'") write "SETTINGS:",st.%SQLCODE,! } catch e { write "SETTINGS:ERROR ",e.DisplayString(),! }`,
+    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens_Util.Log WHERE SourceClass %STARTSWITH '${prodPfx}' OR SourceClass %STARTSWITH '${aiPfx}'") if st.%SQLCODE<0 { write "EVENTLOG:ERROR ",st.%Message,! } else { write "EVENTLOG:",st.%ROWCOUNT,! } } catch e { write "EVENTLOG:ERROR ",e.DisplayString(),! }`,
+    // SETTINGS — delete production default settings
+    `try { set st=##class(%SQL.Statement).%ExecDirect(,"DELETE FROM Ens_Config.DefaultSettings WHERE ProductionName='${prod}'") if st.%SQLCODE<0 { write "SETTINGS:ERROR ",st.%Message,! } else { write "SETTINGS:",st.%ROWCOUNT,! } } catch e { write "SETTINGS:ERROR ",e.DisplayString(),! }`,
     // AISESSIONS — delete stored AI agent sessions (same loop as aiSettingsScript)
     `try { set n=0,k="" for { set k=$order(^${AI_PKG}.Sessions(k)) quit:k=""  set id=$get(^${AI_PKG}.Sessions(k)) do:id'="" ##class(%AI.Agent.Session).%DeleteId(id) set n=n+1 } kill ^${AI_PKG}.Sessions write "AISESSIONS:",n,! } catch e { write "AISESSIONS:ERROR ",e.DisplayString(),! }`,
     // AICONFIG — kill the AI config global unconditionally
     `kill ^${AI_PKG}.Config write "AICONFIG:killed",!`,
     // PKG:EquipmentEntry — absent when no class in ^oddDEF starts with the package prefix
-    `try { set tP=${osq(prodPfx)} set k=$order(^oddDEF(tP)) if $extract(k,1,$length(tP))'=tP { write "PKG:${PROD_PKG}:absent",! } else { set sc=$System.OBJ.DeletePackage(${osq(PROD_PKG)},"/deleteextent") write "PKG:${PROD_PKG}:",$select($$$ISOK(sc):"ok",1:"ERROR "_$system.Status.GetErrorText(sc)),! } } catch e { write "PKG:${PROD_PKG}:ERROR ",e.DisplayString(),! }`,
+    `try { set tP=${osq(prodPfx)} set k=$order(^oddDEF(tP)) if $extract(k,1,$length(tP))'=tP { write "PKG:${PROD_PKG}:absent",! } else { set sc=$System.OBJ.DeletePackage(${osq(PROD_PKG)},"/deleteextent") write "PKG:${PROD_PKG}:",$select($system.Status.IsOK(sc):"ok",1:"ERROR "_$system.Status.GetErrorText(sc)),! } } catch e { write "PKG:${PROD_PKG}:ERROR ",e.DisplayString(),! }`,
     // PKG:EquipmentAI — same
-    `try { set tP=${osq(aiPfx)} set k=$order(^oddDEF(tP)) if $extract(k,1,$length(tP))'=tP { write "PKG:${AI_PKG}:absent",! } else { set sc=$System.OBJ.DeletePackage(${osq(AI_PKG)},"/deleteextent") write "PKG:${AI_PKG}:",$select($$$ISOK(sc):"ok",1:"ERROR "_$system.Status.GetErrorText(sc)),! } } catch e { write "PKG:${AI_PKG}:ERROR ",e.DisplayString(),! }`,
+    `try { set tP=${osq(aiPfx)} set k=$order(^oddDEF(tP)) if $extract(k,1,$length(tP))'=tP { write "PKG:${AI_PKG}:absent",! } else { set sc=$System.OBJ.DeletePackage(${osq(AI_PKG)},"/deleteextent") write "PKG:${AI_PKG}:",$select($system.Status.IsOK(sc):"ok",1:"ERROR "_$system.Status.GetErrorText(sc)),! } } catch e { write "PKG:${AI_PKG}:ERROR ",e.DisplayString(),! }`,
     // CRED — delete each credential if it exists
     ...[credId, CREDENTIALS.vademo, CREDENTIALS.bedrock].map(id =>
-      `try { if ##class(Ens.Config.Credentials).%ExistsId(${osq(id)}) { set sc=##class(Ens.Config.Credentials).%DeleteId(${osq(id)}) write "CRED:${id}:",$select($$$ISOK(sc):"deleted",1:"ERROR "_$system.Status.GetErrorText(sc)),! } else { write "CRED:${id}:absent",! } } catch e { write "CRED:${id}:ERROR ",e.DisplayString(),! }`
+      `try { if ##class(Ens.Config.Credentials).%ExistsId(${osq(id)}) { set sc=##class(Ens.Config.Credentials).%DeleteId(${osq(id)}) write "CRED:${id}:",$select($system.Status.IsOK(sc):"deleted",1:"ERROR "_$system.Status.GetErrorText(sc)),! } else { write "CRED:${id}:absent",! } } catch e { write "CRED:${id}:ERROR ",e.DisplayString(),! }`
     ),
     // Switch to %SYS for Security.Applications management
     `zn "%SYS"`,

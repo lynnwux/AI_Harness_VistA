@@ -155,3 +155,37 @@ test("localTeardown removes the decisions save's temp file beside the decisions 
     assert.ok(fs.existsSync(path.join(dataDir, "decisions.json")));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test("no terminal-session script uses a macro (direct mode does not expand $$$)", () => {
+  const { irisTeardownScript } = require("../lib/teardown");
+  const { sessionScript, bulletinSettingsScript } = require("../production-runner");
+  const { aiSettingsScript } = require("../ai-runner");
+  const smtp = { host: "mail", port: 25, from: "a@b", user: "u", password: "p" };
+  const scripts = {
+    irisTeardownScript: irisTeardownScript(),
+    sessionScript: sessionScript("INTEROP", smtp),
+    bulletinSettingsScript: bulletinSettingsScript("INTEROP", smtp),
+    aiSettingsScript: aiSettingsScript({ VADEMO_URL: "http://h:80", VADEMO_USER: "u", VADEMO_PASSWORD: "p", AWS_BEARER_TOKEN_BEDROCK: "t" }),
+  };
+  for (const [name, s] of Object.entries(scripts)) assert.doesNotMatch(s, /\$\$\$/, `${name} contains a $$$ macro`);
+  assert.match(scripts.irisTeardownScript, /\$system\.Status\.IsOK\(sc\)/);
+});
+
+test("the teardown's SQL lines report an SQL error and count rows", () => {
+  const { irisTeardownScript } = require("../lib/teardown");
+  const lines = irisTeardownScript().split("\n");
+  for (const key of ["MESSAGES", "EVENTLOG", "SETTINGS"]) {
+    const l = lines.find(x => x.includes(`write "${key}:`));
+    assert.ok(l, `${key} line present`);
+    assert.match(l, new RegExp(`if st\.%SQLCODE<0 \{ write "${key}:ERROR ",st\.%Message,! \} else \{ write "${key}:",st\.%ROWCOUNT,! \}`), `${key} checks %SQLCODE<0 and writes %ROWCOUNT`);
+    assert.doesNotMatch(l, /write "[A-Z]+:",st\.%SQLCODE/, `${key} must not write %SQLCODE as its count`);
+  }
+});
+
+test("the teardown stops the production only when it is ours and running, suspended or troubled", () => {
+  const { irisTeardownScript } = require("../lib/teardown");
+  const l = irisTeardownScript().split("\n").find(x => x.includes('"STOP:'));
+  assert.match(l, /\$get\(pn\)="EquipmentEntry\.Production"/);
+  assert.match(l, /\(\$get\(ps\)=1\)!\(\$get\(ps\)=3\)!\(\$get\(ps\)=4\)/, "states 1, 3, 4 only (2 = stopped)");
+  assert.match(l, /StopProduction\(10,1\) if \$system\.Status\.IsOK\(sc\) \{ do ##class\(Ens\.Director\)\.CleanProduction\(\)/, "CleanProduction only after a real stop");
+});
