@@ -528,3 +528,15 @@ test("demo reset also clears the production, AI and restore build status, so the
     assert.deepEqual(await (await fetch(t.base + "/api/build/ai/status")).json(), { state: "idle", step: "", log: [] });
   } finally { await t.done(); }
 });
+
+test("the guide is told Phase 1 is not built, and never that it is", async () => {
+  const t1 = await buildSetup({ apiBuilt: false, orchestratorVerified: false });
+  try {
+    assert.match(t1.systemPrompt(), /PHASE 1 IS NOT BUILT/);
+    assert.doesNotMatch(t1.systemPrompt(), /built and verified/);
+  } finally { await t1.done(); }
+  const t2 = await buildSetup({ apiBuilt: true });
+  try {
+    assert.match(t2.systemPrompt(), /The API layer .* is built and verified/);
+  } finally { await t2.done(); }
+});

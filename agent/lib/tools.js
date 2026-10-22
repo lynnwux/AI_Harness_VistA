@@ -334,8 +334,21 @@ const TOOL_SPECS = [
   { toolSpec: { name: "setQuickQuestion", description: "Set whether to keep a quick-access AI question and/or record its wording and SQL parameters. Merges into any previously recorded values. Refuses unknown ids, unknown or invalid param keys and values (message lists valid options/codes), and wording that looks like a credential.", inputSchema: { json: { type: "object", properties: { id: { type: "string", description: "AIQ template id (AIQ.AgingOutFY, AIQ.HighValueNoContract, AIQ.JCAHOPendingInspection, AIQ.CapitalPlanningTotals)" }, keep: { type: "boolean", description: "Whether to include this question on the AI quick-access page" }, wording: { type: "string", description: "Custom question wording shown to the user; defaults to the template's defaultWording" }, params: { type: "object", description: "Parameter values for this question — see getState.ai.questions for valid keys and options" } }, required: ["id"] } } } },
 ];
 
+// Refused in Phase 1: orchestrator/AI decisions are gated on the API being built and verified.
+const PHASE1_ONLY_MSG = "refused: Phase 1 is not built yet — orchestrator and AI decisions open after the Phase 1 build. Press 🔨 Build on the API tab first; form fields (Include/Omit) can be decided now.";
+
+// Returns true when the tool changes orchestrator/AI state (not a data-field setDisposition or a read-only call).
+const phase1Gated = (name, input, graph) =>
+  ["resolveOpenQuestion", "setBuildScope", "setTarget", "bindRuleTerms", "setQuickQuestion"].includes(name) ||
+  (name === "setDisposition" && categoryOf(graph, input && input.nodeId) !== "data");
+
 function runTool(name, input, ctx) {
   const { graph, decisions } = ctx;
+  if (phase1Gated(name, input, graph)) {
+    const im = ctx.implemented || emptyImplemented();
+    const st = stage(generate({ graph, record: normalize(decisions), implemented: im, inventory: ctx.inventory || null }), im);
+    if (st.layer === "api") return { ok: false, message: PHASE1_ONLY_MSG };
+  }
   switch (name) {
     case "getState": return getState(graph, decisions, ctx);
     case "explainOption": return explainOption(graph, input.nodeId, input.option);
@@ -350,4 +363,4 @@ function runTool(name, input, ctx) {
   }
 }
 
-module.exports = { TOOL_SPECS, runTool, defaultDecisions, getState, categoryOf, CAT_OPTS, findNode, label };
+module.exports = { TOOL_SPECS, runTool, defaultDecisions, getState, categoryOf, CAT_OPTS, findNode, label, PHASE1_ONLY_MSG };

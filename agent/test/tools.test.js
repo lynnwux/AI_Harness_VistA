@@ -4,7 +4,8 @@ const assert = require("node:assert/strict");
 const fs   = require("fs");
 const path = require("path");
 const { graph, rec, IM } = require("./helpers");
-const { runTool, TOOL_SPECS } = require("../lib/tools");
+const { runTool, TOOL_SPECS, PHASE1_ONLY_MSG } = require("../lib/tools");
+const { emptyImplemented } = require("../lib/implemented");
 
 const inv = JSON.parse(fs.readFileSync(
   path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json"), "utf8"
@@ -257,4 +258,33 @@ test("getState.ai agrees with the AI spec: a question with every parameter but n
   assert.equal(st.ai.stage.configured, 2, "AgingOutFY and CapitalPlanningTotals");
   assert.equal(st.ai.stage.kept, 3);
   assert.equal(st.ai.stage.missing, 1);
+});
+
+// ── Phase 1 gate ──────────────────────────────────────────────────────────────
+
+test("in Phase 1 the orchestrator and AI tools refuse and change nothing", () => {
+  const r = rec();
+  const snap = JSON.parse(JSON.stringify(r));
+  const c1 = { graph, decisions: r, implemented: emptyImplemented() };
+  for (const [name, input] of [
+    ["resolveOpenQuestion", { id: "OQ.WorkOrderPolicy", mode: "Defer", policy: "x" }],
+    ["setBuildScope",       { nodeId: "SIDE.WorkOrder", phase: "Defer" }],
+    ["setTarget",           { nodeId: "SIDE.WorkOrder", via: "vista", writePath: "x" }],
+    ["bindRuleTerms",       { id: "OQ.WorkOrderPolicy", bindings: {} }],
+    ["setQuickQuestion",    { id: "AIQ.AgingOutFY", keep: true }],
+    ["setDisposition",      { nodeId: "SIDE.Bulletin", option: "Event" }],
+  ]) {
+    const out = runTool(name, input, c1);
+    assert.equal(out.ok, false, name);
+    assert.equal(out.message, PHASE1_ONLY_MSG, name);
+  }
+  assert.deepEqual(r, snap, "record unchanged");
+});
+
+test("form fields can be decided in every stage", () => {
+  const c1 = { graph, decisions: rec(), implemented: emptyImplemented() };
+  assert.equal(runTool("setDisposition", { nodeId: "FLD.model", option: "Omit" }, c1).ok, true);
+  assert.ok(runTool("getState", {}, c1).stage, "getState answers");
+  assert.ok(runTool("explainOption", { nodeId: "FLD.model", option: "Include" }, c1).appliesToThisElement, "explainOption answers");
+  assert.ok(runTool("explainMapping", { nodeId: "FLD.model" }, c1).mapsThroughLayers.length > 0, "explainMapping answers");
 });
