@@ -92,6 +92,7 @@ function buildOrchestratorSpec(graph, record, implemented) {
     const defaults = buildDefaults(se, record), recorded = record.targets[se.id] || {};
     const target = { ...defaults, ...Object.fromEntries(Object.entries(recorded).filter(([, v]) => filled(v))) };
     if (record.dec[se.id] === "Drop") missing.push({ id: se.id, kind: "decide", what: `decide how ${se.name} is implemented — it is mandatory, so the Drop in the record cannot apply` });
+    if (se.targetKind === "notification" && record.dec[se.id] === "Integration") missing.push({ id: se.id, kind: "decide", what: `${se.name}: this production sends it as an email from IRIS — an Integration is not built yet; set it back to Business Operation or Event and record its email recipients` });
     if (!se.targetKind && record.dec[se.id] !== "Integration") missing.push({ id: se.id, kind: "evidence", what: `${se.name}: legacy evidence not yet recorded in the graph` });
     for (const key of buildTargetKeys(se, record)) {
       if (!filled(target[key])) missing.push({ id: se.id, kind: "target", key, what: `${se.name}: ${describeKey(se, record, key)}` });

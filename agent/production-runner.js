@@ -26,6 +26,10 @@ function readSpecs(paths = DEFAULT_PATHS) {
     }
   }
   if (!orchestrator.complete) throw new Error("the orchestrator spec is not complete — finish its missing items in the Decide chat first");
+  // checked before anything is deployed: IRIS refuses an email with no recipient, and that fails the whole request
+  for (const e of orchestrator.detail.built) {
+    if (e.target && e.target.channel === "email" && !String(e.target.recipients || "").trim()) throw new Error(`the bulletin has no email recipients (${e.name}) — record its email address in the Decide chat, then build again`);
+  }
   return { orchestrator, api };
 }
 
@@ -49,6 +53,8 @@ function samplePayload(api) {
 
 function judge(result, stubNames, bulletin = "dry-run") {
   const r = result || {}, o = r.outcomes || {}, stubs = o.stubs || {}, problems = [];
+  // the request itself failed: say what IRIS said rather than list every outcome as missing
+  if (r.status === "ERROR" && !r.outcomes) return { ok: false, problems: [`the production answered ERROR: ${r.error || "(no message)"}`] };
   if (r.status !== "DRY-RUN" || o.vistaWrite !== "DRY-RUN") problems.push(`the VistA write was not dry-run (status ${r.status}, vistaWrite ${o.vistaWrite})`);
   if (o.bulletin !== bulletin) problems.push(`the bulletin should have been ${bulletin} but was ${o.bulletin}`);
   for (const n of stubNames) if (stubs[n] !== "stub - not wired") problems.push(`stub "${n}" did not stay unwired (${stubs[n]})`);

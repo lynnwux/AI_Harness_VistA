@@ -133,3 +133,18 @@ test("the mail catcher check finds this build's bulletin, not an older one", () 
   assert.equal(findDelivered(msgs, { subject: "NEW EQUIPMENT: ENTRY #x", recipients: "eng@example.org; it@example.org", since }).ID, "new");
   assert.equal(findDelivered(msgs.slice(1), { subject: "NEW EQUIPMENT: ENTRY #x", recipients: "eng@example.org", since }), null);
 });
+
+test("the production build refuses to start when the bulletin has no recipients", () => {
+  const paths = setupSpecs(rec({ ...decided, targets: { "SIDE.Bulletin": { recipients: "x@example.org" } } }));
+  const file = path.join(paths.specsDir, "orchestrator.json");
+  const spec = JSON.parse(fs.readFileSync(file, "utf8"));
+  spec.detail.built.find(e => e.id === "SIDE.Bulletin").target.recipients = "";
+  fs.writeFileSync(file, JSON.stringify(spec));
+  assert.throws(() => readSpecs(paths), /bulletin has no email recipients/);
+});
+
+test("a failed verification request names what IRIS said, not a list of missing outcomes", () => {
+  const j = judge({ status: "ERROR", error: "ERROR #6030: 'To or Cc or Bcc' property must be specified for SMTP." }, ["Incoming inspection work order"], "sent");
+  assert.equal(j.ok, false);
+  assert.deepEqual(j.problems, ["the production answered ERROR: ERROR #6030: 'To or Cc or Bcc' property must be specified for SMTP."]);
+});

@@ -110,3 +110,19 @@ test("the bulletin shows the legacy email template; with FA a stub, its FAP line
   const md0 = renderOrchestrator(graph, rec(), buildOrchestratorSpec(graph, rec(), IM));
   assert.match(md0, /⚠ `\|7\|` reports the outcome of FA document to Austin, which is not built in this phase/);
 });
+
+test("the bulletin is always an email in this build: an Integration disposition never makes the spec complete without recipients", () => {
+  const asIntegration = { ...decided, dec: { ...decided.dec, "SIDE.Bulletin": "Integration" },
+    targets: { "SIDE.Bulletin": { via: "external", system: "email", endpoint: "x@example.org", trigger: "after create", mapping: "all fields" } } };
+  const s = buildOrchestratorSpec(graph, rec(asIntegration), IM);
+  assert.equal(s.complete, false);
+  assert.deepEqual(s.missing.filter(m => m.id === "SIDE.Bulletin").map(m => [m.kind, m.key || null]), [["decide", null], ["target", "recipients"]]);
+  assert.match(s.missing.find(m => m.id === "SIDE.Bulletin" && m.kind === "decide").what, /email from IRIS/);
+  // recording the address as its recipients is not enough while it is still an Integration
+  const withBoth = { ...asIntegration, targets: { "SIDE.Bulletin": { ...asIntegration.targets["SIDE.Bulletin"], recipients: "x@example.org" } } };
+  assert.equal(buildOrchestratorSpec(graph, rec(withBoth), IM).complete, false);
+  // back to an email notification with recipients: complete, and the email defaults apply
+  const s3 = buildOrchestratorSpec(graph, rec(withRecipients), IM);
+  assert.equal(s3.complete, true);
+  assert.equal(s3.detail.built.find(e => e.id === "SIDE.Bulletin").target.channel, "email");
+});

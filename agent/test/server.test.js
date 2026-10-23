@@ -795,3 +795,9 @@ test("the guide's instructions state each layer's build status from the record, 
   try { assert.match(t2.systemPrompt(), /^Build status \(recorded\): API not built · Production not built · AI not built$/m); }
   finally { await t2.done(); }
 });
+
+test("the guide records an email address for a notification as its recipients and never turns it into an Integration", async () => {
+  const t = await setup();
+  try { assert.match(t.systemPrompt(), /email address[^\n]*recipients[^\n]*never[^\n]*Integration/); }
+  finally { t.srv.close(); }
+});

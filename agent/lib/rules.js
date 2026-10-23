@@ -14,15 +14,17 @@ const isBlocking = (record, oqId) => !String((record.oqPolicy || {})[oqId] || ""
 const isMandatory = se => !!se && se.legacyInvocation === "unconditional";   // discovery: the legacy always calls it
 const kindFor = (se, record) => (record.dec[se.id] === "Integration" ? "external" : se.targetKind || null);
 const requiredTargetKeys = (se, record) => { const k = kindFor(se, record); return ["via", ...(k ? Object.keys(TARGET_KEYS[k]) : [])]; };
-const allowedTargetKeys = (se, record) => { const k = kindFor(se, record); return [...requiredTargetKeys(se, record), ...((k && OPTIONAL_KEYS[k]) || [])]; };
-const describeKey = (se, record, key) => (key === "via" ? VIA_HELP : (TARGET_KEYS[kindFor(se, record)] || {})[key] || key);
+const allowedTargetKeys = (se, record) => { const k = kindFor(se, record); return [...new Set([...requiredTargetKeys(se, record), ...((k && OPTIONAL_KEYS[k]) || []), ...(se.targetKind === "notification" ? ["recipients"] : [])])]; };
+const describeKey = (se, record, key) => (key === "via" ? VIA_HELP : (TARGET_KEYS[kindFor(se, record)] || {})[key] || (TARGET_KEYS[se.targetKind] || {})[key] || key);
 
 // This build is stub-first: only the mandatory side effects are real operations. A notification then needs
 // only its recipients — it goes out as an email from IRIS built from the legacy template unless recorded otherwise.
 const BUILD_KEYS = { notification: ["recipients"] };
 const BUILD_DEFAULTS = { notification: { via: "iris", channel: "email", content: "the legacy message template" } };
-const buildTargetKeys = (se, record) => BUILD_KEYS[kindFor(se, record)] || requiredTargetKeys(se, record);
-const buildDefaults = (se, record) => ({ ...(BUILD_DEFAULTS[kindFor(se, record)] || {}) });
+// a notification is built as an email from IRIS whatever its disposition — an Integration is not built yet
+const buildKind = (se, record) => (se.targetKind === "notification" ? "notification" : kindFor(se, record));
+const buildTargetKeys = (se, record) => BUILD_KEYS[buildKind(se, record)] || requiredTargetKeys(se, record);
+const buildDefaults = (se, record) => ({ ...(BUILD_DEFAULTS[buildKind(se, record)] || {}) });
 
 // built = carried into this build: not dropped, not deferred, and its gating question (if any)
 // decided with a non-Defer mode. Mandatory items are always built — even a Drop left in an older record.
