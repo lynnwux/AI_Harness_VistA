@@ -167,7 +167,7 @@ const TEMPLATES = [
         ? `(SERVICE_CONTRACT != ${qsql(scYes)} OR SERVICE_CONTRACT IS NULL)`
         : "SERVICE_CONTRACT IS NULL";
       const statusCond = useStatusClause(params.useStatuses);
-      const wheres = [`${valueCol} >= ${threshold}`, noContract];
+      const wheres = [`${valueCol}+0 >= ${threshold}`, noContract];   // +0: older records store the value as text (695.00)
       if (statusCond) wheres.push(statusCond);
       return [
         `SELECT IEN, MFGR__EQUIPMENT_NAME, EQUIPMENT_CATEGORY_NAME, SERVICE_POINTER_NAME, LOCATION_ROOM_NUMBER, ${valueCol},`,

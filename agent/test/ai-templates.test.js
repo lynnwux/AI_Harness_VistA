@@ -301,3 +301,8 @@ test("fmDateIso and codeLabel: a FileMan date as YYYY, YYYY-MM or YYYY-MM-DD; a 
   assert.equal(codeLabel(inv, "JCAHO", "e."), "CASE e.JCAHO WHEN 'Y' THEN 'YES' WHEN 'N' THEN 'NO' ELSE e.JCAHO END AS JCAHO");
   assert.equal(codeLabel(inv, "MFGR__EQUIPMENT_NAME"), "MFGR__EQUIPMENT_NAME", "an uncoded column is selected as it is");
 });
+
+test("the high-value threshold compares the value as a number — older 6914 records store it as text like 695.00", () => {
+  const sql = sqlFor(tpl("AIQ.HighValueNoContract"), { threshold: 75000, valueColumn: "TOTAL_ASSET_VALUE", useStatuses: ["1"] }, inv);
+  assert.match(sql, /TOTAL_ASSET_VALUE\+0 >= 75000/);
+});

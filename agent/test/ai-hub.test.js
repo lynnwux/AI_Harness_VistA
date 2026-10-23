@@ -403,3 +403,10 @@ test("every turn starts a session with the reply cap and imports the stored conv
   const keep = chat.slice(chat.indexOf("ClassMethod Keep("), chat.indexOf("ClassMethod Keep(") + 400);
   assert.match(keep, /Export\(\)/);
 });
+
+test("the agent's rules make every numeric sort, compare and aggregate numeric with column+0", () => {
+  const t = byName(classes())["EquipmentAI.Agent"];
+  assert.match(t, /ORDER BY TOTAL_ASSET_VALUE\+0 DESC/);
+  assert.match(t, /MAX\(TOTAL_ASSET_VALUE\+0\)/);
+  assert.match(t, /695\.00/);
+});
