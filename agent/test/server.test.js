@@ -812,11 +812,21 @@ test("a reply that claims the layer is ready to build while the record has missi
   fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), paths.graph);
   fs.writeFileSync(paths.decisions, JSON.stringify(MIN_DEC));
   fs.writeFileSync(paths.implemented, JSON.stringify({ ...IM, orchestrator: { built: true, verified: true } }));
-  const app = createApp({ paths, runAgentImpl: async () => ({ reply: "Phase 3 (AI): Complete and ready to build. Click 🔨 Build AI on the AI tab.", toolTrace: [] }) }).app;
+  // the claims seen live, markdown and all — each must get the record's correction
+  const claims = [
+    "Phase 3 (AI): Complete and ready to build. Click 🔨 Build AI on the AI tab.",
+    "All recorded. The AI spec is complete. Click 🔨 **Build AI** on the AI tab.",
+    "Nothing is missing — the AI layer is ready for the build.",
+    "Everything is recorded; you can now press **🔨 Build AI**.",
+  ];
+  let next = 0;
+  const app = createApp({ paths, runAgentImpl: async () => ({ reply: claims[next++], toolTrace: [] }) }).app;
   const srv = await new Promise(r => { const s = app.listen(0, "127.0.0.1", () => r(s)); });
   try {
-    const r = await (await fetch(`http://127.0.0.1:${srv.address().port}/api/agent/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "ready?", history: [] }) })).json();
-    assert.match(r.reply, /Not ready — the record says the AI spec still has \d+ items? missing/);
-    assert.match(r.reply, /🔨 Build AI stays disabled/);
+    for (const claim of claims) {
+      const r = await (await fetch(`http://127.0.0.1:${srv.address().port}/api/agent/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "ready?", history: [] }) })).json();
+      assert.match(r.reply, /Not ready — the record says the AI spec still has \d+ items? missing/, claim);
+      assert.match(r.reply, /🔨 Build AI stays disabled/, claim);
+    }
   } finally { srv.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });

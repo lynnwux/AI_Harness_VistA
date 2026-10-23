@@ -139,7 +139,8 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
   function correctReadyClaim(reply) {
     const st = state.stage, layer = st && st.layer, spec = layer && state.specs && state.specs[layer];
     if (!spec || spec.complete || !["orchestrator", "ai"].includes(layer)) return reply;
-    if (!/ready (to|for) (the )?(\w+ )?build|complete and ready|🔨 Build (AI|production)/i.test(String(reply || ""))) return reply;
+    const plain = String(reply || "").replace(/[*_`~]/g, "").replace(/\s+/g, " ");   // markdown hides the claim from the patterns
+    if (!/ready (to|for) (the )?(\w+ )?build|complete and ready|spec is (now )?complete|all (is |are )?recorded|everything is recorded|nothing (is )?(missing|left)|🔨 ?Build (AI|production)/i.test(plain)) return reply;
     const name = layer === "ai" ? "AI" : "orchestrator", button = layer === "ai" ? "🔨 Build AI" : "🔨 Build production";
     const n = spec.missing.length, list = spec.missing.slice(0, 6).map(m => `- ${m.what}`).join("\n");
     return `${reply}\n\n⚠ **Not ready — the record says the ${name} spec still has ${n} item${n === 1 ? "" : "s"} missing:**\n${list}${n > 6 ? "\n- …" : ""}\n\n${button} stays disabled until they are recorded. Let's record them one at a time.`;
