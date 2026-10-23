@@ -801,3 +801,22 @@ test("the guide records an email address for a notification as its recipients an
   try { assert.match(t.systemPrompt(), /email address[^\n]*recipients[^\n]*never[^\n]*Integration/); }
   finally { t.srv.close(); }
 });
+
+test("a reply that claims the layer is ready to build while the record has missing items gets the record's correction", async () => {
+  const t = await buildSetup({ agentCalls: [] });
+
+
+  await t.done();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "srv-r-"));
+  const paths = { graph: path.join(dir, "graph.json"), decisions: path.join(dir, "decisions.json"), implemented: path.join(dir, "implemented.json"), inventory: INVENTORY, specsDir: path.join(dir, "specs") };
+  fs.copyFileSync(path.join(__dirname, "..", "..", "capability-graph", "new-inventory-entry.json"), paths.graph);
+  fs.writeFileSync(paths.decisions, JSON.stringify(MIN_DEC));
+  fs.writeFileSync(paths.implemented, JSON.stringify({ ...IM, orchestrator: { built: true, verified: true } }));
+  const app = createApp({ paths, runAgentImpl: async () => ({ reply: "Phase 3 (AI): Complete and ready to build. Click 🔨 Build AI on the AI tab.", toolTrace: [] }) }).app;
+  const srv = await new Promise(r => { const s = app.listen(0, "127.0.0.1", () => r(s)); });
+  try {
+    const r = await (await fetch(`http://127.0.0.1:${srv.address().port}/api/agent/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: "ready?", history: [] }) })).json();
+    assert.match(r.reply, /Not ready — the record says the AI spec still has \d+ items? missing/);
+    assert.match(r.reply, /🔨 Build AI stays disabled/);
+  } finally { srv.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});

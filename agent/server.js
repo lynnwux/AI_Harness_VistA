@@ -134,7 +134,17 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     res.json({ error: state.specsError, notice: state.notice, stage: state.stage, layers: { api: layer("api"), orchestrator: layer("orchestrator"), ai: layer("ai") } });
   });
 
-  const UNDONE = "The record changes your previous draft made were undone. With the tools, re-apply only what the developer asked for in their message.";
+  // A reply that calls the current layer ready to build while its spec still has missing items gets the record's
+  // correction appended — the build button follows the record, so the chat must never point at a disabled button.
+  function correctReadyClaim(reply) {
+    const st = state.stage, layer = st && st.layer, spec = layer && state.specs && state.specs[layer];
+    if (!spec || spec.complete || !["orchestrator", "ai"].includes(layer)) return reply;
+    if (!/ready (to|for) (the )?(\w+ )?build|complete and ready|🔨 Build (AI|production)/i.test(String(reply || ""))) return reply;
+    const name = layer === "ai" ? "AI" : "orchestrator", button = layer === "ai" ? "🔨 Build AI" : "🔨 Build production";
+    const n = spec.missing.length, list = spec.missing.slice(0, 6).map(m => `- ${m.what}`).join("\n");
+    return `${reply}\n\n⚠ **Not ready — the record says the ${name} spec still has ${n} item${n === 1 ? "" : "s"} missing:**\n${list}${n > 6 ? "\n- …" : ""}\n\n${button} stays disabled until they are recorded. Let's record them one at a time.`;
+  }
+  const UNDONE ="The record changes your previous draft made were undone. With the tools, re-apply only what the developer asked for in their message.";
   app.post("/api/agent/chat", (req, res) => serially(async () => {
     const { message, history } = req.body || {};
     if (!message) return res.status(400).json({ error: "message required" });
@@ -164,7 +174,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     const g = regenerate();
     const recorded = diffRecords(before, state.record, labelOf);
     if (err) return res.status(500).json({ error: err, recorded });
-    res.json({ reply: out.reply, toolTrace: out.toolTrace, recorded, grounding: out.grounding, evidence: out.evidence, specsError: g.error || null });
+    res.json({ reply: correctReadyClaim(out.reply), toolTrace: out.toolTrace, recorded, grounding: out.grounding, evidence: out.evidence, specsError: g.error || null });
   }).catch(e => { if (!res.headersSent) res.status(500).json({ error: String(e.message || e) }); }));
 
   const vista = registerVistaRoutes(app, { fetchImpl: vademoFetch });
