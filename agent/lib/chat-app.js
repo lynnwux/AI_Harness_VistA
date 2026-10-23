@@ -1,4 +1,6 @@
 "use strict";
+// The page's own favicon, inline so the published app needs no extra file (project.md: every page gets one).
+const FAVICON_LINK = `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23141b24'/%3E%3Cpath d='M7 9.5A3.5 3.5 0 0 1 10.5 6h11A3.5 3.5 0 0 1 25 9.5v7a3.5 3.5 0 0 1-3.5 3.5H15l-5 4.5V20h0.5A3.5 3.5 0 0 1 7 16.5z' fill='%233d9cf5'/%3E%3Ccircle cx='11.5' cy='13' r='1.6' fill='%23141b24'/%3E%3Ccircle cx='16' cy='13' r='1.6' fill='%23141b24'/%3E%3Ccircle cx='20.5' cy='13' r='1.6' fill='%23141b24'/%3E%3Cpath d='M24.5 21.5l1 2.2 2.2 1-2.2 1-1 2.2-1-2.2-2.2-1 2.2-1z' fill='%237ee787'/%3E%3C/svg%3E">`;
 // Angular source for the AI chat app, generated from the AI spec's detail.questions.
 // The app posts to same-origin /ai/quick/<id> and /ai/chat — no host, login or token anywhere.
 
@@ -144,6 +146,7 @@ bootstrapApplication(App).catch(e => console.error(e));
 `,
     "src/index.html":
 `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${safeTitle}</title>
+${FAVICON_LINK}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bitter:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
@@ -156,4 +159,4 @@ bootstrapApplication(App).catch(e => console.error(e));
   };
 }
 
-module.exports = { chatAppFiles };
+module.exports = { FAVICON_LINK, chatAppFiles };

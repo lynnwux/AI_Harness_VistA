@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { angularFiles } = require("../lib/angular-app");
+const { angularFiles, FAVICON_LINK } = require("../lib/angular-app");
 const { graph, rec, IM } = require("./helpers");
 const { generate, writeSpecs, loadInputs, DEFAULT_PATHS } = require("../lib/specs");
 
@@ -19,10 +19,12 @@ const PHASE2_BLOCK = [
   "            <div *ngFor=\"let s of cfg.sideEffects\" style=\"font-size:12px;margin-top:4px\">{{s.deferred?'⏸ ':''}}{{s.name}} — {{s.disp}} <span class=\"nb\">Phase 2</span></div>",
   "          </div>",
 ].join("\n") + "\n";
+// the one intended change to the golden index.html: the page's own favicon, right after the title
+const withIcon = html => html.replace("</title>\n", "</title>\n" + FAVICON_LINK + "\n");
 
 test("angularFiles reproduces the pre-refactor generated app byte for byte, minus the Phase 2 block", () => {
   const golden = goldenApp();
-  assert.deepEqual(angularFiles(goldenCfg()), { ...golden, "src/app/app.ts": golden["src/app/app.ts"].replace(PHASE2_BLOCK, "") });
+  assert.deepEqual(angularFiles(goldenCfg()), { ...golden, "src/app/app.ts": golden["src/app/app.ts"].replace(PHASE2_BLOCK, ""), "src/index.html": withIcon(golden["src/index.html"]) });
 });
 
 test("the app built from the API spec equals the pre-refactor app minus the Phase 2 block", () => {
@@ -33,7 +35,8 @@ test("the app built from the API spec equals the pre-refactor app minus the Phas
   assert.ok(golden["src/app/app.ts"].includes(PHASE2_BLOCK), "golden contains the block being removed");
   const files = angularFiles(spec.detail);
   assert.equal(files["src/app/app.ts"], golden["src/app/app.ts"].replace(JSON.stringify(goldenCfg()), JSON.stringify(kept)).replace(PHASE2_BLOCK, ""));
-  for (const f of ["src/main.ts", "src/index.html", "src/styles.css"]) assert.equal(files[f], golden[f]);
+  for (const f of ["src/main.ts", "src/styles.css"]) assert.equal(files[f], golden[f]);
+  assert.equal(files["src/index.html"], withIcon(golden["src/index.html"]));
 });
 
 test("buildConfig reads a fresh API spec and refuses a stale one", () => {
@@ -45,4 +48,11 @@ test("buildConfig reads a fresh API spec and refuses a stale one", () => {
   const stale = path.join(dir, "stale.json");
   fs.writeFileSync(stale, JSON.stringify({ inputs: { graph: "old" }, detail: {} }));
   assert.throws(() => buildConfig(stale), /stale/);
+});
+
+test("the entry form has its own favicon, inline in index.html", () => {
+  const html = angularFiles(generate({ graph, record: rec(), implemented: IM }).api.detail)["src/index.html"];
+  assert.match(FAVICON_LINK, /^<link rel="icon" type="image\/svg\+xml" href="data:image\/svg\+xml,%3Csvg /);
+  assert.ok(html.includes(FAVICON_LINK));
+  assert.doesNotMatch(FAVICON_LINK, /href="[^"]*[#<>][^"]*"/);
 });

@@ -319,3 +319,11 @@ test("chatAppFiles: the results table indexes each row object by column, in the 
   assert.deepEqual(renderResultTable(app, ans), [["12", "BED, ELECTRIC", "BEDS"], ["13", "PUMP", "INFUSION"]]);
   assert.match(app, /<th \*ngFor="let c of ans\.columns">\{\{c\}\}<\/th>/, "the header row lists the columns");
 });
+
+test("the chat app has its own favicon, inline in index.html", () => {
+  const { FAVICON_LINK } = require("../lib/chat-app");
+  const html = chatAppFiles({ questions: QUESTIONS })["src/index.html"];
+  assert.match(FAVICON_LINK, /^<link rel="icon" type="image\/svg\+xml" href="data:image\/svg\+xml,%3Csvg /);
+  assert.ok(html.includes(FAVICON_LINK));
+  assert.doesNotMatch(FAVICON_LINK, /href="[^"]*[#<>][^"]*"/);
+});

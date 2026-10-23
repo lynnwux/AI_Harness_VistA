@@ -1,4 +1,6 @@
 "use strict";
+// The page's own favicon, inline so the published app needs no extra file (project.md: every page gets one).
+const FAVICON_LINK = `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23141b24'/%3E%3Crect x='7' y='5' width='18' height='22' rx='2.2' fill='%23e6edf3'/%3E%3Crect x='10' y='9' width='12' height='2.6' rx='1' fill='%233d9cf5'/%3E%3Crect x='10' y='14' width='12' height='2.6' rx='1' fill='%233d9cf5'/%3E%3Crect x='10' y='19' width='7' height='2.6' rx='1' fill='%233d9cf5'/%3E%3Ccircle cx='23.5' cy='23.5' r='5' fill='%237ee787'/%3E%3Cpath d='M21.2 23.6 22.9 25.3 26 22' stroke='%23141b24' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">`;
 // Angular source for the Phase 1 data-entry app, generated from the API spec's build config.
 
 const VA_CSS = `
@@ -206,6 +208,7 @@ bootstrapApplication(App).catch(e => console.error(e));
 `,
     "src/index.html":
 `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${cfg.command} — build</title>
+${FAVICON_LINK}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bitter:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
@@ -216,4 +219,4 @@ bootstrapApplication(App).catch(e => console.error(e));
 }
 const DEFAULT_COMPONENT_FILES = ["app.component.ts","app.component.html","app.component.css","app.component.spec.ts","app.config.ts","app.routes.ts"];
 
-module.exports = { angularFiles, DEFAULT_COMPONENT_FILES };
+module.exports = { FAVICON_LINK, angularFiles, DEFAULT_COMPONENT_FILES };
