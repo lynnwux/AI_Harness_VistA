@@ -18,7 +18,7 @@ TYPE OF ENTRY   [fld 7]
 ACQUISITION METHOD   [fld 20.1]
 ACQUISITION DATE   [fld 13]
 VENDOR POINTER   [fld 10]
-ORIGINAL ASSET VALUE   [fld 31.5]
+TOTAL ASSET VALUE   [fld 12]
 WARRANTY EXP. DATE   [fld 14]
 REPLACING (ENTRY NUMBER)   [fld 51]
 CATEGORY STOCK NUMBER   [fld 18]
@@ -89,7 +89,7 @@ Query filters (from cross-references): `B`, `F`, `FC`.
 - **ACQUISITION METHOD** `[fld 20.1]` — select (dropdown) — options: C=CONSTRUCTED; G=GIFT/BEQUEST/DONATION; L=LEASED; M=CAPITAL LEASE; O=OTHER; P=PURCHASED; R=TRANSFERRED; T=TRADED; X=EXCESS; 1=ON LOAN TO VAMC
 - **ACQUISITION DATE** `[fld 13]` — date picker
 - **VENDOR POINTER** `[fld 10]` — left-rail lookup panel — 2627 rows from `VENDOR440` · `GET /lookup` · e.g. `1` — OMNIS COMPUTER SUPPLIES
-- **ORIGINAL ASSET VALUE** `[fld 31.5]` — number
+- **TOTAL ASSET VALUE** `[fld 12]` — number
 - **WARRANTY EXP. DATE** `[fld 14]` — date picker
 - **REPLACING (ENTRY NUMBER)** `[fld 51]` — left-rail lookup panel — 289 rows from `EQUIPMENT_INV_6914` · `GET /lookup` · e.g. `6` — AUTOMATIC DOOR
 

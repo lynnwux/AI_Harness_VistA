@@ -17,7 +17,7 @@ test("one-way rule: no orchestrator-layer decision changes the API spec or its m
     { dec: { "SIDE.PMSchedule": "Integration", "RULE.FinancialEligibility": "Drop", "SEC.ENFACS": "Note" } },
     { scope: { "SIDE.WorkOrder": "Defer" } },
     { targets: { "SIDE.Bulletin": { via: "iris", channel: "email" } } },
-    { ruleBindings: { "OQ.WorkOrderPolicy": { cost: "31.5" } } },
+    { ruleBindings: { "OQ.WorkOrderPolicy": { cost: "12" } } },
   ];
   for (const v of variants) {
     const i = inputs(rec(v)); const b = generate(i).api;

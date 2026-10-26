@@ -76,7 +76,7 @@ ClassMethod SaveEquipment6914() As %Status [ ProcedureBlock = 0 ]
 		If d.stationNumber '= "" Set e.STATIONNUMBER = d.stationNumber
 		If d.fundControlPoint '= "" Set e.FUNDCONTROLPOINT = $Extract(d.fundControlPoint,1,30)
 		// --- numbers ---
-		If d.originalAssetValue '= "" Set e.ORIGINALASSETVALUE = +$Translate(d.originalAssetValue,",","")
+		If d.totalAssetValue '= "" Set e.TOTALASSETVALUE = +$Translate(d.totalAssetValue,",","")
 		If d.serviceContractCost '= "" Set e.SERVICECONTRACTCOST = +$Translate(d.serviceContractCost,",","")
 		// --- dates YYYY-MM-DD -> FileMan ---
 		If d.acquisitionDate '= "" Set e.ACQUISITIONDATE = ..ToFMDate(d.acquisitionDate)

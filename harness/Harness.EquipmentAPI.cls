@@ -34,7 +34,7 @@ ClassMethod CreateJSON(payload As %String) As %String [ ProcedureBlock = 0, SqlP
 	Set map("conditionCode")=53,map("stationNumber")=60,map("vaPmNumber")=25
 	Set map("serviceContract")=19.5,map("serviceContractCost")=19.6,map("localIdentifier")=26
 	Set map("jcaho")=27,map("controlledItem")=33,map("investmentCategory")=34
-	Set map("fundControlPoint")=35,map("equityAccount")=64,map("originalAssetValue")=31.5
+	Set map("fundControlPoint")=35,map("equityAccount")=64,map("totalAssetValue")=12
 	Set DR="",k=""
 	For  Set k=$Order(map(k)) Quit:k=""  Do
 	. Set val=obj.%Get(k)

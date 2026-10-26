@@ -151,9 +151,9 @@
           }
         },
         {
-          "k": "originalAssetValue",
-          "label": "ORIGINAL ASSET VALUE",
-          "fno": "31.5",
+          "k": "totalAssetValue",
+          "label": "TOTAL ASSET VALUE",
+          "fno": "12",
           "type": "number"
         },
         {

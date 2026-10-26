@@ -87,7 +87,7 @@ test("bindRuleTerms only binds a resolved rule, only to fields in the API reques
   const r = rec();
   assert.equal(runTool("bindRuleTerms", { id: "OQ.WorkOrderPolicy", bindings: { "TYPE OF ENTRY": "7" } }, ctx(r)).ok, false);
   runTool("resolveOpenQuestion", { id: "OQ.WorkOrderPolicy", mode: "Business rule", policy: "if TYPE OF ENTRY = NX OR cost over a limit" }, ctx(r));
-  const bad = runTool("bindRuleTerms", { id: "OQ.WorkOrderPolicy", bindings: { cost: "12" } }, ctx(r));
+  const bad = runTool("bindRuleTerms", { id: "OQ.WorkOrderPolicy", bindings: { cost: "31.5" } }, ctx(r));   // ORIGINAL ASSET VALUE: not on the entry form
   assert.equal(bad.ok, false);
   assert.match(bad.message, /not in the API request contract/);
   assert.equal(runTool("bindRuleTerms", { id: "OQ.WorkOrderPolicy", bindings: { "TYPE OF ENTRY": 7 } }, ctx(r)).ok, true);

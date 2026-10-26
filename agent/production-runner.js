@@ -40,7 +40,7 @@ function readSpecs(paths = DEFAULT_PATHS) {
 // are left out: a made-up record number would point at a real record or at nothing.
 const TEST_ITEM = {
   "3": "TEST ITEM - NOT REAL", "4": "TEST-MODEL", "5": "TEST-0001",
-  "7": "NX", "20.1": "O", "13": "2000-01-01", "31.5": 1, "14": "2000-01-01",
+  "7": "NX", "20.1": "O", "13": "2000-01-01", "12": 1, "14": "2000-01-01",
   "20": "1", "9": "NO", "53": "1", "60": "TEST", "25": "TEST-00001", "19.5": "NO", "19.6": 0,
   "26": "WORKBENCH-TEST", "23": "2000-01-01", "27": "NO",
   "33": "NO", "34": "1", "35": "TEST", "64": "3299",

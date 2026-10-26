@@ -58,7 +58,7 @@ test("expectedRow maps form values to storage", () => {
   assert.equal(row.LOCKOUT_REQUIRED, "1");         // STORED_YESNO.lockoutRequired.YES
   assert.equal(row.ACQUISITION_DATE, "3000101");   // fmDate("2000-01-01")
   assert.equal(row.MANUFACTURER, "42");            // pointer → String
-  assert.equal(row.ORIGINAL_ASSET_VALUE, "1");     // number → String
+  assert.equal(row.TOTAL_ASSET_VALUE, "1");        // number → String
 });
 
 test("verifyWritePath posts, reads back and passes", async () => {
@@ -140,4 +140,16 @@ test("verifyWritePath throws with the error message when NextIEN returns status 
     () => verifyWritePath(client, spec, { runId }),
     /\^ENG\(6914,0\) not found/,
   );
+});
+
+test("the verifier reads back each field from the column the graph says it is stored in", () => {
+  const fields = graph.capabilities[0].data.filter(d => d.kind === "field" && d.sqlField);
+  for (const f of fields) {
+    const k = f.id.replace(/^FLD\./, "");
+    if (k in COLUMN) assert.equal(COLUMN[k], f.sqlField, `${f.id} (fld ${f.field})`);
+  }
+  // the screen-1 ASSET VALUE is TOTAL ASSET VALUE (fld 12), not the read-only turn-in ORIGINAL ASSET VALUE (fld 31.5)
+  const asset = fields.find(f => f.id === "FLD.totalAssetValue");
+  assert.equal(asset.field, "12");
+  assert.ok(!fields.some(f => f.field === "31.5"));
 });

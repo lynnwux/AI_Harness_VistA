@@ -36,7 +36,7 @@ export interface EquipmentIdentity {
   /** fld 10 → 440 VENDOR */
   vendorPointer: string;
   /** fld 31.5 dollars */
-  originalAssetValue: number;
+  totalAssetValue: number;
   /** fld 14 FileMan date */
   warrantyExpDate: string;
   /** fld 51 → 6914 self-reference IEN of item being replaced */
@@ -123,7 +123,7 @@ export const MOCK_RECORDS: EquipmentData[] = [
     acquisitionMethod: 'PURCHASE',
     acquisitionDate: '2026-01-15',
     vendorPointer: 'BECKMAN COULTER INC',
-    originalAssetValue: 18500,
+    totalAssetValue: 18500,
     warrantyExpDate: '2028-01-15',
     replacingEntryNumber: null,
     servicePointer: 'LABORATORY',
@@ -160,7 +160,7 @@ export const MOCK_RECORDS: EquipmentData[] = [
     acquisitionMethod: 'PURCHASE',
     acquisitionDate: '2025-01-10',
     vendorPointer: 'CANON MEDICAL SYSTEMS USA',
-    originalAssetValue: 1250000,
+    totalAssetValue: 1250000,
     warrantyExpDate: '2027-01-10',
     replacingEntryNumber: null,
     servicePointer: 'RADIOLOGY',
@@ -197,7 +197,7 @@ export const MOCK_RECORDS: EquipmentData[] = [
     acquisitionMethod: 'PURCHASE',
     acquisitionDate: '2024-11-01',
     vendorPointer: 'SIEMENS MEDICAL SOLUTIONS USA',
-    originalAssetValue: 3200000,
+    totalAssetValue: 3200000,
     warrantyExpDate: '2026-11-01',
     replacingEntryNumber: null,
     servicePointer: 'RADIOLOGY',
@@ -234,7 +234,7 @@ export const MOCK_RECORDS: EquipmentData[] = [
     acquisitionMethod: 'PURCHASE',
     acquisitionDate: '2025-06-15',
     vendorPointer: 'INSTRUMENTATION LAB CO',
-    originalAssetValue: 42000,
+    totalAssetValue: 42000,
     warrantyExpDate: '2027-06-15',
     replacingEntryNumber: null,
     servicePointer: 'LABORATORY',
@@ -271,7 +271,7 @@ export const MOCK_RECORDS: EquipmentData[] = [
     acquisitionMethod: 'PURCHASE',
     acquisitionDate: '2018-09-15',
     vendorPointer: 'DELL MARKETING LP',
-    originalAssetValue: 4800,
+    totalAssetValue: 4800,
     warrantyExpDate: '2021-09-15',
     replacingEntryNumber: null,
     servicePointer: 'INFORMATION RESOURCE MGMT',
@@ -504,7 +504,7 @@ export const SCREEN_LAYOUT: ScreenDef[] = [
     fields: ['entryNumber','manufacturer','mfgrEquipmentName','model','serial',
              'equipmentCategory','categoryStockNumber','typeOfEntry',
              'acquisitionMethod','acquisitionDate','vendorPointer',
-             'originalAssetValue','warrantyExpDate','replacingEntryNumber'] },
+             'totalAssetValue','warrantyExpDate','replacingEntryNumber'] },
   { screen: 2, title: 'Ownership & Location',
     fields: ['servicePointer','useStatus','parentSystem','location',
              'lockoutRequired','conditionCode','stationNumber','vaPmNumber',

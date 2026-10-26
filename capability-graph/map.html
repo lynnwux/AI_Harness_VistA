@@ -764,20 +764,22 @@ const EMBED = {
           "lookupCount": 2627
         },
         {
-          "id": "FLD.originalAssetValue",
+          "id": "FLD.totalAssetValue",
           "kind": "field",
           "file": 6914,
-          "field": "31.5",
-          "name": "ORIGINAL ASSET VALUE",
-          "sqlField": "ORIGINAL_ASSET_VALUE",
+          "field": "12",
+          "name": "TOTAL ASSET VALUE",
+          "sqlField": "TOTAL_ASSET_VALUE",
           "access": "write",
           "type": "Numeric",
           "screen": 1,
           "meta": {
-            "provenance": "derived",
-            "confidence": 0.85,
+            "provenance": "verified",
+            "confidence": 0.97,
             "evidence": [
-              "DD: FileMan Field Number 31.5 (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-09-27)"
+              "DD: TOTAL ASSET VALUE is FileMan field 12, node 2 piece 3 — property TOTALASSETVALUE, SQL TOTAL_ASSET_VALUE (VISTA.EQUIPMENTINV6914.cls, Atelier GET /doc, 2026-10-26)",
+              "Legacy screen ENEQ1 (file 6910.9) entry 14 \"ASSET VALUE\", type NJ10,2, editable: its pre-action clears $P(^ENG(6914,DA,2),U,3), i.e. field 12 (SQL ENG_DJ_SCREEN6910_9 + SUB_ENTRY_DEFINITIONS6910_97, 2026-10-26)",
+              "Not field 31.5 ORIGINAL ASSET VALUE: that is ENEQ2 entry 16 \"ORIG. VALUE(R)\", read-only, filled automatically at turn-in"
             ],
             "workflows": [
               "WF.EquipmentMgmt.NewInventoryEntry"
@@ -2160,7 +2162,7 @@ const EMBED = {
             "FLD.acquisitionMethod",
             "FLD.acquisitionDate",
             "FLD.vendorPointer",
-            "FLD.originalAssetValue",
+            "FLD.totalAssetValue",
             "FLD.warrantyExpDate",
             "FLD.replacingEntryNumber"
           ],
