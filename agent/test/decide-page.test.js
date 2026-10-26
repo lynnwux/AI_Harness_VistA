@@ -368,3 +368,16 @@ test("after a successful build the page moves on: the stage's tab, its opening, 
   assert.equal(await p.moveOn({ layer: "ai", step: "keep" }), false, "no move when the stage stayed");
   assert.equal(added.length, 0);
 });
+
+test("#7 the page notices a record change made outside its own chat, and only then", () => {
+  const p = page("recordChangedOutside, OUTSIDE_CHANGE_MSG");
+  assert.equal(p.recordChangedOutside(null, { recordRev: "aaa111bbb222" }), false, "first load: nothing to compare");
+  assert.equal(p.recordChangedOutside("aaa111bbb222", { recordRev: "aaa111bbb222" }), false, "unchanged");
+  assert.equal(p.recordChangedOutside("aaa111bbb222", { recordRev: "ccc333ddd444" }), true, "changed elsewhere");
+  assert.equal(p.recordChangedOutside("aaa111bbb222", { error: "unreachable" }), false, "no revision, no claim");
+  assert.match(p.OUTSIDE_CHANGE_MSG, /changed outside this chat/);
+});
+
+test("#7 the chat records its own turn's revision, so its own changes are never reported as outside ones", () => {
+  assert.match(SCRIPT, /if\(res\.recordRev\) LAST_REV=res\.recordRev;/);
+});

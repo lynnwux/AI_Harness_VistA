@@ -297,3 +297,15 @@ test("getState reports each layer's build status from the record — the only so
   assert.deepEqual(prod.orchestrator, { built: true, verified: true });
   assert.match(TOOL_SPECS.find(t => t.toolSpec.name === "getState").toolSpec.description, /builds/);
 });
+
+test("#1 a read-only turn (the grounding retry) can look things up but never change the record", () => {
+  const { READ_ONLY_MSG } = require("../lib/record-sync");
+  const r = rec();
+  const c = { ...ctx(r), readOnly: true };
+  for (const [name, input] of [["resolveOpenQuestion", { id: "OQ.WorkOrderPolicy", mode: "Required input", policy: "ask" }], ["setDisposition", { nodeId: "FLD.model", option: "Omit" }],
+    ["setTarget", { nodeId: "SIDE.Bulletin", recipients: "x@example.org" }], ["setQuickQuestion", { id: "AIQ.AgingOutFY", keep: true }], ["setBuildScope", { nodeId: "SIDE.WorkOrder", phase: "Defer" }], ["bindRuleTerms", { id: "OQ.WorkOrderPolicy", bindings: {} }]]) {
+    assert.deepEqual(runTool(name, input, c), { ok: false, message: READ_ONLY_MSG }, name);
+  }
+  assert.deepEqual(r, rec(), "nothing changed");
+  assert.ok(runTool("getState", {}, c).stage, "getState still answers");
+});

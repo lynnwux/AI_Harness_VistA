@@ -61,6 +61,17 @@ Logins and hosts always come from `agent/.env`; copies hold no credentials. The 
 `implemented.json` are not changed. A restore and a build never run at the same time. Progress:
 `GET /api/restore/status` (status file `agent/restore-status.json`).
 
+## Chat ↔ record sync
+
+The decisions record (`decisions.json`) is the truth; the "recorded" cards show exactly what each turn changed. The server also corrects, in the same reply, anything the chat says that the record does not back:
+
+- **⚠ Not recorded: …** — a recording tool refused (the tool's own reason is shown).
+- **⚠ Nothing was recorded this turn** — the reply claims a recording, but nothing changed.
+- **⚠ Not kept: …** — a recorded value stated an amount found in neither your words nor the item's evidence.
+- **⚠ Not ready — …** — the reply calls a layer ready to build while items are still missing.
+
+A grounding retry keeps the first draft's record changes and runs read-only, so it can only rewrite the reply. An edit to `decisions.json` made outside the server is picked up before the next read or turn (never overwritten), and the Decide page notes a record change made outside its own chat. Every correction is logged to `agent/desync-log.jsonl` (git-ignored) so new kinds of drift can be found and covered.
+
 ## Demo reset
 
 The small **↺** icon in the Decide page's top bar (tooltip: Demo reset) tears every phase down — only after you

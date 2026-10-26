@@ -232,8 +232,15 @@ async function loadAiStatus(){
 async function loadSpecs(){
   try{ const r=await fetch("/api/specs",{cache:"no-store"}); SPECS=await r.json(); }
   catch(e){ SPECS={error:"Could not reach the workbench server: "+e.message}; }
+  // a record change this tab's chat did not make (another tab, a reset elsewhere, a hand edit): say so and re-anchor the guide
+  if(recordChangedOutside(LAST_REV, SPECS)){ addMsg("assistant", OUTSIDE_CHANGE_MSG); chatHistory.push({role:"assistant",text:historyNote(SPECS,"record changed outside this chat")}); }
+  if(SPECS&&SPECS.recordRev) LAST_REV=SPECS.recordRev;
   renderRight();
 }
+// the record's revision the page last saw — set by every load and by this tab's own chat turns
+let LAST_REV=null;
+const OUTSIDE_CHANGE_MSG="⚠ **The record changed outside this chat** — another tab, a reset or a restore elsewhere, or an edit to decisions.json. The specs on the right show the record as it is now; what this chat said earlier may be out of date.";
+const recordChangedOutside=(lastRev, specs)=>!!(lastRev && specs && specs.recordRev && specs.recordRev!==lastRev);
 function updateProg(){
   if(!G||!SPECS||!SPECS.layers) return;
   const n=(cap(G).openQuestions||[]).length, open=SPECS.layers.orchestrator.missing.filter(m=>m.kind==="decide").length;
@@ -453,6 +460,7 @@ async function sendChat(){
   try{
     const r=await fetch("/api/agent/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:msg,history:prior})});
     const res=await r.json(); pending.remove();
+    if(res.recordRev) LAST_REV=res.recordRev;   // this turn's own changes are not "outside" ones
     if(res.error){ addMsg("assistant","⚠ "+res.error); addRecordedCards(res.recorded); await loadSpecs(); return; }
     // the cards first, so the reply — which asks the next question — is the last thing in view
     addEvidenceCard(res.evidence); addRecordedCards(res.recorded);
@@ -686,7 +694,7 @@ document.getElementById("killBtn").onclick=async ()=>{
 // Draws the page for the current stage, as on load: the specs, the stage's tab, the right pane and a fresh chat
 // opening. Run at boot and after a demo reset (in place — a reload would wipe the reset's verdict).
 async function openPage(){
-  PORTAL=null; AI_CHAT_URL=null; AI_BUILT=false;
+  PORTAL=null; AI_CHAT_URL=null; AI_BUILT=false; LAST_REV=null;   // a fresh page (or this tab's own reset) starts a new baseline
   await loadSpecs(); TAB=defaultTab(SPECS); renderRight(); loadPortal(); loadAiStatus();
   document.getElementById("chatMsgs").innerHTML=""; chatHistory=[];
   addMsg("assistant", capabilityOverview());

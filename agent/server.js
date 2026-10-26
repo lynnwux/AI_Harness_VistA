@@ -14,6 +14,8 @@ const { emptyImplemented, apiRecord } = require("./lib/implemented");
 const { localTeardown } = require("./lib/teardown");
 const { KNOWN_GOOD_ROOT } = require("./lib/known-good");
 const { groundedTurn } = require("./lib/grounding");
+const { syncNotes, ungroundedChanges, revertChanges } = require("./lib/record-sync");
+const crypto = require("crypto");
 const { TEMPLATES } = require("./lib/ai-templates");
 
 const ROOT = path.join(__dirname, "..");                 // repo root (serves capability-graph/, workbench-demo.html, …)
@@ -24,7 +26,8 @@ const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(f
 // agentDir, repoRoot, knownGoodRoot and tmpDir are where the demo reset removes leftovers (localTeardownImpl does it);
 // vademoFetch serves the lookups.
 function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl = spawn, statusFiles = {}, killTreeImpl = killTree,
-                     agentDir = __dirname, repoRoot = ROOT, knownGoodRoot = KNOWN_GOOD_ROOT, tmpDir = os.tmpdir(), vademoFetch = fetch, localTeardownImpl = localTeardown } = {}) {
+                     agentDir = __dirname, repoRoot = ROOT, knownGoodRoot = KNOWN_GOOD_ROOT, tmpDir = os.tmpdir(), vademoFetch = fetch, localTeardownImpl = localTeardown,
+                     desyncLog = path.join(path.dirname(paths.decisions), "desync-log.jsonl") } = {}) {
   let graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
   let inventory = readJson(paths.inventory || DEFAULT_PATHS.inventory, null);     // re-read in regenerate()
   let notice = null;
@@ -40,6 +43,22 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     const n = findNode(graph, id); return n ? label(n) : id;
   };
   const restore = snap => { for (const k of Object.keys(state.record)) delete state.record[k]; Object.assign(state.record, JSON.parse(JSON.stringify(snap))); };
+  // The record file is the single truth. Each save remembers the file's hash; an edit made outside this server (another
+  // process, a hand edit) is picked up before the next read or turn instead of being overwritten by it.
+  const hashOf = text => crypto.createHash("sha256").update(text).digest("hex");
+  const fileHash = () => { try { return hashOf(fs.readFileSync(paths.decisions, "utf8")); } catch (e) { return null; } };
+  let savedHash = fileHash();
+  const save = () => { saveRecord(paths.decisions, state.record); savedHash = fileHash(); };
+  function syncFromFile() {
+    const h = fileHash();
+    if (!h || h === savedHash) return false;
+    restore(loadRecord(paths.decisions, () => defaultDecisions(graph), { onCorrupt }));
+    savedHash = h; regenerate(); return true;
+  }
+  // the record's revision: the page compares it to notice a change made outside its own chat
+  const recordRev = () => hashOf(JSON.stringify(state.record)).slice(0, 12);
+  // every correction the server makes to a reply is logged, so new kinds of chat ↔ record drift can be found
+  const logDesync = entry => { try { fs.appendFileSync(desyncLog, JSON.stringify({ at: new Date().toISOString(), ...entry }) + "\n"); } catch (e) { /* logging never breaks a turn */ } };
   // one chat turn or build at a time, so each turn's diff, prompt and history see only its own changes
   let queue = Promise.resolve();
   const serially = fn => { const p = queue.then(fn); queue = p.catch(() => {}); return p; };
@@ -126,13 +145,14 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
   const app = express();
   app.use(express.json({ limit: "1mb" }));
 
-  app.get("/api/state", (_req, res) => res.json({ workflow: graph.workflow, decisions: state.record, state: getState(graph, state.record, { implemented: implemented(), inventory }) }));
-  app.get("/api/decisions", (_req, res) => res.json(state.record));
+  app.get("/api/state", (_req, res) => { syncFromFile(); res.json({ workflow: graph.workflow, decisions: state.record, state: getState(graph, state.record, { implemented: implemented(), inventory }) }); });
+  app.get("/api/decisions", (_req, res) => { syncFromFile(); res.json(state.record); });
 
   app.get("/api/specs", (_req, res) => {
+    syncFromFile();
     if (!state.specs) return res.status(500).json({ error: state.specsError || "specs not generated", notice: state.notice });
     const layer = l => ({ md: state.md[l], complete: state.specs[l].complete, missing: state.specs[l].missing, needs: state.specs[l].needs, owns: state.specs[l].owns, ...(l==="api" ? { verifiedRecord: apiRecord(implemented()).verifiedRecord } : {}) });
-    res.json({ error: state.specsError, notice: state.notice, stage: state.stage, layers: { api: layer("api"), orchestrator: layer("orchestrator"), ai: layer("ai") } });
+    res.json({ error: state.specsError, notice: state.notice, stage: state.stage, recordRev: recordRev(), layers: { api: layer("api"), orchestrator: layer("orchestrator"), ai: layer("ai") } });
   });
 
   // A reply that calls the current layer ready to build while its spec still has missing items gets the record's
@@ -146,37 +166,52 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     const n = spec.missing.length, list = spec.missing.slice(0, 6).map(m => `- ${m.what}`).join("\n");
     return `${reply}\n\n⚠ **Not ready — the record says the ${name} spec still has ${n} item${n === 1 ? "" : "s"} missing:**\n${list}${n > 6 ? "\n- …" : ""}\n\n${button} stays disabled until they are recorded. Let's record them one at a time.`;
   }
-  const UNDONE ="The record changes your previous draft made were undone. With the tools, re-apply only what the developer asked for in their message.";
+  // what the grounding retry is told: the first draft's record changes stand, and it may only rewrite the reply
+  const keptNote = changes => changes.length
+    ? `Your first draft's record changes stand: ${changes.map(c => `${c.label} ${c.field} → ${JSON.stringify(c.after)}`).join("; ")}. Recording tools are switched off for this rewrite — rewrite only the reply text, and do not say anything else was recorded.`
+    : "Your first draft recorded nothing. Recording tools are switched off for this rewrite — rewrite only the reply text, and do not say anything was recorded.";
   app.post("/api/agent/chat", (req, res) => serially(async () => {
     const { message, history } = req.body || {};
     if (!message) return res.status(400).json({ error: "message required" });
     // the fallback never depends on the model: the server handles the exact command itself
     if (RESTORE_COMMAND.test(String(message))) return res.json({ ...startRestore(runners), recorded: [], evidence: [] });
+    syncFromFile();   // an edit made outside this server is the record this turn works on — never overwritten
     const before = JSON.parse(JSON.stringify(state.record));
     let out = null, err = null;
     try {
       const ctx = { graph, decisions: state.record, implemented: implemented(), system: systemPrompt(), inventory };
       const next = state.stage && state.stage.next;   // the item being worked on, before tools change it
       const currentId = next ? next.id || next.for || null : null;
-      // tools mutate state.record in place; a draft the guardrail rejects has its record changes undone before the retry
+      // the grounding check judges the reply's words, not the tool calls: a retry keeps the draft's record changes and
+      // runs read-only, so it can neither lose a decision nor record a different one
       let attempt = 0;
-      const run = (t, h) => {
-        if (attempt++ === 0) return runAgentImpl(t, h, ctx);
-        restore(before);
-        return runAgentImpl(t + "\n" + UNDONE, h, ctx);
-      };
+      const run = (t, h) => attempt++ === 0
+        ? runAgentImpl(t, h, ctx)
+        : runAgentImpl(t + "\n" + keptNote(diffRecords(before, state.record, labelOf)), h, { ...ctx, readOnly: true });
       // the check judges against the record as it was before this turn, never against what the draft just wrote
       out = await groundedTurn({ run, message: String(message), history: history || [], graph, record: before, currentId, inventory });
     } catch (e) { err = String(e.message || e); }
-    try { saveRecord(paths.decisions, state.record); }
+    // a recorded value is held to the reply's threshold test: one stating an amount the developer never gave is not kept
+    const ungrounded = ungroundedChanges({ changes: diffRecords(before, state.record, labelOf), before, graph, userMessage: String(message) });
+    if (ungrounded.length) revertChanges(state.record, before, ungrounded);
+    try { save(); }
     catch (e) {
       restore(before); regenerate();   // memory stays equal to the file the builds read
       return res.status(500).json({ error: `the decisions record could not be saved, so nothing was recorded: ${e.message || e}`, recorded: [] });
     }
     const g = regenerate();
     const recorded = diffRecords(before, state.record, labelOf);
-    if (err) return res.status(500).json({ error: err, recorded });
-    res.json({ reply: correctReadyClaim(out.reply), toolTrace: out.toolTrace, recorded, grounding: out.grounding, evidence: out.evidence, specsError: g.error || null });
+    const notes = ungrounded.map(c => ({ check: "ungrounded-value", text: `⚠ Not kept: ${c.label} (${c.field}) — it states ${c.thresholds.join(", ")}, which is in neither your words nor this item's evidence. Say the amount yourself and it will be recorded.` }));
+    if (err) {
+      if (notes.length) logDesync({ checks: notes.map(n => n.check), message: String(message), error: err, recorded: recorded.map(c => `${c.id} ${c.field}`) });
+      return res.status(500).json({ error: err + (notes.length ? "\n\n" + notes.map(n => n.text).join("\n") : ""), recorded, recordRev: recordRev() });
+    }
+    notes.push(...syncNotes({ reply: out.reply, recorded, toolTrace: out.toolTrace }));
+    const ready = correctReadyClaim(out.reply);
+    const checks = [...(ready !== out.reply ? ["ready-claim"] : []), ...notes.map(n => n.check), ...(out.grounding && out.grounding.retried && !out.grounding.ok ? ["grounding-unfixed"] : [])];
+    const reply = ready + (notes.length ? "\n\n" + notes.map(n => n.text).join("\n") : "");
+    if (checks.length) logDesync({ checks, message: String(message), reply: String(out.reply).slice(0, 600), recorded: recorded.map(c => `${c.id} ${c.field} → ${JSON.stringify(c.after)}`) });
+    res.json({ reply, toolTrace: out.toolTrace, recorded, grounding: out.grounding, evidence: out.evidence, specsError: g.error || null, recordRev: recordRev() });
   }).catch(e => { if (!res.headersSent) res.status(500).json({ error: String(e.message || e) }); }));
 
   const vista = registerVistaRoutes(app, { fetchImpl: vademoFetch });
@@ -195,7 +230,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     const backup = `decisions.backup-${stamp}.json`;
     if (fs.existsSync(paths.decisions)) fs.copyFileSync(paths.decisions, path.join(path.dirname(paths.decisions), backup));
     restore(normalize(defaultDecisions(graph)));
-    saveRecord(paths.decisions, state.record);
+    save();
     fs.writeFileSync(paths.implemented, JSON.stringify(emptyImplemented(), null, 2) + "\n");
     const local = localTeardownImpl({ agentDir, repoRoot, knownGoodRoot, tmpDir, decisionsFile: paths.decisions,
       statusFiles: { build: runners.buildStatus, production: runners.productionStatus, ai: runners.aiStatus, restore: runners.restoreStatus, teardown: runners.teardownStatus } });

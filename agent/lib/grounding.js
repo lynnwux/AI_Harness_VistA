@@ -105,7 +105,11 @@ function buildIndex(graph, inventory) {
       });
     }
   }
-  return { groups, common, lexicon };
+  // item IDs (OQ.WorkOrderPolicy, SIDE.Bulletin, AIQ.…) are names, not evidence: their prefixes are common words
+  const prefixes = [...new Set(groups.flatMap(g => [g.id, ...g.members]).map(id => String(id).split(".")[0]).filter(p => /^[A-Z]{2,}$/.test(p)))];
+  prefixes.forEach(p => common.add(p));
+  const idRe = prefixes.length ? new RegExp(`\\b(?:${prefixes.join("|")})\\.[A-Za-z0-9_.]*[A-Za-z0-9_]`, "g") : null;
+  return { groups, common, lexicon, idRe };
 }
 
 function checkReply({ graph, reply, userMessage = "", record = {}, currentId = null, index }) {
@@ -119,7 +123,7 @@ function checkReply({ graph, reply, userMessage = "", record = {}, currentId = n
   const others = ix.groups.filter(g => !focus.includes(g));
   const borrowed = [];
   // dollar amounts are judged by the threshold rule below, never as borrowed legacy terms ("$50,000" is not the term "000")
-  for (const t of tokens(text.replace(THRESH, " "))) {
+  for (const t of tokens((ix.idRe ? text.replace(ix.idRe, " ") : text).replace(THRESH, " "))) {
     if (focusVocab.has(t) || ix.common.has(t)) continue;
     const from = others.filter(g => g.vocab.has(t)).map(g => g.id);
     if (from.length) borrowed.push({ term: t, from });
@@ -198,4 +202,4 @@ async function groundedTurn({ run, message, history = [], graph, record, current
   };
 }
 
-module.exports = { buildIndex, checkReply, correctionPrompt, correctedNote, warningNote, groundedTurn, tokens };
+module.exports = { buildIndex, checkReply, correctionPrompt, correctedNote, warningNote, groundedTurn, tokens, THRESH };

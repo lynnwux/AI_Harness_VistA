@@ -235,3 +235,8 @@ test("file 6914's own field names are shared vocabulary for the AI questions, ne
   const r = checkReply({ graph: require("./helpers").graph, reply, userMessage: "", record: {}, currentId: "AIQ.JCAHOPendingInspection", inventory, index: require("../lib/grounding").buildIndex(require("./helpers").graph, inventory) });
   assert.ok(!r.borrowed.some(b => b.term === "TOTAL"), JSON.stringify(r.borrowed));
 });
+
+test("#2 an item ID in the reply (OQ.WorkOrderPolicy, SIDE.Bulletin, AIQ.…) is never a borrowed term", () => {
+  const r = check("**OQ.WorkOrderPolicy: Whether to create an incoming inspection work order** — it gates SIDE.WorkOrder; OQ.PMEnrollmentPolicy and OQ.FAConfirmation are separate.");
+  assert.deepEqual(r.borrowed.filter(b => /^(OQ|SIDE|FLD|AIQ)$/.test(b.term)), [], JSON.stringify(r.borrowed));
+});

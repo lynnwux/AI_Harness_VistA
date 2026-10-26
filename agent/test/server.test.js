@@ -94,7 +94,7 @@ test("the chat's instructions build stub-first: only the real operations' detail
   } finally { t.srv.close(); }
 });
 
-test("the grounding check ignores what a rejected draft recorded, and the retry starts from the record as it was", async () => {
+test("a rejected draft's write of an amount the developer never gave is not kept: the retry can't touch it, and the value check removes it", async () => {
   let calls = 0, seenOnRetry = "unset";
   const fake = async (_m, _h, ctx) => {
     if (++calls === 1) {
@@ -108,9 +108,10 @@ test("the grounding check ignores what a rejected draft recorded, and the retry 
   try {
     const r = await (await chat(t, "what about PM?")).json();
     assert.equal(calls, 2, "the model's own write must not make its threshold look grounded");
-    assert.equal(seenOnRetry, undefined, "the rejected draft's write is undone before the retry");
-    assert.ok(!r.recorded.some(c => c.id === "OQ.PMEnrollmentPolicy"), JSON.stringify(r.recorded));
-    assert.equal(JSON.parse(fs.readFileSync(t.paths.decisions, "utf8")).oqPolicy["OQ.PMEnrollmentPolicy"], undefined);
+    assert.equal(seenOnRetry, "enroll when cost >= $25,000", "the retry sees the draft's change (it stands during the read-only rewrite)");
+    assert.ok(!r.recorded.some(c => c.id === "OQ.PMEnrollmentPolicy" && c.field === "oqPolicy"), JSON.stringify(r.recorded));
+    assert.equal(JSON.parse(fs.readFileSync(t.paths.decisions, "utf8")).oqPolicy["OQ.PMEnrollmentPolicy"], undefined, "the ungrounded amount is not kept");
+    assert.match(r.reply, /⚠ Not kept: .*\$25,000/);
   } finally { t.srv.close(); }
 });
 
@@ -829,4 +830,85 @@ test("a reply that claims the layer is ready to build while the record has missi
       assert.match(r.reply, /🔨 Build AI stays disabled/, claim);
     }
   } finally { srv.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── chat ↔ record sync ────────────────────────────────────────────────────────────────────────────────────
+const syncLog = t => { const f = path.join(path.dirname(t.paths.decisions), "desync-log.jsonl"); return fs.existsSync(f) ? fs.readFileSync(f, "utf8").trim().split("\n").map(l => JSON.parse(l)) : []; };
+
+test("#1 a grounding retry keeps the first draft's recordings, and the retry itself cannot record", async () => {
+  let calls = 0; const retried = [];
+  const fake = async (_m, _h, ctx) => {
+    if (++calls === 1) {
+      runTool("resolveOpenQuestion", { id: "OQ.WorkOrderPolicy", mode: "Required input", policy: "ask the clerk" }, ctx);
+      return { reply: "Whether to create an incoming inspection work order: recorded — create one when the value is ≥ $99,999.", toolTrace: [] };
+    }
+    retried.push(runTool("resolveOpenQuestion", { id: "OQ.WorkOrderPolicy", mode: "Defer", policy: "changed my mind" }, ctx));
+    return { reply: "Whether to create an incoming inspection work order: recorded as Required input — the clerk is asked.", toolTrace: [] };
+  };
+  const t = await setup(fake);
+  try {
+    const r = await (await chat(t, "make the incoming inspection work order a required input: ask the clerk")).json();
+    assert.equal(calls, 2, "the grounding check retried");
+    assert.equal(retried[0].ok, false, "the retry could not record");
+    const saved = JSON.parse(fs.readFileSync(t.paths.decisions, "utf8"));
+    assert.equal(saved.dec["OQ.WorkOrderPolicy"], "Required input");
+    assert.equal(saved.oqPolicy["OQ.WorkOrderPolicy"], "ask the clerk");
+    assert.ok(r.recorded.some(c => c.id === "OQ.WorkOrderPolicy" && c.after === "Required input"), JSON.stringify(r.recorded));
+  } finally { t.srv.close(); }
+});
+
+test("#3 a recorded value with an unsupported threshold is not kept, and the reply says so", async () => {
+  const fake = async (_m, _h, ctx) => {
+    runTool("resolveOpenQuestion", { id: "OQ.WorkOrderPolicy", mode: "Business rule", policy: "create one when the value is above $88,888" }, ctx);
+    return { reply: "Done — recorded the business rule for the incoming inspection work order.", toolTrace: [] };
+  };
+  const t = await setup(fake);
+  try {
+    const r = await (await chat(t, "make the incoming inspection work order a business rule for expensive items")).json();
+    const saved = JSON.parse(fs.readFileSync(t.paths.decisions, "utf8"));
+    assert.equal(saved.oqPolicy["OQ.WorkOrderPolicy"], undefined, "the ungrounded policy was not kept");
+    assert.match(r.reply, /⚠ Not kept: .*\$88,888/);
+    assert.ok(!r.recorded.some(c => c.field === "oqPolicy"), "the cards show only what was kept");
+    assert.ok(syncLog(t).some(e => e.checks.includes("ungrounded-value")), "logged");
+  } finally { t.srv.close(); }
+});
+
+test("#4 a claimed recording with no change gets 'Nothing was recorded', and the correction is logged", async () => {
+  const t = await setup(async () => ({ reply: "Done — I've recorded Required input for the work order.", toolTrace: [] }));
+  try {
+    const r = await (await chat(t, "set the work order to required input")).json();
+    assert.match(r.reply, /⚠ Nothing was recorded this turn/);
+    const log = syncLog(t);
+    assert.equal(log.length, 1);
+    assert.deepEqual(log[0].checks, ["claim-without-change"]);
+    assert.equal(log[0].message, "set the work order to required input");
+  } finally { t.srv.close(); }
+});
+
+test("#5 a refused recording is shown under the reply, whatever the reply says", async () => {
+  const fake = async (_m, _h, ctx) => {
+    const result = runTool("setQuickQuestion", { id: "AIQ.Nope", keep: true }, ctx);
+    return { reply: "Recorded.", toolTrace: [{ name: "setQuickQuestion", input: { id: "AIQ.Nope", keep: true }, result }] };
+  };
+  const t = await setup(fake);
+  try {
+    const r = await (await chat(t, "keep it")).json();
+    assert.match(r.reply, /⚠ Not recorded: setQuickQuestion AIQ\.Nope — /);
+  } finally { t.srv.close(); }
+});
+
+test("#7 a record changed outside this chat is picked up, gets a new revision, and is never overwritten by the next turn", async () => {
+  const t = await setup();
+  try {
+    const rev1 = (await (await fetch(t.base + "/api/specs")).json()).recordRev;
+    assert.match(rev1, /^[0-9a-f]{12}$/);
+    const edited = JSON.parse(fs.readFileSync(t.paths.decisions, "utf8"));
+    edited.dec["OQ.WorkOrderPolicy"] = "Defer"; edited.oqPolicy["OQ.WorkOrderPolicy"] = "edited outside the chat";
+    fs.writeFileSync(t.paths.decisions, JSON.stringify(edited));
+    const s2 = await (await fetch(t.base + "/api/specs")).json();
+    assert.notEqual(s2.recordRev, rev1, "a new revision");
+    const r = await (await chat(t, "hello")).json();
+    assert.equal(JSON.parse(fs.readFileSync(t.paths.decisions, "utf8")).oqPolicy["OQ.WorkOrderPolicy"], "edited outside the chat", "the turn did not overwrite it");
+    assert.equal(r.recordRev, s2.recordRev);
+  } finally { t.srv.close(); }
 });

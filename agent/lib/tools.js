@@ -7,6 +7,7 @@ const { generate, stage } = require("./specs");
 const { requestContract } = require("./specs/api");
 const { TEMPLATES, validateParams, sqlFor, validateOne } = require("./ai-templates");
 const { emptyImplemented, apiRecord } = require("./implemented");
+const { RECORDING_TOOLS, READ_ONLY_MSG } = require("./record-sync");
 
 const CAT_OPTS = {
   oq:   ["Business rule", "Required input", "Defer"],
@@ -349,6 +350,8 @@ const phase1Gated = (name, input, graph) =>
 
 function runTool(name, input, ctx) {
   const { graph, decisions } = ctx;
+  // a read-only turn (the grounding retry) may look things up but never change the record
+  if (ctx.readOnly && RECORDING_TOOLS.includes(name)) return { ok: false, message: READ_ONLY_MSG };
   if (phase1Gated(name, input, graph)) {
     const im = ctx.implemented || emptyImplemented();
     const st = stage(generate({ graph, record: normalize(decisions), implemented: im, inventory: ctx.inventory || null }), im);
