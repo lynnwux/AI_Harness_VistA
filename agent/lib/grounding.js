@@ -21,6 +21,11 @@ const cap = g => g.capabilities[0];
 const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const lexRe = w => new RegExp(`\\b${escRe(w).replace(/i[sz]ed$/, "i[sz]ed")}\\b`, "i");
 const norm = s => String(s || "").replace(/[\s,]/g, "").toLowerCase();
+// a threshold is supported when its amount appears in the allowed text, however it is worded (">$50000", "> $50,000",
+// "greater than $50,000"); a threshold with no amount ("> X") falls back to the text itself
+const amounts = text => new Set((String(text || "").replace(/,/g, "").match(/\d+(?:\.\d+)?/g) || []).map(Number));
+const amountOf = s => { const m = String(s).replace(/,/g, "").match(/\d+(?:\.\d+)?/); return m ? Number(m[0]) : null; };
+const supported = (threshold, allowedText) => { const a = amountOf(threshold); return a === null ? norm(allowedText).includes(norm(threshold)) : amounts(allowedText).has(a); };
 
 function tokens(text) {
   const out = new Set();
@@ -112,12 +117,16 @@ function buildIndex(graph, inventory) {
   return { groups, common, lexicon, idRe };
 }
 
-function checkReply({ graph, reply, userMessage = "", record = {}, currentId = null, index }) {
+// The items a text is about: every group whose name words it uses (two of them for a name of three or more words).
+const namedIn = (ix, text) => { const hay = String(text || "").toLowerCase(); return ix.groups.filter(g => g.aliasWords.filter(w => new RegExp(`(^|[^a-z0-9])${escRe(w)}([^a-z0-9]|$)`).test(hay)).length >= g.need); };
+const groupsOf = (ix, id) => (id ? ix.groups.filter(g => g.id === id || g.members.includes(id)) : []);
+
+function checkReply({ graph, reply, userMessage = "", record = {}, currentId = null, alsoFocus = [], index }) {
   const ix = index || buildIndex(graph);
   const text = String(reply || "");
-  const hay = (text + "\n" + userMessage).toLowerCase();
-  const named = ix.groups.filter(g => g.aliasWords.filter(w => new RegExp(`(^|[^a-z0-9])${escRe(w)}([^a-z0-9]|$)`).test(hay)).length >= g.need);
-  const focus = named.length ? named : ix.groups.filter(g => g.id === currentId || g.members.includes(currentId));
+  // the subject: the item being worked on, the items this turn recorded or the guide last talked about, and any the
+  // reply or the message names — a reply naming another item adds it, never takes the subject over
+  const focus = [...new Set([...groupsOf(ix, currentId), ...alsoFocus.flatMap(id => groupsOf(ix, id)), ...namedIn(ix, text + "\n" + userMessage)])];
   if (!focus.length) return { ok: true, focus: [], borrowed: [], thresholds: [] };
   const focusVocab = new Set(focus.flatMap(g => [...g.vocab])), focusLex = new Set(focus.flatMap(g => [...g.lex]));
   const others = ix.groups.filter(g => !focus.includes(g));
@@ -135,7 +144,7 @@ function checkReply({ graph, reply, userMessage = "", record = {}, currentId = n
   }
   // a threshold is supported by the focused item's evidence, the developer's words now, that item's recorded
   // policy, or the recorded params of the focused AI question (number params as "$value" to match threshold patterns)
-  const allowed = norm([
+  const allowed = [
     focus.map(g => g.text).join("\n"),
     userMessage,
     ...focus.map(g => (record.oqPolicy || {})[g.id] || ""),
@@ -144,8 +153,8 @@ function checkReply({ graph, reply, userMessage = "", record = {}, currentId = n
       if (!entry || !entry.params) return [];
       return Object.values(entry.params).map(v => typeof v === "number" && v >= 0 ? "$" + v : String(v));
     }),
-  ].join("\n"));
-  const thresholds = [...new Set((text.match(THRESH) || []).map(s => s.trim()))].filter(s => !allowed.includes(norm(s)));
+  ].join("\n");
+  const thresholds = [...new Set((text.match(THRESH) || []).map(s => s.trim()))].filter(s => !supported(s, allowed));
   return { ok: borrowed.length === 0 && thresholds.length === 0, focus: focus.map(g => g.id), borrowed, thresholds };
 }
 
@@ -158,7 +167,8 @@ function correctionPrompt(r, ix) {
   const L = [`GROUNDING CHECK (automatic — not from the developer). Your previous reply did not stay within the evidence for: ${focus.map(g => g.names.join(" / ")).join("; ")}.`];
   if (r.borrowed.length) L.push(`It used terms that come from OTHER items' evidence: ${borrowedText(r, ix)}.`);
   if (r.thresholds.length) L.push(`It stated thresholds that appear in neither this item's evidence nor the developer's words: ${r.thresholds.join("; ")}.`);
-  L.push("Rewrite the reply using ONLY this item's evidence, quoted where you describe the legacy:");
+  L.push("Keep answering the developer's message — the same question, the same item — and do not switch to another item or ask them to decide something they did not raise.");
+  L.push("Rewrite the reply using ONLY the evidence of these items, quoted where you describe the legacy:");
   focus.forEach(g => g.evidence.forEach(e => L.push(`- ${e}`)));
   L.push("Do not mention this check; just give the corrected reply.");
   return L.join("\n");
@@ -183,9 +193,13 @@ function warningNote(r, ix) {
 // One chat turn with the guardrail: run, check, and on a failed check retry once with the item's
 // evidence. `run(userText, history)` is the agent call, injected so the loop is testable without a model.
 // `inventory` is optional; when supplied it is passed to buildIndex so AI template groups are included.
-async function groundedTurn({ run, message, history = [], graph, record, currentId, inventory }) {
+// `touched()` names the items the turn has recorded so far; they and the item the guide's last message was about are
+// part of the subject, so a "yes" to a proposal is judged on the item proposed.
+async function groundedTurn({ run, message, history = [], graph, record, currentId, inventory, touched = () => [] }) {
   const index = buildIndex(graph, inventory);
-  const ground = reply => checkReply({ graph, index, reply, userMessage: message, record, currentId });
+  const last = [...history].reverse().find(h => h.role === "assistant");
+  const lastIds = last ? namedIn(index, last.text).map(g => g.id) : [];
+  const ground = reply => checkReply({ graph, index, reply, userMessage: message, record, currentId, alsoFocus: [...lastIds, ...touched()] });
   // the evidence card: the graph's own evidence for the item(s) the final reply is about
   const evidence = r => r.focus.map(id => ix(id)).filter(Boolean).map(g => ({ id: g.id, names: g.names, lines: g.evidence }));
   const ix = id => index.groups.find(g => g.id === id);
@@ -202,4 +216,4 @@ async function groundedTurn({ run, message, history = [], graph, record, current
   };
 }
 
-module.exports = { buildIndex, checkReply, correctionPrompt, correctedNote, warningNote, groundedTurn, tokens, THRESH };
+module.exports = { buildIndex, checkReply, correctionPrompt, correctedNote, warningNote, groundedTurn, tokens, THRESH, namedIn, groupsOf, supported };

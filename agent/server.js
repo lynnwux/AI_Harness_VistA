@@ -13,8 +13,8 @@ const { DEFAULT_PATHS, generate, writeSpecs, stage } = require("./lib/specs");
 const { emptyImplemented, apiRecord } = require("./lib/implemented");
 const { localTeardown } = require("./lib/teardown");
 const { KNOWN_GOOD_ROOT } = require("./lib/known-good");
-const { groundedTurn } = require("./lib/grounding");
-const { syncNotes, ungroundedChanges, revertChanges } = require("./lib/record-sync");
+const { groundedTurn, buildIndex, namedIn } = require("./lib/grounding");
+const { syncNotes, ungroundedChanges, unaskedChanges, revertChanges } = require("./lib/record-sync");
 const crypto = require("crypto");
 const { TEMPLATES } = require("./lib/ai-templates");
 
@@ -177,11 +177,11 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     if (RESTORE_COMMAND.test(String(message))) return res.json({ ...startRestore(runners), recorded: [], evidence: [] });
     syncFromFile();   // an edit made outside this server is the record this turn works on — never overwritten
     const before = JSON.parse(JSON.stringify(state.record));
+    const next = state.stage && state.stage.next;   // the item being worked on, before tools change it
+    const currentId = next ? next.id || next.for || null : null;
     let out = null, err = null;
     try {
       const ctx = { graph, decisions: state.record, implemented: implemented(), system: systemPrompt(), inventory };
-      const next = state.stage && state.stage.next;   // the item being worked on, before tools change it
-      const currentId = next ? next.id || next.for || null : null;
       // the grounding check judges the reply's words, not the tool calls: a retry keeps the draft's record changes and
       // runs read-only, so it can neither lose a decision nor record a different one
       let attempt = 0;
@@ -189,7 +189,9 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
         ? runAgentImpl(t, h, ctx)
         : runAgentImpl(t + "\n" + keptNote(diffRecords(before, state.record, labelOf)), h, { ...ctx, readOnly: true });
       // the check judges against the record as it was before this turn, never against what the draft just wrote
-      out = await groundedTurn({ run, message: String(message), history: history || [], graph, record: before, currentId, inventory });
+      // the items this turn recorded are part of the subject the check judges, so the turn's own item is never "borrowed"
+      out = await groundedTurn({ run, message: String(message), history: history || [], graph, record: before, currentId, inventory,
+        touched: () => [...new Set(diffRecords(before, state.record).map(c => c.id))] });
     } catch (e) { err = String(e.message || e); }
     // a recorded value is held to the reply's threshold test: one stating an amount the developer never gave is not kept
     const ungrounded = ungroundedChanges({ changes: diffRecords(before, state.record, labelOf), before, graph, userMessage: String(message) });
@@ -207,6 +209,12 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
       return res.status(500).json({ error: err + (notes.length ? "\n\n" + notes.map(n => n.text).join("\n") : ""), recorded, recordRev: recordRev() });
     }
     notes.push(...syncNotes({ reply: out.reply, recorded, toolTrace: out.toolTrace }));
+    // a change to an item the turn wasn't about — not the item worked on, not one the message or the guide's last
+    // message names — is kept but pointed out
+    const ix = buildIndex(graph, inventory), lastAssistant = [...(history || [])].reverse().find(h => h.role === "assistant");
+    const askedIds = [currentId, ...namedIn(ix, String(message)).map(g => g.id), ...(lastAssistant ? namedIn(ix, lastAssistant.text).map(g => g.id) : [])].filter(Boolean);
+    const unasked = unaskedChanges({ changes: recorded, askedIds, graph, index: ix });
+    if (unasked.length) notes.push({ check: "unasked-change", text: `⚠ Also changed, though your message didn't ask for it: ${[...new Set(unasked.map(c => c.label))].join("; ")} — ${unasked.map(c => `${c.field} → ${JSON.stringify(c.after)}`).join("; ")}. Tell me to put it back if you didn't mean it.` });
     const ready = correctReadyClaim(out.reply);
     const checks = [...(ready !== out.reply ? ["ready-claim"] : []), ...notes.map(n => n.check), ...(out.grounding && out.grounding.retried && !out.grounding.ok ? ["grounding-unfixed"] : [])];
     const reply = ready + (notes.length ? "\n\n" + notes.map(n => n.text).join("\n") : "");

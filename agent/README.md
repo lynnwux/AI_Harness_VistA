@@ -69,8 +69,9 @@ The decisions record (`decisions.json`) is the truth; the "recorded" cards show 
 - **⚠ Nothing was recorded this turn** — the reply claims a recording, but nothing changed.
 - **⚠ Not kept: …** — a recorded value stated an amount found in neither your words nor the item's evidence.
 - **⚠ Not ready — …** — the reply calls a layer ready to build while items are still missing.
+- **⚠ Also changed, though your message didn't ask for it: …** — the turn changed an item it wasn't about (kept; tell the guide to put it back if unintended).
 
-A grounding retry keeps the first draft's record changes and runs read-only, so it can only rewrite the reply. An edit to `decisions.json` made outside the server is picked up before the next read or turn (never overwritten), and the Decide page notes a record change made outside its own chat. Every correction is logged to `agent/desync-log.jsonl` (git-ignored) so new kinds of drift can be found and covered.
+A grounding retry keeps the first draft's record changes and runs read-only, so it can only rewrite the reply. The grounding check's subject is the item being worked on, the items the turn recorded, the item the guide's last message was about, and any item named — a reply naming another item can't take the subject over — and thresholds are compared by amount, however they are worded. An edit to `decisions.json` made outside the server is picked up before the next read or turn (never overwritten), and the Decide page notes a record change made outside its own chat. Every correction is logged to `agent/desync-log.jsonl` (git-ignored) so new kinds of drift can be found and covered.
 
 ## Demo reset
 

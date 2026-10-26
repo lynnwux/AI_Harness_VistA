@@ -240,3 +240,34 @@ test("#2 an item ID in the reply (OQ.WorkOrderPolicy, SIDE.Bulletin, AIQ.…) is
   const r = check("**OQ.WorkOrderPolicy: Whether to create an incoming inspection work order** — it gates SIDE.WorkOrder; OQ.PMEnrollmentPolicy and OQ.FAConfirmation are separate.");
   assert.deepEqual(r.borrowed.filter(b => /^(OQ|SIDE|FLD|AIQ)$/.test(b.term)), [], JSON.stringify(r.borrowed));
 });
+
+test("the subject is the item being worked on plus any the reply names — a reply naming another item can't take the subject over", () => {
+  const { buildIndex } = require("../lib/grounding");
+  const ix = buildIndex(graph);
+  const r = checkReply({ graph, index: ix, reply: "FA: business rule — report capitalized items (Field 34 = 1); ENFACS holders keep the override. PM schedule enrollment is unchanged.",
+    userMessage: "make it a business rule report capitalized items (Field 34 = 1)", record: { oqPolicy: {} }, currentId: "OQ.FAConfirmation" });
+  assert.ok(r.focus.includes("OQ.FAConfirmation"), JSON.stringify(r.focus));
+  assert.deepEqual(r.borrowed.filter(b => ["FA", "ENFACS"].includes(b.term)), [], JSON.stringify(r.borrowed));
+});
+
+test("items this turn recorded, and the one the guide's last message was about, are part of the subject", () => {
+  const r = checkReply({ graph, reply: "Recorded: FA reports capitalized items; ENFACS holders keep the override. Also PM schedule enrollment stays as decided.",
+    userMessage: "yes", record: { oqPolicy: {} }, currentId: null, alsoFocus: ["OQ.FAConfirmation"] });
+  assert.ok(r.focus.includes("OQ.FAConfirmation"));
+  assert.deepEqual(r.borrowed.filter(b => ["FA", "ENFACS"].includes(b.term)), []);
+});
+
+test("a threshold matches by amount, whatever the wording: >$50000, > $50,000 and 'greater than $50,000' are the same", () => {
+  const r = check("PM schedule enrollment: enroll when the value is > $50,000.", { userMessage: "when the value is >$50000", currentId: "OQ.PMEnrollmentPolicy" });
+  assert.deepEqual(r.thresholds, []);
+  const r2 = check("PM schedule enrollment: enroll when the value is > $50,000.", { userMessage: "yes", currentId: "OQ.PMEnrollmentPolicy", record: { oqPolicy: { "OQ.PMEnrollmentPolicy": "enroll when the value is greater than $50,000" } } });
+  assert.deepEqual(r2.thresholds, []);
+  assert.deepEqual(check("PM schedule enrollment: enroll when the value is > $75,000.", { userMessage: "yes", currentId: "OQ.PMEnrollmentPolicy" }).thresholds, ["> $75,000"]);
+});
+
+test("the retry prompt keeps the developer's question: it may not switch to another item", () => {
+  const { buildIndex } = require("../lib/grounding");
+  const ix = buildIndex(graph);
+  const r = check("PM schedule enrollment: enroll when the value is > $75,000.", { currentId: "OQ.PMEnrollmentPolicy" });
+  assert.match(correctionPrompt(r, ix), /Keep answering the developer's message/);
+});

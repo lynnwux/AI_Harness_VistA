@@ -912,3 +912,36 @@ test("#7 a record changed outside this chat is picked up, gets a new revision, a
     assert.equal(r.recordRev, s2.recordRev);
   } finally { t.srv.close(); }
 });
+
+test("#11 a change the developer's message didn't ask for is pointed out under the reply (and kept)", async () => {
+  const fake = async (_m, _h, ctx) => {
+    runTool("resolveOpenQuestion", { id: "OQ.FAConfirmation", mode: "Business rule", policy: "report capitalized items (Field 34 = 1)" }, ctx);
+    runTool("resolveOpenQuestion", { id: "OQ.PMEnrollmentPolicy", mode: "Business rule", policy: "enroll every new item" }, ctx);
+    return { reply: "Recorded the FA document to Austin as a business rule.", toolTrace: [] };
+  };
+  const t = await setup(fake);
+  try {
+    const r = await (await fetch(t.base + "/api/agent/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "make it a business rule report capitalized items (Field 34 = 1)", history: [{ role: "assistant", text: "**FA document to Austin** — how should the FA report be handled?" }] }) })).json();
+    assert.match(r.reply, /⚠ Also changed, though your message didn't ask for it: .*PM/);
+    assert.doesNotMatch(r.reply, /Also changed[^\n]*FA document/, "the asked item is not flagged");
+    const saved = JSON.parse(fs.readFileSync(t.paths.decisions, "utf8"));
+    assert.equal(saved.oqPolicy["OQ.PMEnrollmentPolicy"], "enroll every new item", "kept — the developer decides");
+    assert.ok(syncLog(t).some(e => e.checks.includes("unasked-change")));
+  } finally { t.srv.close(); }
+});
+
+test("a retry stays on the turn's item: what the turn recorded is part of the subject the check judges", async () => {
+  let calls = 0;
+  const fake = async (_m, _h, ctx) => {
+    calls++;
+    runTool("resolveOpenQuestion", { id: "OQ.FAConfirmation", mode: "Business rule", policy: "report capitalized items (Field 34 = 1)" }, ctx);
+    return { reply: "FA: business rule — report capitalized items (Field 34 = 1); ENFACS holders keep the override. PM schedule enrollment is unchanged.", toolTrace: [] };
+  };
+  const t = await setup(fake);
+  try {
+    const r = await (await chat(t, "make it a business rule report capitalized items (Field 34 = 1)")).json();
+    assert.equal(calls, 1, "no retry: FA's own terms are not 'borrowed' when the turn is about FA");
+    assert.doesNotMatch(r.reply, /Grounding check/);
+  } finally { t.srv.close(); }
+});

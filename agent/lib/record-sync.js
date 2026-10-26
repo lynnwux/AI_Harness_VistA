@@ -1,7 +1,7 @@
 "use strict";
 // Keeps what the chat says in step with the decisions record. The record is the truth; these checks correct a
 // reply that says otherwise, deterministically, in the same reply — the model is never trusted to report itself.
-const { THRESH, buildIndex } = require("./grounding");
+const { THRESH, buildIndex, groupsOf, supported } = require("./grounding");
 
 // the tools that change the record (every other tool only reads)
 const RECORDING_TOOLS = ["setDisposition", "resolveOpenQuestion", "setBuildScope", "setTarget", "bindRuleTerms", "setQuickQuestion"];
@@ -9,7 +9,6 @@ const RECORDING_TOOLS = ["setDisposition", "resolveOpenQuestion", "setBuildScope
 const READ_ONLY_MSG = "refused: this turn only rewrites the reply — the first draft's record changes already stand, so recording tools are switched off. Do not call them.";
 
 const plain = s => String(s || "").replace(/[*_`~]/g, "").replace(/\s+/g, " ").trim();
-const norm = s => String(s || "").replace(/[\s,]/g, "").toLowerCase();
 // "I've recorded …", "… has been set", "is now resolved", a reply opening with "Done/Recorded/Saved", "Recorded — …"
 const CLAIM = /\bI(?:'ve| have)\s+(?:now\s+|also\s+)?(?:recorded|saved|updated|set|changed|resolved|marked|stored)\b|\b(?:has|have) been (?:recorded|saved|updated|set|changed|resolved|stored)\b|\bis now (?:set|recorded|resolved|stored)\b|^(?:done|recorded|saved)\b|\b(?:done|recorded|saved)\s*[—–-]/i;
 
@@ -35,10 +34,18 @@ function ungroundedChanges({ changes, before, graph, userMessage = "", index }) 
   const ix = index || buildIndex(graph);
   const text = id => { const g = ix.groups.find(x => x.id === id || x.members.includes(id)); return g ? g.text : ""; };
   return changes.filter(c => typeof c.after === "string").map(c => {
-    const allowed = norm([userMessage, typeof c.before === "string" ? c.before : "", text(c.id)].join("\n"));
-    const thresholds = [...new Set((c.after.match(THRESH) || []).map(s => s.trim()))].filter(s => !allowed.includes(norm(s)));
+    const allowed = [userMessage, typeof c.before === "string" ? c.before : "", text(c.id)].join("\n");
+    const thresholds = [...new Set((c.after.match(THRESH) || []).map(s => s.trim()))].filter(s => !supported(s, allowed));
     return { ...c, thresholds };
   }).filter(c => c.thresholds.length);
+}
+
+// Changes to items the turn was not about: not the item asked about (or worked on), and not part of its group (the
+// side effect an open question gates moves with it). Kept, but pointed out — the developer decides.
+function unaskedChanges({ changes, askedIds = [], graph, index }) {
+  const ix = index || buildIndex(graph);
+  const asked = new Set(askedIds.flatMap(id => groupsOf(ix, id)).flatMap(g => [g.id, ...g.members]).concat(askedIds));
+  return changes.filter(c => !asked.has(c.id));
 }
 
 // Put back exactly the listed leaves (diffRecords changes) from `before`; nothing else is touched.
@@ -61,4 +68,4 @@ function revertChanges(record, before, changes) {
   return record;
 }
 
-module.exports = { RECORDING_TOOLS, READ_ONLY_MSG, syncNotes, ungroundedChanges, revertChanges };
+module.exports = { RECORDING_TOOLS, READ_ONLY_MSG, syncNotes, ungroundedChanges, unaskedChanges, revertChanges };

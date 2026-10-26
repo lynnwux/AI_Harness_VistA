@@ -50,3 +50,19 @@ test("revertChanges puts back exactly the listed leaves and nothing else", () =>
   assert.equal(after.dec["OQ.WorkOrderPolicy"], "Business rule", "the disposition stays");
   assert.equal(after.oqPolicy["OQ.WorkOrderPolicy"], undefined, "the ungrounded policy is gone");
 });
+
+test("#11 a change to an item the turn wasn't about is pointed out (a side effect of the asked item is not)", () => {
+  const { unaskedChanges } = require("../lib/record-sync");
+  const before = rec();
+  const after = rec({ dec: { "OQ.FAConfirmation": "Business rule" }, oqPolicy: { "OQ.FAConfirmation": "report capitalized items", "OQ.PMEnrollmentPolicy": "enroll when value > $50,000" }, scope: { "SIDE.FinancialAsset": "Build now" } });
+  const changes = diffRecords(before, after);
+  const extra = unaskedChanges({ changes, askedIds: ["OQ.FAConfirmation"], graph });
+  assert.deepEqual(extra.map(c => c.id), ["OQ.PMEnrollmentPolicy"]);
+  assert.deepEqual(unaskedChanges({ changes, askedIds: ["OQ.FAConfirmation", "OQ.PMEnrollmentPolicy"], graph }), []);
+});
+
+test("a recorded value's threshold matches by amount too", () => {
+  const before = rec();
+  const after = rec({ oqPolicy: { "OQ.PMEnrollmentPolicy": "enroll when value > $50,000" } });
+  assert.deepEqual(ungroundedChanges({ changes: diffRecords(before, after), before, graph, userMessage: "business rule when the value is >$50000" }), []);
+});
