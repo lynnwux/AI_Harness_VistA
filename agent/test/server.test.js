@@ -961,14 +961,15 @@ test("a reply that claims a recording without making one is re-run once with a t
   const runs = [];
   const fake = async (_m, _h, ctx) => {
     runs.push(!!ctx.requireTool);
-    if (!ctx.requireTool) return { reply: "Recorded. AIQ.JCAHOPendingInspection will not appear on the quick-access page.", toolTrace: [] };
+    // the first call claims without recording (a model can answer a required tool call with a read-only one)
+    if (runs.length === 1) return { reply: "Recorded. AIQ.JCAHOPendingInspection will not appear on the quick-access page.", toolTrace: [] };
     const result = runTool("setQuickQuestion", { id: "AIQ.JCAHOPendingInspection", keep: false }, ctx);
     return { reply: "Recorded: the JCAHO question will not appear.", toolTrace: [{ name: "setQuickQuestion", input: { id: "AIQ.JCAHOPendingInspection", keep: false }, result }] };
   };
   const t = await setup(fake);
   try {
     const r = await (await chat(t, "no")).json();
-    assert.deepEqual(runs, [false, true], "re-run once, with a tool call required");
+    assert.deepEqual(runs, [true, true], "re-run once, with a tool call required");
     assert.equal(JSON.parse(fs.readFileSync(t.paths.decisions, "utf8")).aiQuestions["AIQ.JCAHOPendingInspection"].keep, false);
     assert.ok(r.recorded.some(c => c.id === "AIQ.JCAHOPendingInspection"), JSON.stringify(r.recorded));
     assert.doesNotMatch(r.reply, /Nothing was recorded/);
@@ -992,5 +993,36 @@ test("the sync log carries each note's text, so a refusal's reason can be read l
     await chat(t, "keep it");
     const e = syncLog(t).find(x => x.checks.includes("refused"));
     assert.ok(e && e.notes.some(n => /Not recorded: setQuickQuestion AIQ\.Nope/.test(n)), JSON.stringify(e));
+  } finally { t.srv.close(); }
+});
+
+test("when the current item is waiting for the developer's answer, the first model call already requires a tool", async () => {
+  const seen = [];
+  const t = await setup(async (_m, _h, ctx) => { seen.push({ requireTool: !!ctx.requireTool, readOnly: !!ctx.readOnly }); return { reply: "ok", toolTrace: [] }; });
+  try {
+    await chat(t, "required input — ask the clerk");
+    assert.deepEqual(seen[0], { requireTool: true, readOnly: false }, "orchestrator stage, next item open");
+  } finally { t.srv.close(); }
+  const seen2 = [];
+  const { emptyImplemented } = require("../lib/implemented");
+  const t2 = await setup(async (_m, _h, ctx) => { seen2.push(!!ctx.requireTool); return { reply: "ok", toolTrace: [] }; },
+    paths => fs.writeFileSync(paths.implemented, JSON.stringify(emptyImplemented())));
+  try {
+    await chat(t2, "what is this page?");
+    assert.equal(seen2[0], false, "the api stage has no item waiting for an answer in the chat");
+  } finally { t2.srv.close(); }
+});
+
+test("a grounding retry never forces a tool (it is read-only)", async () => {
+  const seen = [];
+  let calls = 0;
+  const fake = async (_m, _h, ctx) => {
+    seen.push({ requireTool: !!ctx.requireTool, readOnly: !!ctx.readOnly });
+    return ++calls === 1 ? { reply: "Whether to create an incoming inspection work order: ≥ $99,999.", toolTrace: [] } : { reply: "Whether to create an incoming inspection work order: the clerk is asked.", toolTrace: [] };
+  };
+  const t = await setup(fake);
+  try {
+    await chat(t, "tell me about the incoming inspection work order");
+    assert.deepEqual(seen[1], { requireTool: false, readOnly: true });
   } finally { t.srv.close(); }
 });

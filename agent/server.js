@@ -183,13 +183,16 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     const currentId = next ? next.id || next.for || null : null;
     let out = null, err = null, claimRetried = false;
     try {
-      const ctx = { graph, decisions: state.record, implemented: implemented(), system: systemPrompt(), inventory };
+      // an item waiting for the developer's answer: the first model call must use a tool (the guide answered without
+      // recording far too often) — a question is still served, by getState or an explain tool
+      const awaiting = !!(next && state.stage && ["orchestrator", "ai"].includes(state.stage.layer));
+      const ctx = { graph, decisions: state.record, implemented: implemented(), system: systemPrompt(), inventory, requireTool: awaiting };
       // the grounding check judges the reply's words, not the tool calls: a retry keeps the draft's record changes and
       // runs read-only, so it can neither lose a decision nor record a different one
       let attempt = 0;
       const run = (t, h) => attempt++ === 0
         ? runAgentImpl(t, h, ctx)
-        : runAgentImpl(t + "\n" + keptNote(diffRecords(before, state.record, labelOf)), h, { ...ctx, readOnly: true });
+        : runAgentImpl(t + "\n" + keptNote(diffRecords(before, state.record, labelOf)), h, { ...ctx, readOnly: true, requireTool: false });
       // the check judges against the record as it was before this turn, never against what the draft just wrote
       // the items this turn recorded are part of the subject the check judges, so the turn's own item is never "borrowed"
       out = await groundedTurn({ run, message: String(message), history: history || [], graph, record: before, currentId, inventory,

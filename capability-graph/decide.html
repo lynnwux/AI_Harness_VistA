@@ -241,6 +241,15 @@ async function loadSpecs(){
 let LAST_REV=null;
 const OUTSIDE_CHANGE_MSG="⚠ **The record changed outside this chat** — another tab, a reset or a restore elsewhere, or an edit to decisions.json. The specs on the right show the record as it is now; what this chat said earlier may be out of date.";
 const recordChangedOutside=(lastRev, specs)=>!!(lastRev && specs && specs.recordRev && specs.recordRev!==lastRev);
+// a reply that completed a layer's spec unlocks its build button — say so, rather than leave a button that lit up unnoticed
+function unlockMessage(prev, specs){
+  if(!prev||!prev.layers||!specs||!specs.layers) return null;
+  if(specs.stage && (specs.stage.layer==="api" || specs.stage.apiOutOfDate)) return null;   // Phase 2 is still locked
+  for(const [l,name,btn,tab] of [["ai","AI","🔨 Build AI","AI"],["orchestrator","orchestrator","🔨 Build production","Orchestrator"]])
+    if(specs.layers[l]&&specs.layers[l].complete && prev.layers[l]&&!prev.layers[l].complete)
+      return `✅ The ${name} spec is complete — ${btn} is now enabled on the ${tab} tab.`;
+  return null;
+}
 function updateProg(){
   if(!G||!SPECS||!SPECS.layers) return;
   const n=(cap(G).openQuestions||[]).length, open=SPECS.layers.orchestrator.missing.filter(m=>m.kind==="decide").length;
@@ -457,6 +466,7 @@ async function sendChat(){
   chatBusy=true; send.disabled=true;
   inp.value=""; addMsg("user",msg); const prior=chatHistory.slice(); chatHistory.push({role:"user",text:msg});
   const pending=addMsg("assistant","…","muted");
+  const prevSpecs=SPECS;
   try{
     const r=await fetch("/api/agent/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:msg,history:prior})});
     const res=await r.json(); pending.remove();
@@ -467,6 +477,7 @@ async function sendChat(){
     addMsg("assistant",res.reply); chatHistory.push({role:"assistant",text:res.reply});
     if(res.restore && (res.restore.started || res.restore.running)) followRestore();
     await loadSpecs();
+    const unlocked=unlockMessage(prevSpecs,SPECS); if(unlocked) addMsg("assistant",unlocked);
   }catch(e){ pending.remove(); addMsg("assistant","⚠ "+e.message); }
   finally{ chatBusy=false; send.disabled=false; }
 }

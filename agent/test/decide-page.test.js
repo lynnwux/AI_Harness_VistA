@@ -381,3 +381,16 @@ test("#7 the page notices a record change made outside its own chat, and only th
 test("#7 the chat records its own turn's revision, so its own changes are never reported as outside ones", () => {
   assert.match(SCRIPT, /if\(res\.recordRev\) LAST_REV=res\.recordRev;/);
 });
+
+test("when a reply completes a layer's spec, the page says the build is now enabled", () => {
+  const p = page("unlockMessage");
+  const incomplete = apiSpecs(rec(DONE), VERIFIED);
+  const complete = apiSpecs(rec({ ...DONE, aiQuestions: ALL_KEPT }), VERIFIED);
+  assert.equal(incomplete.layers.ai.complete, false);
+  assert.equal(complete.layers.ai.complete, true);
+  assert.match(p.unlockMessage(incomplete, complete), /✅ The AI spec is complete — 🔨 Build AI is now enabled/);
+  assert.equal(p.unlockMessage(complete, complete), null, "only on the change");
+  assert.equal(p.unlockMessage(null, complete), null, "not on page load");
+  const orchIncomplete = apiSpecs(rec(), IM), orchComplete = apiSpecs(rec(DONE), IM);
+  assert.match(p.unlockMessage(orchIncomplete, orchComplete), /orchestrator spec is complete — 🔨 Build production is now enabled/);
+});
