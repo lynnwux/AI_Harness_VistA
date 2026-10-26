@@ -117,6 +117,7 @@
   .cmsg.user::before{content:"You";color:#053; opacity:.55}
   .cmsg.assistant{align-self:flex-start;background:#1f2b3a;border:1px solid #3d5170;border-left:3px solid var(--accent);color:#f0f6fc}
   .cmsg.assistant::before{content:"Assistant";color:#66d9ff}
+  .cmsg.assistant a{color:var(--accent)}
   .cmsg.muted{background:transparent;border:none;box-shadow:none;color:var(--faint);font-size:12px}
   .cmsg.muted::before{content:""}
   .cmsg b{color:#fff}
@@ -362,8 +363,10 @@ function openingMessages(specs){
   const ien=(specs.layers.api&&specs.layers.api.verifiedRecord&&specs.layers.api.verifiedRecord.ien)?` (test record IEN ${specs.layers.api.verifiedRecord.ien})`:"";
   if(st.layer==="ai"){
     const ai=specs.layers.ai, miss=(ai&&ai.missing)||[];
-    const where=`**Where we are — ✅ Phase 1 (API) and Phase 2 (the IRIS production) are built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/), and the IRIS production (the orchestrator layer) is running.\n\nWe're working on Phase 3, the **AI** layer, now — the equipment inventory chatbot on IRIS AI Hub; its spec is on the AI tab.`;
-    const next = st.step==="done" ? "**The AI layer is built and verified.** Open the chat app from the AI tab (💬 Open chat app). To change a quick-access question, tell me here, then press 🔨 Build AI again."
+    const where = st.step==="done"
+      ? `**Where we are — ✅ Phase 1 (API), Phase 2 (the IRIS production) and Phase 3 (the AI layer) are built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/), the IRIS production (the orchestrator layer) is running, and the equipment inventory chatbot is live on IRIS AI Hub.`
+      : `**Where we are — ✅ Phase 1 (API) and Phase 2 (the IRIS production) are built and verified.** The Angular app is published at [/prototype/build/](/prototype/build/), and the IRIS production (the orchestrator layer) is running.\n\nWe're working on Phase 3, the **AI** layer, now — the equipment inventory chatbot on IRIS AI Hub; its spec is on the AI tab.`;
+    const next = st.step==="done" ? "**Next:** open the chat app from the AI tab (💬 Open chat app). To change a quick-access question, tell me here, then press 🔨 Build AI again."
       : st.step==="ready" ? "**The AI spec is complete** — ready for 🔨 Build AI on the AI tab."
       : st.step==="discovery" ? "⚠ The inventory discovery file (capability-graph/inventory-fields.json) is missing — run the discovery step (agent/discover-inventory.js) before designing the AI layer."
       : `**Still to decide for the AI layer (${miss.length}):** ${miss.slice(0,6).map((m,i)=>`${i+1}. ${m.what}`).join(" · ")}${miss.length>6?" · …":""}.\n\nI'll take the quick-access questions one at a time — keep or drop, the wording, then each parameter — showing the legacy field meanings as evidence and asking you for every value; I never propose one. After each decision a card shows exactly what was recorded.\n\nReady to start with the first one?`;
@@ -387,7 +390,8 @@ const SERVED = location.protocol === "http:" || location.protocol === "https:";
 
 /* ---- chat assistant (served mode) ---- */
 let chatHistory=[];
-function fmtMsg(s){ return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>"); }
+// a markdown link becomes a link only for a page path or http(s) URL; the URL may not contain quotes or spaces
+function fmtMsg(s){ return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])).replace(/\[([^\]\n]+)\]\(((?:\/|https?:\/\/)[^\s()"']*)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>').replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>"); }
 
 /* ---------- text-to-speech (Web Speech API) ---------- */
 let voiceOn = false;   // off until the user turns it on with the Voice button
@@ -716,7 +720,7 @@ async function openPage(){
 function historyNote(specs, label){
   const st=specs&&specs.stage, layer=st&&st.layer==="ai"?"ai":st&&st.layer==="api"?"api":"orchestrator";
   const pend=specs&&specs.layers ? (layer==="ai" ? specs.layers.ai.missing : layer==="api" ? [] : specs.layers.orchestrator.missing.filter(m=>m.kind==="decide")) : [];
-  const where=layer==="ai"?"Phase 1 (API) and Phase 2 (production) built+verified; working on Phase 3, the AI layer":layer==="api"?"Phase 1 (API) not built; working on Phase 1":"Phase 1 (API) built+verified; working on Phase 2, the orchestrator";
+  const where=layer==="ai"&&st.step==="done"?"all three phases built+verified":layer==="ai"?"Phase 1 (API) and Phase 2 (production) built+verified; working on Phase 3, the AI layer":layer==="api"?"Phase 1 (API) not built; working on Phase 1":"Phase 1 (API) built+verified; working on Phase 2, the orchestrator";
   return `[${label}: ${where}; stage=${st?st.layer+"/"+st.step:"unknown"}; still to decide: ${pend.map(m=>m.id||m.what).join(", ")||"none"}; approach = show legacy evidence, explain, developer decides]`;
 }
 // A build moved the page on when it reached another layer, or finished the AI layer.

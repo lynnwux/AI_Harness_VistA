@@ -72,8 +72,26 @@ test("a complete AI spec is ready for 🔨 Build AI; a verified one points at th
   const built = { ...VERIFIED, ai: { built: true, verified: true } };
   const done = apiSpecs(rec({ ...DONE, aiQuestions: ALL_KEPT }), built);
   assert.equal(done.stage.step, "done");
-  assert.match(p.openingMessages(done).join("\n"), /AI layer is built and verified/);
+  assert.match(p.openingMessages(done).join("\n"), /Phase 3 \(the AI layer\) are built and verified[\s\S]*Open chat app/);
   assert.equal(p.defaultTab(done), "ai");
+});
+
+test("once the AI layer is built, the opening says all three phases are done — never 'working on Phase 3 now'", () => {
+  const p = page("historyNote");
+  const done = apiSpecs(rec({ ...DONE, aiQuestions: ALL_KEPT }), { ...VERIFIED, ai: { built: true, verified: true } });
+  const text = p.openingMessages(done).join("\n\n");
+  assert.match(text, /Phase 3 \(the AI layer\) are built and verified/);
+  assert.doesNotMatch(text, /working on Phase 3/i);
+  assert.match(p.historyNote(done, "stage changed"), /all three phases built\+verified; stage=ai\/done/);
+  assert.doesNotMatch(p.historyNote(done, "stage changed"), /working on Phase 3/);
+});
+
+test("a markdown link in a chat message renders as a link; anything but a page path or http(s) stays text", () => {
+  const p = page("fmtMsg");
+  assert.equal(p.fmtMsg("at [/prototype/build/](/prototype/build/)."), 'at <a href="/prototype/build/" target="_blank" rel="noopener">/prototype/build/</a>.');
+  assert.match(p.fmtMsg("[docs](https://example.org/x)"), /<a href="https:\/\/example.org\/x"/);
+  assert.doesNotMatch(p.fmtMsg("[x](javascript:alert(1))"), /<a /);
+  assert.doesNotMatch(p.fmtMsg('[x](/a"onmouseover=alert(1))'), /onmouseover=alert\(1\)"/);
 });
 
 test("in the orchestrator stage the opening is the orchestrator's and the orchestrator tab opens", () => {
