@@ -167,6 +167,8 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     return `${reply}\n\n⚠ **Not ready — the record says the ${name} spec still has ${n} item${n === 1 ? "" : "s"} missing:**\n${list}${n > 6 ? "\n- …" : ""}\n\n${button} stays disabled until they are recorded. Let's record them one at a time.`;
   }
   // what the grounding retry is told: the first draft's record changes stand, and it may only rewrite the reply
+  // what the forced re-run is told when a reply claimed a recording but no recording tool ran
+  const FORCE_RECORD = "(automatic) Your previous reply said the developer's answer was recorded, but no recording tool was called, so nothing is in the record. Record the developer's answer now with the right tool (getState shows the current item), then reply in one or two sentences.";
   const keptNote = changes => changes.length
     ? `Your first draft's record changes stand: ${changes.map(c => `${c.label} ${c.field} → ${JSON.stringify(c.after)}`).join("; ")}. Recording tools are switched off for this rewrite — rewrite only the reply text, and do not say anything else was recorded.`
     : "Your first draft recorded nothing. Recording tools are switched off for this rewrite — rewrite only the reply text, and do not say anything was recorded.";
@@ -179,7 +181,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     const before = JSON.parse(JSON.stringify(state.record));
     const next = state.stage && state.stage.next;   // the item being worked on, before tools change it
     const currentId = next ? next.id || next.for || null : null;
-    let out = null, err = null;
+    let out = null, err = null, claimRetried = false;
     try {
       const ctx = { graph, decisions: state.record, implemented: implemented(), system: systemPrompt(), inventory };
       // the grounding check judges the reply's words, not the tool calls: a retry keeps the draft's record changes and
@@ -192,6 +194,13 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
       // the items this turn recorded are part of the subject the check judges, so the turn's own item is never "borrowed"
       out = await groundedTurn({ run, message: String(message), history: history || [], graph, record: before, currentId, inventory,
         touched: () => [...new Set(diffRecords(before, state.record).map(c => c.id))] });
+      // the reply claims a recording that never happened (the model answered without calling a tool): run the turn
+      // once more with a tool call required, so the developer's answer is actually recorded
+      if (syncNotes({ reply: out.reply, recorded: diffRecords(before, state.record), toolTrace: out.toolTrace }).some(n => n.check === "claim-without-change")) {
+        claimRetried = true;
+        const forced = await runAgentImpl(String(message) + "\n" + FORCE_RECORD, history || [], { ...ctx, requireTool: true });
+        out = { ...out, reply: diffRecords(before, state.record).length ? forced.reply : out.reply, toolTrace: [...(out.toolTrace || []), ...(forced.toolTrace || [])] };
+      }
     } catch (e) { err = String(e.message || e); }
     // a recorded value is held to the reply's threshold test: one stating an amount the developer never gave is not kept
     const ungrounded = ungroundedChanges({ changes: diffRecords(before, state.record, labelOf), before, graph, userMessage: String(message) });
@@ -223,9 +232,9 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     const unasked = unaskedChanges({ changes: recorded, askedIds, graph, index: ix });
     if (unasked.length) notes.push({ check: "unasked-change", text: `⚠ Also changed, though your message didn't ask for it: ${[...new Set(unasked.map(c => c.label))].join("; ")} — ${unasked.map(c => `${c.field} → ${JSON.stringify(c.after)}`).join("; ")}. Tell me to put it back if you didn't mean it.` });
     const ready = correctReadyClaim(out.reply);
-    const checks = [...(silent ? ["empty-reply"] : []), ...(ready !== out.reply ? ["ready-claim"] : []), ...notes.map(n => n.check), ...(out.grounding && out.grounding.retried && !out.grounding.ok ? ["grounding-unfixed"] : [])];
+    const checks = [...(claimRetried ? ["claim-retried"] : []), ...(silent ? ["empty-reply"] : []), ...(ready !== out.reply ? ["ready-claim"] : []), ...notes.map(n => n.check), ...(out.grounding && out.grounding.retried && !out.grounding.ok ? ["grounding-unfixed"] : [])];
     const reply = ready + (notes.length ? "\n\n" + notes.map(n => n.text).join("\n") : "");
-    if (checks.length) logDesync({ checks, message: String(message), reply: String(out.reply).slice(0, 600), recorded: recorded.map(c => `${c.id} ${c.field} → ${JSON.stringify(c.after)}`) });
+    if (checks.length) logDesync({ checks, message: String(message), reply: String(out.reply).slice(0, 600), notes: notes.map(n => n.text), recorded: recorded.map(c => `${c.id} ${c.field} → ${JSON.stringify(c.after)}`) });
     res.json({ reply, toolTrace: out.toolTrace, recorded, grounding: out.grounding, evidence: out.evidence, specsError: g.error || null, recordRev: recordRev() });
   }).catch(e => { if (!res.headersSent) res.status(500).json({ error: String(e.message || e) }); }));
 

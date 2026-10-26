@@ -60,3 +60,24 @@ test("a turn that stays silent after the nudge returns an empty reply (the serve
   const out = await runAgent("drop it", [], ctx, { converseImpl: fake });
   assert.equal(out.reply, "");
 });
+
+test("a turn that must record forces a tool call on its first model call (toolChoice any), and only there", async () => {
+  const seen = [];
+  let n = 0;
+  const fake = async req => { seen.push(req.toolChoice || null); return ++n === 1 ? toolUse(1) : endTurn("Recorded."); };
+  await runAgent("record it", [], { ...ctx, requireTool: true }, { converseImpl: fake });
+  assert.deepEqual(seen, [{ any: {} }, null]);
+  seen.length = 0; n = 0;
+  await runAgent("hello", [], ctx, { converseImpl: fake });
+  assert.deepEqual(seen, [null, null], "an ordinary turn never forces a tool");
+});
+
+test("converse sends toolChoice inside toolConfig", async () => {
+  let body = null;
+  const saved = process.env.AWS_BEARER_TOKEN_BEDROCK; process.env.AWS_BEARER_TOKEN_BEDROCK = "fake-token";
+  try {
+    await converse({ system: "s", messages: [], tools: [{ toolSpec: { name: "x" } }], toolChoice: { any: {} } },
+      { fetchImpl: async (_u, opts) => { body = JSON.parse(opts.body); return { ok: true, json: async () => ({}) }; } });
+  } finally { if (saved === undefined) delete process.env.AWS_BEARER_TOKEN_BEDROCK; else process.env.AWS_BEARER_TOKEN_BEDROCK = saved; }
+  assert.deepEqual(body.toolConfig.toolChoice, { any: {} });
+});

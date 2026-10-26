@@ -66,7 +66,7 @@ Logins and hosts always come from `agent/.env`; copies hold no credentials. The 
 The decisions record (`decisions.json`) is the truth; the "recorded" cards show exactly what each turn changed. The server also corrects, in the same reply, anything the chat says that the record does not back:
 
 - **⚠ Not recorded: …** — a recording tool refused (the tool's own reason is shown).
-- **⚠ Nothing was recorded this turn** — the reply claims a recording, but nothing changed.
+- **⚠ Nothing was recorded this turn** — the reply claims a recording, but nothing changed. Before this note appears, the server re-runs the turn once with a tool call required (Bedrock `toolChoice: any`), which usually records the answer.
 - **⚠ Not kept: …** — a recorded value stated an amount found in neither your words nor the item's evidence.
 - **⚠ Not ready — …** — the reply calls a layer ready to build while items are still missing.
 - **⚠ Also changed, though your message didn't ask for it: …** — the turn changed an item it wasn't about (kept; tell the guide to put it back if unintended).

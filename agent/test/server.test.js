@@ -880,7 +880,7 @@ test("#4 a claimed recording with no change gets 'Nothing was recorded', and the
     assert.match(r.reply, /⚠ Nothing was recorded this turn/);
     const log = syncLog(t);
     assert.equal(log.length, 1);
-    assert.deepEqual(log[0].checks, ["claim-without-change"]);
+    assert.deepEqual(log[0].checks, ["claim-retried", "claim-without-change"], "the forced re-run was tried first, and still nothing was recorded");
     assert.equal(log[0].message, "set the work order to required input");
   } finally { t.srv.close(); }
 });
@@ -954,5 +954,43 @@ test("a turn whose reply is empty gets a reply written from the record: what was
     assert.match(r.reply, /^Recorded: .*Required input/);
     assert.match(r.reply, /Next: /);
     assert.ok(syncLog(t).some(e => e.checks.includes("empty-reply")));
+  } finally { t.srv.close(); }
+});
+
+test("a reply that claims a recording without making one is re-run once with a tool call required — and the answer is recorded", async () => {
+  const runs = [];
+  const fake = async (_m, _h, ctx) => {
+    runs.push(!!ctx.requireTool);
+    if (!ctx.requireTool) return { reply: "Recorded. AIQ.JCAHOPendingInspection will not appear on the quick-access page.", toolTrace: [] };
+    const result = runTool("setQuickQuestion", { id: "AIQ.JCAHOPendingInspection", keep: false }, ctx);
+    return { reply: "Recorded: the JCAHO question will not appear.", toolTrace: [{ name: "setQuickQuestion", input: { id: "AIQ.JCAHOPendingInspection", keep: false }, result }] };
+  };
+  const t = await setup(fake);
+  try {
+    const r = await (await chat(t, "no")).json();
+    assert.deepEqual(runs, [false, true], "re-run once, with a tool call required");
+    assert.equal(JSON.parse(fs.readFileSync(t.paths.decisions, "utf8")).aiQuestions["AIQ.JCAHOPendingInspection"].keep, false);
+    assert.ok(r.recorded.some(c => c.id === "AIQ.JCAHOPendingInspection"), JSON.stringify(r.recorded));
+    assert.doesNotMatch(r.reply, /Nothing was recorded/);
+    const e = syncLog(t).find(x => x.checks.includes("claim-retried"));
+    assert.ok(e, "logged");
+  } finally { t.srv.close(); }
+});
+
+test("if the forced re-run still records nothing, the 'Nothing was recorded' note stays", async () => {
+  const t = await setup(async () => ({ reply: "Recorded.", toolTrace: [] }));
+  try {
+    const r = await (await chat(t, "no")).json();
+    assert.match(r.reply, /⚠ Nothing was recorded this turn/);
+  } finally { t.srv.close(); }
+});
+
+test("the sync log carries each note's text, so a refusal's reason can be read later", async () => {
+  const fake = async (_m, _h, ctx) => { const result = runTool("setQuickQuestion", { id: "AIQ.Nope", keep: true }, ctx); return { reply: "ok", toolTrace: [{ name: "setQuickQuestion", input: { id: "AIQ.Nope" }, result }] }; };
+  const t = await setup(fake);
+  try {
+    await chat(t, "keep it");
+    const e = syncLog(t).find(x => x.checks.includes("refused"));
+    assert.ok(e && e.notes.some(n => /Not recorded: setQuickQuestion AIQ\.Nope/.test(n)), JSON.stringify(e));
   } finally { t.srv.close(); }
 });

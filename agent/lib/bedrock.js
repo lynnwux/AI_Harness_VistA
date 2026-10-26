@@ -10,7 +10,7 @@ const DEFAULT_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
 const REGION = process.env.AWS_DEFAULT_REGION || DEFAULT_REGION;
 const MODEL = process.env.BEDROCK_MODEL_ID || DEFAULT_MODEL_ID;
 
-async function converse({ system, messages, tools }, { fetchImpl = fetch, timeoutMs = 120000 } = {}) {
+async function converse({ system, messages, tools, toolChoice }, { fetchImpl = fetch, timeoutMs = 120000 } = {}) {
   const token = process.env.AWS_BEARER_TOKEN_BEDROCK;
   if (!token) throw new Error("AWS_BEARER_TOKEN_BEDROCK not set");
   const url = `https://bedrock-runtime.${REGION}.amazonaws.com/model/${encodeURIComponent(MODEL)}/converse`;
@@ -19,7 +19,7 @@ async function converse({ system, messages, tools }, { fetchImpl = fetch, timeou
     messages,
     inferenceConfig: { maxTokens: 1200, temperature: 0.2 },
   };
-  if (tools) body.toolConfig = { tools };
+  if (tools) body.toolConfig = toolChoice ? { tools, toolChoice } : { tools };   // toolChoice { any: {} } = at least one tool call
   const res = await fetchImpl(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -46,7 +46,8 @@ async function runAgent(userText, history, ctx, { converseImpl = converse } = {}
   const toolTrace = [];
   let nudged = false;   // a turn that ends with no text is asked once to write its reply
   for (let i = 0; i < MAX_TOOL_ROUNDS; i++) {
-    const resp = await converseImpl({ system: ctx.system, messages, tools: TOOL_SPECS });
+    // a turn that must record (ctx.requireTool) forces a tool call on its first model call only
+    const resp = await converseImpl({ system: ctx.system, messages, tools: TOOL_SPECS, toolChoice: ctx.requireTool && i === 0 ? { any: {} } : undefined });
     const out = resp.output.message;
     messages.push(out);
     if (resp.stopReason === "tool_use") {
