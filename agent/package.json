@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
     "smoke": "node smoke.js",
+    "preflight": "node --env-file-if-exists=.env preflight.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
