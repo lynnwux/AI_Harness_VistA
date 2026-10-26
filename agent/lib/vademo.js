@@ -3,6 +3,10 @@
 // All remote calls accept a fetchImpl injection so tests never hit the network.
 const { redact } = require("./iris-deploy");
 
+// VADEMO hosts more than one IRIS instance; VistA (VISTA-DIEGO) is the one under /irishealth — the same instance
+// as the Harness REST service. VADEMO_ATELIER_PATH overrides it if the web gateway routing changes again.
+const atelierBase = (env = process.env) => (env.VADEMO_ATELIER_PATH || "/irishealth/api/atelier").replace(/\/+$/, "") + "/v1/VISTA-DIEGO";
+
 function vademoFromEnv(env, { fetchImpl = fetch, timeoutMs = 30000 } = {}) {
   const url = (env.VADEMO_URL || "").replace(/\/+$/, "");
   const user = env.VADEMO_USER || "";
@@ -10,7 +14,7 @@ function vademoFromEnv(env, { fetchImpl = fetch, timeoutMs = 30000 } = {}) {
   if (!url || !user || !pass)
     throw new Error("VADEMO connection not configured — set VADEMO_URL, VADEMO_USER and VADEMO_PASSWORD (see agent/.env.example)");
   const auth = "Basic " + Buffer.from(user + ":" + pass).toString("base64");
-  const atelier = `${url}/api/atelier/v1/VISTA-DIEGO`;
+  const atelier = url + atelierBase(env);
   const secrets = [pass];
 
   // Generic Atelier call; always attaches auth + AbortSignal; redacts the password on network errors.
@@ -70,4 +74,4 @@ function vademoFromEnv(env, { fetchImpl = fetch, timeoutMs = 30000 } = {}) {
   return { putClass, compile, deleteClass, query, rest };
 }
 
-module.exports = { vademoFromEnv };
+module.exports = { vademoFromEnv, atelierBase };

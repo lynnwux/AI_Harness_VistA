@@ -8,6 +8,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { DEFAULT_PATHS, loadInputs, inputHashes } = require("./lib/specs");
+const { atelierBase } = require("./lib/vademo");
 const { aiClasses, PKG, WEB_APP, CREDENTIALS, GUARD_CASES } = require("./lib/ai-hub");
 const { serverEntry, docPath, redact, irisSession, irisScript } = require("./lib/iris-deploy");
 const { DEFAULT_REGION, DEFAULT_MODEL_ID } = require("./lib/bedrock");
@@ -44,7 +45,7 @@ async function _defaultBuildChatApp(questions, outDir, log) {
 }
 
 // The fixed Atelier SQL path that the AI layer uses for VistA queries (same as server.js ATELIER_QUERY).
-const VADEMO_PATH = "/api/atelier/v1/VISTA-DIEGO/action/query";
+const VADEMO_PATH = atelierBase() + "/action/query";
 
 const readJson = f => JSON.parse(fs.readFileSync(f, "utf8"));
 const osq = s => '"' + String(s == null ? "" : s).replace(/"/g, '""') + '"';

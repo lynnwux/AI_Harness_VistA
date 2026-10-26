@@ -3,6 +3,7 @@ const express = require("express");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { atelierBase } = require("./lib/vademo");
 const { spawn } = require("child_process");
 const { runAgent } = require("./lib/bedrock");
 const { killTree } = require("./lib/runner-control");
@@ -292,7 +293,7 @@ function registerVistaRoutes(app, { fetchImpl = fetch } = {}) {
 
   // Complete pointer-file lists, pulled live from VADEMO and cached. Registry maps
   // each lookup file → its table + candidate display column(s). val defaults to IEN.
-  const ATELIER_QUERY = "/api/atelier/v1/VISTA-DIEGO/action/query";
+  const ATELIER_QUERY = atelierBase() + "/action/query";
   const LOOKUP = {
     MANUFACTURER_LIST_FILE6912: { table: "MANUFACTURER_LIST_FILE6912", disp: ["MFGS_FULL_LENGTH_NAME", "MFGDIV"] },
     EQUIPMENT_CATEGORY6911:      { table: "EQUIPMENT_CATEGORY6911",      disp: ["NAME"] },

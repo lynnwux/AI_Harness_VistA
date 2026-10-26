@@ -9,6 +9,7 @@
 
 const fs   = require("fs");
 const path = require("path");
+const { atelierBase } = require("./lib/vademo");
 
 // ─── Personal data rule ───────────────────────────────────────────────────────
 // The general SQL path may read only tables without personal data. A table is judged by its columns, not
@@ -161,7 +162,7 @@ async function main() {
   }
 
   const auth = "Basic " + Buffer.from(VADEMO_USER + ":" + VADEMO_PASSWORD).toString("base64");
-  const BASE = VADEMO_URL + "/api/atelier/v1/VISTA-DIEGO";
+  const BASE = VADEMO_URL + atelierBase();
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 

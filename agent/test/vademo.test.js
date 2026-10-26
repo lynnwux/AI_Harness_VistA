@@ -1,10 +1,10 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { vademoFromEnv } = require("../lib/vademo");
+const { vademoFromEnv, atelierBase } = require("../lib/vademo");
 
 const ENV = { VADEMO_URL: "http://vademo:80", VADEMO_USER: "admin", VADEMO_PASSWORD: "fake-pass-secret-789" };
-const BASE = `${ENV.VADEMO_URL}/api/atelier/v1/VISTA-DIEGO`;
+const BASE = `${ENV.VADEMO_URL}/irishealth/api/atelier/v1/VISTA-DIEGO`;   // the VistA instance on VADEMO
 
 // Fake fetch that records every call and answers per route prefix match.
 function fakeFetch(routes) {
@@ -135,4 +135,9 @@ test("a 500 body echoing the password is redacted", async () => {
   assert.match(msg, /HTTP 500/);
   assert.ok(!msg.includes(pass), `password leaked in: ${msg}`);
   assert.match(msg, /\*\*\*/);
+});
+
+test("the Atelier path is the VistA instance's (/irishealth) unless VADEMO_ATELIER_PATH says otherwise", () => {
+  assert.equal(atelierBase({}), "/irishealth/api/atelier/v1/VISTA-DIEGO");
+  assert.equal(atelierBase({ VADEMO_ATELIER_PATH: "/api/atelier/" }), "/api/atelier/v1/VISTA-DIEGO");
 });
