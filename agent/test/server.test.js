@@ -945,3 +945,14 @@ test("a retry stays on the turn's item: what the turn recorded is part of the su
     assert.doesNotMatch(r.reply, /Grounding check/);
   } finally { t.srv.close(); }
 });
+
+test("a turn whose reply is empty gets a reply written from the record: what was recorded, and what is next", async () => {
+  const fake = async (_m, _h, ctx) => { runTool("resolveOpenQuestion", { id: "OQ.WorkOrderPolicy", mode: "Required input", policy: "ask the clerk" }, ctx); return { reply: "", toolTrace: [] }; };
+  const t = await setup(fake);
+  try {
+    const r = await (await chat(t, "required input — ask the clerk")).json();
+    assert.match(r.reply, /^Recorded: .*Required input/);
+    assert.match(r.reply, /Next: /);
+    assert.ok(syncLog(t).some(e => e.checks.includes("empty-reply")));
+  } finally { t.srv.close(); }
+});

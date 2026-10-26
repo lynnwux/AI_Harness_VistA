@@ -22,7 +22,9 @@ function syncNotes({ reply, recorded = [], toolTrace = [] }) {
     const text = `⚠ Not recorded: ${t.name}${id ? " " + id : ""} — ${r.message || r.error}`;
     if (!seen.has(text)) { seen.add(text); notes.push({ check: "refused", text }); }
   }
-  if (!recorded.length && !notes.length && CLAIM.test(plain(reply))) {
+  // a recording tool that succeeded without changing anything (the value was already set) makes a claim true
+  const succeeded = toolTrace.some(t => RECORDING_TOOLS.includes(t.name) && t.result && t.result.ok);
+  if (!recorded.length && !notes.length && !succeeded && CLAIM.test(plain(reply))) {
     notes.push({ check: "claim-without-change", text: "⚠ Nothing was recorded this turn — the record is unchanged, so anything the reply above says was recorded is not in it. Say it again and it will be recorded." });
   }
   return notes;

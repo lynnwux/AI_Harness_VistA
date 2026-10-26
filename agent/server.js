@@ -208,6 +208,13 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
       if (notes.length) logDesync({ checks: notes.map(n => n.check), message: String(message), error: err, recorded: recorded.map(c => `${c.id} ${c.field}`) });
       return res.status(500).json({ error: err + (notes.length ? "\n\n" + notes.map(n => n.text).join("\n") : ""), recorded, recordRev: recordRev() });
     }
+    // the model ended its turn without a reply: write one from the record — what was recorded, and what is next
+    const silent = !String(out.reply || "").trim();
+    if (silent) {
+      const nxt = state.stage && state.stage.next;
+      out.reply = (recorded.length ? "Recorded: " + recorded.map(c => `${c.label} · ${c.field} → ${JSON.stringify(c.after)}`).join("; ") + "." : "Nothing was recorded.")
+        + "\n\nNext: " + (nxt ? nxt.what || nxt.service || nxt.id : `the ${state.stage ? state.stage.layer : ""} stage is ${state.stage ? state.stage.step : "unknown"}`);
+    }
     notes.push(...syncNotes({ reply: out.reply, recorded, toolTrace: out.toolTrace }));
     // a change to an item the turn wasn't about — not the item worked on, not one the message or the guide's last
     // message names — is kept but pointed out
@@ -216,7 +223,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     const unasked = unaskedChanges({ changes: recorded, askedIds, graph, index: ix });
     if (unasked.length) notes.push({ check: "unasked-change", text: `⚠ Also changed, though your message didn't ask for it: ${[...new Set(unasked.map(c => c.label))].join("; ")} — ${unasked.map(c => `${c.field} → ${JSON.stringify(c.after)}`).join("; ")}. Tell me to put it back if you didn't mean it.` });
     const ready = correctReadyClaim(out.reply);
-    const checks = [...(ready !== out.reply ? ["ready-claim"] : []), ...notes.map(n => n.check), ...(out.grounding && out.grounding.retried && !out.grounding.ok ? ["grounding-unfixed"] : [])];
+    const checks = [...(silent ? ["empty-reply"] : []), ...(ready !== out.reply ? ["ready-claim"] : []), ...notes.map(n => n.check), ...(out.grounding && out.grounding.retried && !out.grounding.ok ? ["grounding-unfixed"] : [])];
     const reply = ready + (notes.length ? "\n\n" + notes.map(n => n.text).join("\n") : "");
     if (checks.length) logDesync({ checks, message: String(message), reply: String(out.reply).slice(0, 600), recorded: recorded.map(c => `${c.id} ${c.field} → ${JSON.stringify(c.after)}`) });
     res.json({ reply, toolTrace: out.toolTrace, recorded, grounding: out.grounding, evidence: out.evidence, specsError: g.error || null, recordRev: recordRev() });

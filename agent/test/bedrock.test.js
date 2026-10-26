@@ -42,3 +42,21 @@ test("converse gives up after its timeout", async () => {
     else process.env.AWS_BEARER_TOKEN_BEDROCK = prev;
   }
 });
+
+const endTurn = text => ({ stopReason: "end_turn", output: { message: { role: "assistant", content: text ? [{ text }] : [] } } });
+
+test("a turn that ends with no text is nudged once to write its reply", async () => {
+  const seen = [];
+  let n = 0;
+  const fake = async ({ messages }) => { seen.push(messages[messages.length - 1]); return ++n === 1 ? toolUse(1) : n === 2 ? endTurn("") : endTurn("Recorded. Next: the wording."); };
+  const out = await runAgent("drop it", [], ctx, { converseImpl: fake });
+  assert.equal(out.reply, "Recorded. Next: the wording.");
+  assert.match(JSON.stringify(seen[seen.length - 1]), /write your reply/i, "the nudge asked for the reply");
+});
+
+test("a turn that stays silent after the nudge returns an empty reply (the server writes one), never '(no text)'", async () => {
+  let n = 0;
+  const fake = async () => (++n === 1 ? toolUse(1) : endTurn(""));
+  const out = await runAgent("drop it", [], ctx, { converseImpl: fake });
+  assert.equal(out.reply, "");
+});

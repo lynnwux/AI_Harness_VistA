@@ -66,3 +66,8 @@ test("a recorded value's threshold matches by amount too", () => {
   const after = rec({ oqPolicy: { "OQ.PMEnrollmentPolicy": "enroll when value > $50,000" } });
   assert.deepEqual(ungroundedChanges({ changes: diffRecords(before, after), before, graph, userMessage: "business rule when the value is >$50000" }), []);
 });
+
+test("a claim is not contradicted when a recording tool succeeded, even if the value was already set", () => {
+  const notes = syncNotes({ reply: "Done. Now the third parameter.", recorded: [], toolTrace: [{ name: "setQuickQuestion", input: { id: "AIQ.HighValueNoContract" }, result: { ok: true } }] });
+  assert.deepEqual(notes, []);
+});

@@ -44,6 +44,7 @@ async function runAgent(userText, history, ctx, { converseImpl = converse } = {}
   messages.push({ role: "user", content: [{ text: userText }] });
 
   const toolTrace = [];
+  let nudged = false;   // a turn that ends with no text is asked once to write its reply
   for (let i = 0; i < MAX_TOOL_ROUNDS; i++) {
     const resp = await converseImpl({ system: ctx.system, messages, tools: TOOL_SPECS });
     const out = resp.output.message;
@@ -61,7 +62,12 @@ async function runAgent(userText, history, ctx, { converseImpl = converse } = {}
       continue;
     }
     const text = (out.content || []).filter(c => c.text).map(c => c.text).join("\n").trim();
-    return { reply: text || "(no text)", toolTrace };
+    if (!text && !nudged) {
+      nudged = true;
+      messages.push({ role: "user", content: [{ text: "(automatic) Your turn ended without a reply. Write your reply to the developer now: what you recorded, then the next item — without calling tools." }] });
+      continue;
+    }
+    return { reply: text, toolTrace };   // still empty: the server writes the reply from the record
   }
   const recorded = toolTrace.filter(t => t.result && t.result.ok).length;
   return {
