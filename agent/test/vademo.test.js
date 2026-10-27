@@ -141,3 +141,21 @@ test("the Atelier path is the VistA instance's (/irishealth) unless VADEMO_ATELI
   assert.equal(atelierBase({}), "/irishealth/api/atelier/v1/VISTA-DIEGO");
   assert.equal(atelierBase({ VADEMO_ATELIER_PATH: "/api/atelier/" }), "/api/atelier/v1/VISTA-DIEGO");
 });
+
+test("compile retries once in a single process when VADEMO's work-queue manager runs out of memory", async () => {
+  const STORE = { status: { errors: [{ error: "#5002: ObjectScript error: <STORE>CheckGroups+28^%SYS.WorkQueueMgr" }] }, console: [] };
+  let n = 0;
+  const fetch = fakeFetch({ [`POST ${BASE}/action/compile`]: () => (++n === 1 ? okReply(STORE) : okReply({ status: { errors: [] }, console: ["Compilation finished successfully"] })) });
+  await vademoFromEnv(ENV, { fetchImpl: fetch }).compile(["Harness.Setup.cls"]);
+  assert.equal(fetch.calls.length, 2);
+  assert.equal(fetch.calls[0].url, `${BASE}/action/compile`);
+  assert.equal(fetch.calls[1].url, `${BASE}/action/compile?flags=${encodeURIComponent("cuk/multicompile=0")}`);
+  assert.deepEqual(fetch.calls[1].body, ["Harness.Setup.cls"]);
+  // it still fails when the retry fails, and a real compile error is never retried
+  const always = fakeFetch({ [`POST ${BASE}/action/compile`]: okReply(STORE) });
+  await assert.rejects(() => vademoFromEnv(ENV, { fetchImpl: always }).compile(["X.cls"]), /<STORE>/);
+  assert.equal(always.calls.length, 2);
+  const syntax = fakeFetch({ [`POST ${BASE}/action/compile`]: okReply({ status: { errors: [{ error: "syntax error at line 3" }] }, console: [] }) });
+  await assert.rejects(() => vademoFromEnv(ENV, { fetchImpl: syntax }).compile(["X.cls"]), /syntax error/);
+  assert.equal(syntax.calls.length, 1);
+});

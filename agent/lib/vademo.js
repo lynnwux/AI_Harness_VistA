@@ -40,10 +40,19 @@ function vademoFromEnv(env, { fetchImpl = fetch, timeoutMs = 30000 } = {}) {
   }
 
   // Compile one or more classes in one round-trip; throws listing all status.errors and console ERRORs.
+  // VADEMO's parallel compile can run out of memory in its work-queue manager (<STORE>…%SYS.WorkQueueMgr) before
+  // compiling anything; that is retried once in a single process. A real compile error is never retried.
   async function compile(names) {
-    const j = await answer(await callAtelier("POST", "/action/compile", names), "compile errors");
-    const consoleFails = (j.console || []).filter(l => /ERROR/.test(l));
-    if (consoleFails.length) throw new Error(redact("compile errors: " + consoleFails.join("; "), secrets));
+    const once = async (q = "") => {
+      const j = await answer(await callAtelier("POST", "/action/compile" + q, names), "compile errors");
+      const consoleFails = (j.console || []).filter(l => /ERROR/.test(l));
+      if (consoleFails.length) throw new Error(redact("compile errors: " + consoleFails.join("; "), secrets));
+    };
+    try { await once(); }
+    catch (e) {
+      if (!/<STORE>.*WorkQueueMgr/.test(e.message)) throw e;
+      await once("?flags=" + encodeURIComponent("cuk/multicompile=0"));
+    }
   }
 
   // Delete a class document; HTTP 404 means it was already absent, any other failure throws.
