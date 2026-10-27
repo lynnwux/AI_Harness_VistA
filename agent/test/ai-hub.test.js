@@ -431,3 +431,30 @@ test("the guard rejects an amount compared, sorted or taken MIN/MAX of without C
   is("SUM(TOTAL_ASSET_VALUE)", true);
   is("TOTAL_ASSET_VALUE IS NULL", true);
 });
+
+// ObjectScript ends a postcondition (Quit:cond, Continue:cond, Set:cond …) at its first space outside parentheses and
+// strings, so a condition with spaces must sit inside one pair of parentheses. Returns the offending lines.
+function brokenPostconditions(text) {
+  const bad = [];
+  text.split("\n").forEach((line, n) => {
+    const re = /(?:^|\s)(Continue|Quit|Set|Do|Kill|Return|Write):/g;
+    let m;
+    while ((m = re.exec(line))) {
+      let i = m.index + m[0].length, depth = 0, inStr = false;
+      for (; i < line.length; i++) {
+        const c = line[i];
+        if (inStr) { if (c === '"') inStr = false; continue; }
+        if (c === '"') inStr = true; else if (c === "(") depth++; else if (c === ")") depth--; else if (c === " " && depth === 0) break;
+      }
+      const rest = line.slice(i).trim();
+      if ((m[1] === "Continue" && rest && !rest.startsWith("//")) || /^(&&|\|\||'?=|<|>|\[|\]|_)/.test(rest)) bad.push(`${n + 1}: ${line.trim()}`);
+    }
+  });
+  return bad;
+}
+
+test("every postcondition in the generated ObjectScript is one unbroken expression — no spaces outside parentheses", () => {
+  assert.deepEqual(brokenPostconditions('        Continue:(a = 1) && (b = 2)\n        Continue:t = "IS"\n        Quit:x\'=""\n        Set:(a = 1) x = 2'),
+    ['1: Continue:(a = 1) && (b = 2)', '2: Continue:t = "IS"'], "the lint itself");
+  for (const c of classes()) assert.deepEqual(brokenPostconditions(c.text), [], c.name);
+});

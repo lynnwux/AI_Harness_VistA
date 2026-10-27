@@ -271,8 +271,8 @@ ClassMethod Amounts(ByRef pTok, pN As %Integer) As %String
         Set tCol = $select($data(tAlias(t)): tAlias(t), 1: $piece(t, ".", $length(t, ".")))
         Continue:'$listfind(tCols, tCol)
         Set tPrev = $get(pTok(i - 1)), tPrev2 = $get(pTok(i - 2)), tNext = $get(pTok(i + 1)), tNext2 = $get(pTok(i + 2))
-        Continue:(tPrev = "(") && (tPrev2 = "CAST") && (tNext = "AS") && $listfind(tCasts, tNext2)
-        Continue:tNext = "IS"
+        Continue:((tPrev = "(") && (tPrev2 = "CAST") && (tNext = "AS") && $listfind(tCasts, tNext2))
+        Continue:(tNext = "IS")
         If (tClause = "SELECT") && '$data(tAlias(t)) && (tNext = "AS") && ..IsName($extract(tNext2)) && '$listfind(tOps, tPrev) {
             Set tAlias(tNext2) = tCol
         }
