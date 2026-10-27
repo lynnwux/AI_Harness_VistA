@@ -682,6 +682,11 @@ function makeVerifyFetch({ failQuestionId = null, chatbotError = false, vademoHt
       if (/^SELECT\s+COUNT\(\*\)\s+AS\s+n\s+FROM/i.test(sql)) {
         return { ok: true, json: () => Promise.resolve({ result: { content: [{ n: 295 }] }, status: { errors: [] } }) };
       }
+      // a reference check's raw read: the chatbot's two rows meet the filters, a text-stored small amount does not
+      if (/ AS V, SERVICE_CONTRACT AS SC, USE_STATUS AS US FROM /.test(sql)) {
+        const raw = [{ IEN: "1", V: "9000000.00", SC: "N", US: "1" }, { IEN: "2", V: 9500000, SC: "", US: "1" }, { IEN: "3", V: "1.00", SC: "N", US: "1" }];
+        return { ok: true, json: () => Promise.resolve({ result: { content: raw }, status: { errors: [] } }) };
+      }
       // Quick question direct: return same rows as chatbot
       return { ok: true, json: () => Promise.resolve({ result: { content: FAKE_QUICK_ROWS }, status: { errors: [] } }) };
     }
@@ -1058,4 +1063,15 @@ const knownGoodBefore = fs.existsSync(REAL_KNOWN_GOOD) ? fs.readdirSync(REAL_KNO
 test("guard (last): no main() test wrote the real agent/_known-good", () => {
   const now = fs.existsSync(REAL_KNOWN_GOOD) ? fs.readdirSync(REAL_KNOWN_GOOD).sort().join(",") : null;
   assert.equal(now, knownGoodBefore);
+});
+
+test("judgeAi: a quick question with a reference check must return exactly the items the raw values say — same-SQL agreement is not enough", () => {
+  const rows = [{ IEN: "1" }, { IEN: "2" }, { IEN: "3" }];
+  const wrong = judgeAi({ quick: [{ id: "AIQ.HighValueNoContract", wording: "High value?", chatbot: { rows, rowCount: 3, truncated: false }, direct: rows, expected: ["1", "3"] }] });
+  assert.equal(wrong.ok, false);
+  assert.match(wrong.problems[0], /AIQ\.HighValueNoContract: chatbot returned 3 rows, but 2 items meet its filters when VistA's raw values are checked one by one \(1 that do not, 0 missing\)/);
+  assert.equal(wrong.items[0].ok, false);
+  const right = judgeAi({ quick: [{ id: "AIQ.HighValueNoContract", chatbot: { rows: rows.slice(0, 2), rowCount: 2, truncated: false }, direct: rows.slice(0, 2), expected: [2, "1"] }] });
+  assert.equal(right.ok, true, right.problems.join("; "));
+  assert.match(right.items[0].vista, /2 rows · checked row by row/);
 });

@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 const { watchParent, sweepWorkspaces, timedFetch } = require("./lib/runner-control");
-const { DEFAULT_PATHS, loadInputs, inputHashes } = require("./lib/specs");
+const { DEFAULT_PATHS, loadInputs, inputHashes, currentSpec, REGENERATED_NOTE } = require("./lib/specs");
 const { productionClasses, PKG, WEB_APP, BULLETIN } = require("./lib/production");
 const { saveKnownGood } = require("./lib/known-good");
 const { serverEntry, docPath } = require("./lib/iris-deploy");
@@ -17,20 +17,31 @@ const CONFIG_FILE = path.join(__dirname, "interclaw-servers.json");
 const readJson = f => JSON.parse(fs.readFileSync(f, "utf8"));
 
 function readSpecs(paths = DEFAULT_PATHS) {
-  const orchestrator = readJson(path.join(paths.specsDir, "orchestrator.json"));
-  const api = readJson(path.join(paths.specsDir, "api.json"));
+  let orchestrator = readJson(path.join(paths.specsDir, "orchestrator.json"));
+  let api = readJson(path.join(paths.specsDir, "api.json"));
   const inputs = loadInputs(paths);
   for (const [layer, spec] of [["orchestrator", orchestrator], ["api", api]]) {
     if (JSON.stringify(spec.inputs) !== JSON.stringify(inputHashes(layer, inputs))) {
       throw new Error(`the ${layer} spec is stale — it no longer matches the decisions record; reload the Decide page and build again`);
     }
   }
+  // written by older code? use what this code generates
+  const regenerated = [];
+  for (const [layer, read] of [["orchestrator", orchestrator], ["api", api]]) {
+    const cur = currentSpec(layer, read, paths);
+    if (cur.regenerated) regenerated.push(layer);
+    if (layer === "orchestrator") orchestrator = cur.spec; else api = cur.spec;
+  }
   if (!orchestrator.complete) throw new Error("the orchestrator spec is not complete — finish its missing items in the Decide chat first");
-  // checked before anything is deployed: IRIS refuses an email with no recipient, and that fails the whole request
+  checkRecipients(orchestrator);
+  return { orchestrator, api, regenerated };
+}
+
+// Checked before anything is deployed: IRIS refuses an email with no recipient, and that fails the whole request.
+function checkRecipients(orchestrator) {
   for (const e of orchestrator.detail.built) {
     if (e.target && e.target.channel === "email" && !String(e.target.recipients || "").trim()) throw new Error(`the bulletin has no email recipients (${e.name}) — record its email address in the Decide chat, then build again`);
   }
-  return { orchestrator, api };
 }
 
 // serverEntry is imported from ./lib/iris-deploy
@@ -132,6 +143,7 @@ async function main(paths = DEFAULT_PATHS) {
   try {
     step("Reading the orchestrator spec");
     const specs = readSpecs(paths);
+    for (const l of specs.regenerated) note(REGENERATED_NOTE(l));
     const d = specs.orchestrator.detail;
     const { IRIS_AI_HUB_URL: url, IRIS_AI_HUB_USER: user, IRIS_AI_HUB_PASSWORD: pass, INTERCLAW_SCRIPTS: scripts } = process.env;
     const entry = serverEntry(url);
@@ -238,4 +250,4 @@ async function main(paths = DEFAULT_PATHS) {
 
 if (require.main === module) { watchParent(); main(); }
 
-module.exports = { readSpecs, serverEntry, samplePayload, judge, sessionScript, portalUrl, docPath, smtpSettings, bulletinSettingsScript, findDelivered, STATUS_FILE, CREDENTIAL_ID };
+module.exports = { readSpecs, checkRecipients, serverEntry, samplePayload, judge, sessionScript, portalUrl, docPath, smtpSettings, bulletinSettingsScript, findDelivered, STATUS_FILE, CREDENTIAL_ID };

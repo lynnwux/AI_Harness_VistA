@@ -7,7 +7,8 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { DEFAULT_PATHS, loadInputs, inputHashes } = require("./lib/specs");
+const { DEFAULT_PATHS, loadInputs, inputHashes, currentSpec, REGENERATED_NOTE } = require("./lib/specs");
+const { TEMPLATES } = require("./lib/ai-templates");
 const { atelierBase } = require("./lib/vademo");
 const { aiClasses, PKG, WEB_APP, CREDENTIALS, GUARD_CASES } = require("./lib/ai-hub");
 const { serverEntry, docPath, redact, irisSession, irisScript } = require("./lib/iris-deploy");
@@ -59,8 +60,9 @@ function readAiSpec(paths = DEFAULT_PATHS) {
   if (want !== got) {
     throw new Error("the AI spec is stale — it no longer matches the decisions record; reload the Decide page and build again");
   }
-  if (!aiSpec.complete) throw new Error("the AI spec is not complete — finish its missing items in the Decide chat first");
-  return { ai: aiSpec, inventory: inputs.inventory };
+  const cur = currentSpec("ai", aiSpec, paths);   // written by older code? use what this code generates
+  if (!cur.spec.complete) throw new Error("the AI spec is not complete — finish its missing items in the Decide chat first");
+  return { ai: cur.spec, inventory: inputs.inventory, regenerated: cur.regenerated };
 }
 
 // The VADEMO login the AI layer uses, chosen as a pair: the read-only login when VADEMO_READ_USER is set
@@ -258,8 +260,19 @@ function judgeAi({ quick = [], count = null, guard = [], conversation = [], rowC
       }
     }
     const cb    = describeRows(chatbotRows, { truncated });
-    const vista = describeRows(directRows);
+    let vista = describeRows(directRows);
     if (!ok) problems.push(`question ${q.id}: chatbot returned ${cb}, VistA returned ${vista}`);
+    // the independent check (q.expected: the IENs the raw values say meet the filters) — the question's own SQL run
+    // on both sides agrees even when that SQL compares wrongly, so the rows must also be exactly these items
+    if (ok && !truncated && Array.isArray(q.expected)) {
+      const want = new Set(q.expected.map(String)), got = new Set(chatbotRows.map(r => String(r.IEN != null ? r.IEN : r.ien)));
+      const extra = [...got].filter(i => !want.has(i)).length, missing = [...want].filter(i => !got.has(i)).length;
+      vista = `${want.size} rows · checked row by row`;
+      if (extra || missing) {
+        ok = false;
+        problems.push(`question ${q.id}: chatbot returned ${chatbotRows.length} rows, but ${want.size} items meet its filters when VistA's raw values are checked one by one (${extra} that do not, ${missing} missing)`);
+      }
+    }
     items.push({ question: asked, chatbot: cb, vista, ok });
   }
 
@@ -358,7 +371,8 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
 
   try {
     step("Reading the AI spec");
-    const { ai, inventory } = readAiSpec(paths);
+    const { ai, inventory, regenerated } = readAiSpec(paths);
+    if (regenerated) safeNote(REGENERATED_NOTE("AI"));
     const d = ai.detail;
 
     const { IRIS_AI_HUB_URL: url, IRIS_AI_HUB_USER: user, IRIS_AI_HUB_PASSWORD: pass } = process.env;
@@ -477,9 +491,12 @@ async function main(paths = DEFAULT_PATHS, _deps = {}) {
       const qSessId = "verify-q-" + Date.now() + "-" + qi;
       const chatbot = await hubPost(`/equipmentai/quick/${encodeURIComponent(qId)}`, { sessionId: qSessId });
       const direct  = await directQuery(q.sql);
-      quickInput.push({ id: q.id, wording: q.wording, chatbot, direct });
+      // a template with a reference check: the raw values, filtered here one row at a time
+      const tpl = TEMPLATES.find(t => t.id === q.id), ref = tpl && tpl.reference ? tpl.reference(q.params || {}, inventory) : null;
+      const expected = ref ? (await directQuery(ref.sql)).filter(ref.keep).map(r => String(r.IEN)) : undefined;
+      quickInput.push({ id: q.id, wording: q.wording, chatbot, direct, ...(expected ? { expected } : {}) });
       const cb = (chatbot.truncated) ? `${chatbot.rowCount} rows (truncated)` : `${(chatbot.rows || []).length} rows`;
-      safeNote(`quick ${q.id}: chatbot=${cb}, vista=${direct.length} rows`);
+      safeNote(`quick ${q.id}: chatbot=${cb}, vista=${direct.length} rows${expected ? `, checked row by row=${expected.length}` : ""}`);
     }
 
     // 2. Count check: ask chat "How many pieces of equipment do we have?" — one retry on failure.

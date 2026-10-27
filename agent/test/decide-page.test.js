@@ -117,7 +117,8 @@ test("an out-of-date server is announced: the AI status is not JSON, or /api/spe
   assert.equal(p.serverLooksOld({ error: "unreachable" }, true), false, "an unreachable server has its own message");
   assert.match(p.OLD_SERVER_NOTICE, /restart the workbench server \(npm start\)/i);
   // the page shows the notice and boots on the stage's tab
-  assert.match(SCRIPT, /serverLooksOld\(SPECS, AI_STATUS_JSON\)/);
+  assert.match(SCRIPT, /specBanners\(SPECS, AI_STATUS_JSON\)/);
+  assert.match(SCRIPT, /serverLooksOld\(specs, aiStatusIsJson\) \?/);
   assert.match(SCRIPT, /OLD_SERVER_NOTICE/);
   assert.match(SCRIPT, /TAB\s*=\s*defaultTab\(SPECS\)/);
 });
@@ -411,4 +412,13 @@ test("when a reply completes a layer's spec, the page says the build is now enab
   assert.equal(p.unlockMessage(null, complete), null, "not on page load");
   const orchIncomplete = apiSpecs(rec(), IM), orchComplete = apiSpecs(rec(DONE), IM);
   assert.match(p.unlockMessage(orchIncomplete, orchComplete), /orchestrator spec is complete — 🔨 Build production is now enabled/);
+});
+
+test("when the server's code changed since it started, the spec pane asks for a restart", () => {
+  const p = page("specBanners, CODE_CHANGED_NOTICE");
+  const s = apiSpecs(rec(DONE), VERIFIED);
+  assert.doesNotMatch(p.specBanners(s, true), /restart the workbench server/);
+  const html = p.specBanners({ ...s, codeChanged: true }, true);
+  assert.match(html, /The workbench code changed since the server started/);
+  assert.match(html, /restart the workbench server/);
 });

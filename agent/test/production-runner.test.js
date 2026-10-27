@@ -6,7 +6,7 @@ const os = require("os");
 const path = require("path");
 const { graph, rec, IM } = require("./helpers");
 const { generate, writeSpecs } = require("../lib/specs");
-const { readSpecs, serverEntry, samplePayload, judge } = require("../production-runner");
+const { readSpecs, checkRecipients, serverEntry, samplePayload, judge } = require("../production-runner");
 
 const decided = {
   dec: { "OQ.WorkOrderPolicy": "Required input", "OQ.PMEnrollmentPolicy": "Business rule", "OQ.FAConfirmation": "Defer" },
@@ -136,11 +136,21 @@ test("the mail catcher check finds this build's bulletin, not an older one", () 
 
 test("the production build refuses to start when the bulletin has no recipients", () => {
   const paths = setupSpecs(rec({ ...decided, targets: { "SIDE.Bulletin": { recipients: "x@example.org" } } }));
+  const spec = JSON.parse(fs.readFileSync(path.join(paths.specsDir, "orchestrator.json"), "utf8"));
+  assert.doesNotThrow(() => checkRecipients(spec));
+  spec.detail.built.find(e => e.id === "SIDE.Bulletin").target.recipients = "";
+  assert.throws(() => checkRecipients(spec), /bulletin has no email recipients/);
+});
+
+test("a spec file that differs from what this code generates is replaced before the build reads it", () => {
+  const paths = setupSpecs(rec({ ...decided, targets: { "SIDE.Bulletin": { recipients: "x@example.org" } } }));
   const file = path.join(paths.specsDir, "orchestrator.json");
   const spec = JSON.parse(fs.readFileSync(file, "utf8"));
-  spec.detail.built.find(e => e.id === "SIDE.Bulletin").target.recipients = "";
+  spec.detail.built.find(e => e.id === "SIDE.Bulletin").target.recipients = "";   // as older code, or a hand edit, left it
   fs.writeFileSync(file, JSON.stringify(spec));
-  assert.throws(() => readSpecs(paths), /bulletin has no email recipients/);
+  const r = readSpecs(paths);
+  assert.deepEqual(r.regenerated, ["orchestrator"]);
+  assert.equal(r.orchestrator.detail.built.find(e => e.id === "SIDE.Bulletin").target.recipients, "x@example.org");
 });
 
 test("a failed verification request names what IRIS said, not a list of missing outcomes", () => {

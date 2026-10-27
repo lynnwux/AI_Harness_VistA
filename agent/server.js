@@ -25,10 +25,24 @@ const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(f
 // spawnImpl, statusFiles and killTreeImpl let tests run the build routes without starting a runner or touching agent/ files;
 // agentDir, repoRoot, knownGoodRoot and tmpDir are where the demo reset removes leftovers (localTeardownImpl does it);
 // vademoFetch serves the lookups.
+// A fingerprint of the server's own code (agent/*.js and agent/lib/**/*.js: name, size, modified time). The server
+// keeps the code it started with, so when the files change it is running older code — and writes specs with it.
+function codeFingerprint(dir) {
+  const files = [];
+  const walk = (d, deep) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = path.join(d, e.name);
+    if (e.isDirectory() && deep) walk(p, true);
+    else if (e.isFile() && e.name.endsWith(".js")) { const s = fs.statSync(p); files.push(`${path.relative(dir, p)}:${s.size}:${s.mtimeMs}`); }
+  } };
+  try { walk(dir, false); if (fs.existsSync(path.join(dir, "lib"))) walk(path.join(dir, "lib"), true); } catch (_) { return null; }
+  return files.sort().join("|");
+}
+
 function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl = spawn, statusFiles = {}, killTreeImpl = killTree,
-                     agentDir = __dirname, repoRoot = ROOT, knownGoodRoot = KNOWN_GOOD_ROOT, tmpDir = os.tmpdir(), vademoFetch = fetch, localTeardownImpl = localTeardown,
+                     codeDir = __dirname, agentDir = __dirname, repoRoot = ROOT, knownGoodRoot = KNOWN_GOOD_ROOT, tmpDir = os.tmpdir(), vademoFetch = fetch, localTeardownImpl = localTeardown,
                      desyncLog = path.join(path.dirname(paths.decisions), "desync-log.jsonl") } = {}) {
   let graph = JSON.parse(fs.readFileSync(paths.graph, "utf8"));
+  const startCode = codeFingerprint(codeDir);
   let inventory = readJson(paths.inventory || DEFAULT_PATHS.inventory, null);     // re-read in regenerate()
   let notice = null;
   const onCorrupt = bak => { notice = `decisions.json could not be read, so the workbench started from the default decisions. The unreadable file was backed up as ${path.basename(bak)} — nothing in it is lost.`; };
@@ -152,7 +166,7 @@ function createApp({ paths = DEFAULT_PATHS, runAgentImpl = runAgent, spawnImpl =
     syncFromFile();
     if (!state.specs) return res.status(500).json({ error: state.specsError || "specs not generated", notice: state.notice });
     const layer = l => ({ md: state.md[l], complete: state.specs[l].complete, missing: state.specs[l].missing, needs: state.specs[l].needs, owns: state.specs[l].owns, ...(l==="api" ? { verifiedRecord: apiRecord(implemented()).verifiedRecord } : {}) });
-    res.json({ error: state.specsError, notice: state.notice, stage: state.stage, recordRev: recordRev(), layers: { api: layer("api"), orchestrator: layer("orchestrator"), ai: layer("ai") } });
+    res.json({ error: state.specsError, notice: state.notice, stage: state.stage, recordRev: recordRev(), codeChanged: codeFingerprint(codeDir) !== startCode, layers: { api: layer("api"), orchestrator: layer("orchestrator"), ai: layer("ai") } });
   });
 
   // A reply that calls the current layer ready to build while its spec still has missing items gets the record's

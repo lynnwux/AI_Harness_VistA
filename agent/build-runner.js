@@ -8,7 +8,7 @@ const path = require("path");
 const { angularFiles, DEFAULT_COMPONENT_FILES } = require("./lib/angular-app");
 const { buildAngularApp } = require("./lib/angular-build");
 const { saveKnownGood: saveKnownGoodLib, KNOWN_GOOD_ROOT } = require("./lib/known-good");
-const { DEFAULT_PATHS, loadInputs, inputHashes, designHash, canon } = require("./lib/specs");
+const { DEFAULT_PATHS, loadInputs, inputHashes, designHash, canon, currentSpec, REGENERATED_NOTE } = require("./lib/specs");
 const { PHASE1_SERVICES, emptyImplemented, apiRecord, builtApi } = require("./lib/implemented");
 const { vademoFromEnv } = require("./lib/vademo");
 const { deployRestService, REST_CLASSES, HARNESS_DIR } = require("./lib/rest-service");
@@ -85,9 +85,12 @@ async function main(deps = {}) {
   let restDir = null;
   try {
     setStep("Reading spec");
-    const apiSpec = JSON.parse(fs.readFileSync(path.join(paths.specsDir, "api.json"), "utf8"));
-    if (canon(inputHashes("api", loadInputs(paths))) !== canon(apiSpec.inputs))
+    const read = JSON.parse(fs.readFileSync(path.join(paths.specsDir, "api.json"), "utf8"));
+    if (canon(inputHashes("api", loadInputs(paths))) !== canon(read.inputs))
       throw new Error("api spec is stale — its inputs changed since it was generated; regenerate (POST /api/build does this) and retry");
+    const cur = currentSpec("api", read, paths);   // written by older code? use what this code generates
+    if (cur.regenerated) log(REGENERATED_NOTE("API"));
+    const apiSpec = cur.spec;
     const cfg = apiSpec.detail;
     log(`spec → ${cfg.pages.length} screens, ${cfg.pages.reduce((n, p) => n + p.fields.length, 0)} fields`);
 

@@ -87,3 +87,27 @@ test("building Phase 1 never makes the API spec look stale", () => {
     inputHashes("api", inputs(rec(), { ...IM, api: builtApi(PHASE1_SERVICES, { verifiedRecord: { ien: 9 }, builtFrom: "x" }) }))
   );
 });
+
+test("a spec that matches the decisions but not this code is regenerated — a server started before the code changed wrote it", () => {
+  const { currentSpec, loadInputs } = require("../lib/specs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "specs-code-"));
+  const paths = { graph: path.join(dir, "g.json"), decisions: path.join(dir, "d.json"), implemented: path.join(dir, "i.json"), inventory: path.join(dir, "inv.json"), specsDir: path.join(dir, "specs") };
+  const inventory = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "capability-graph", "inventory-fields.json"), "utf8"));
+  fs.writeFileSync(paths.graph, JSON.stringify(graph)); fs.writeFileSync(paths.decisions, JSON.stringify(rec()));
+  fs.writeFileSync(paths.implemented, JSON.stringify(IM)); fs.writeFileSync(paths.inventory, JSON.stringify(inventory));
+  try {
+    const i = loadInputs(paths);
+    writeSpecs(paths.specsDir, generate(i), i);
+    const file = path.join(paths.specsDir, "ai.json"), read = () => JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.deepEqual(currentSpec("ai", read(), paths).regenerated, false, "this code's own spec is used as it is");
+    // what older code wrote: same inputs, different content
+    const old = read(); old.detail.general.rowCap = 999; fs.writeFileSync(file, JSON.stringify(old));
+    const r = currentSpec("ai", old, paths);
+    assert.equal(r.regenerated, true);
+    assert.equal(r.spec.detail.general.rowCap, 200, "the build uses what this code generates");
+    assert.equal(read().detail.general.rowCap, 200, "and the spec files are rewritten to match");
+    // a spec that no longer matches the decisions is left for the caller's stale check
+    const stale = { ...read(), inputs: { ...read().inputs, decisions: "x" } };
+    assert.equal(currentSpec("ai", stale, paths).spec, stale);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

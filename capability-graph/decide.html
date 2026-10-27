@@ -206,6 +206,16 @@ const PHASE2_CLOSED = "Phase 2 opens after the Phase 1 build — press 🔨 Buil
 const API_OUT_OF_DATE = "the API layer changed since it was built — press 🔨 Build on the API tab to rebuild Phase 1 first";
 // Banner / opening message when the API layer is built but its spec changed.
 const API_OOD_NOTICE = "**⚠ The API layer changed since it was built.** Press 🔨 Build on the API tab to rebuild Phase 1 — the production and AI builds stay disabled until then.";
+// The server keeps the code it started with; once the code on disk changes it writes specs with older code.
+const CODE_CHANGED_NOTICE = "The workbench code changed since the server started — restart the workbench server (npm start in agent/) so the specs and the chat use the current code.";
+// The warnings above the spec: an old or stale server, an out-of-date API layer, a notice, a generation failure.
+function specBanners(specs, aiStatusIsJson){
+  return (serverLooksOld(specs, aiStatusIsJson) ? `<div class="specerr">⚠ ${esc(OLD_SERVER_NOTICE)}</div>` : "")
+    + (specs.codeChanged ? `<div class="specerr">⚠ ${esc(CODE_CHANGED_NOTICE)}</div>` : "")
+    + (specs.stage && specs.stage.apiOutOfDate ? `<div class="specerr">${esc(API_OOD_NOTICE.replace(/\*\*/g,""))}</div>` : "")
+    + (specs.notice ? `<div class="specerr">⚠ ${esc(specs.notice)}</div>` : "")
+    + (specs.error ? `<div class="specerr">⚠ Spec generation failed — showing the last good version. ${esc(specs.error)}</div>` : "");
+}
 function serverLooksOld(specs, aiStatusIsJson){
   if(aiStatusIsJson===false) return true;
   if(!specs||!specs.layers) return false;            // unreachable or failed: shown by its own message
@@ -306,10 +316,7 @@ function renderRight(){
   }
   const doc=document.getElementById("doc");
   if(!SPECS||!SPECS.layers){ doc.innerHTML=`<div class="specerr">${esc((SPECS&&SPECS.error)||"Specs not available")}</div>`; return; }
-  const banner = (serverLooksOld(SPECS, AI_STATUS_JSON) ? `<div class="specerr">⚠ ${esc(OLD_SERVER_NOTICE)}</div>` : "")
-    + (SPECS.stage && SPECS.stage.apiOutOfDate ? `<div class="specerr">${esc(API_OOD_NOTICE.replace(/\*\*/g,""))}</div>` : "")
-    + (SPECS.notice ? `<div class="specerr">⚠ ${esc(SPECS.notice)}</div>` : "")
-    + (SPECS.error ? `<div class="specerr">⚠ Spec generation failed — showing the last good version. ${esc(SPECS.error)}</div>` : "");
+  const banner = specBanners(SPECS, AI_STATUS_JSON);
   doc.innerHTML = banner + mdToHtml(SPECS.layers[TAB].md);
   updateProg(); updateAgenda();
 }

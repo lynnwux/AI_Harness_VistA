@@ -178,6 +178,22 @@ const TEMPLATES = [
         "WHERE " + wheres.join("\n  AND "),
       ].join("\n");
     },
+    // The build's independent check: read every record's raw value, contract and status — no comparison in VistA —
+    // and apply the same filters here, one row at a time. Running the question's own SQL on both sides would agree
+    // even when that SQL compares wrongly.
+    reference(params, inventory) {
+      const threshold = Number(params.threshold);
+      const scYes = yesCode(inventory, "EQUIPMENT_INV_6914", "SERVICE_CONTRACT");
+      const statuses = !params.useStatuses || params.useStatuses[0] === "ALL" ? null : params.useStatuses.map(String);
+      const blank = v => v === null || v === undefined || String(v).trim() === "";
+      const amount = v => (blank(v) ? NaN : Number(String(v).replace(/,/g, "")));
+      return {
+        sql: `SELECT IEN, ${params.valueColumn} AS V, SERVICE_CONTRACT AS SC, USE_STATUS AS US FROM VISTA.EQUIPMENT_INV_6914`,
+        keep: r => amount(r.V) >= threshold
+          && (scYes ? blank(r.SC) || String(r.SC) !== scYes : blank(r.SC))
+          && (!statuses || statuses.includes(String(r.US))),
+      };
+    },
   },
 
   {

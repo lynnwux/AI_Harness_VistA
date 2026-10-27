@@ -308,3 +308,19 @@ test("the high-value threshold compares the value as a number — older 6914 rec
   assert.match(sql, /CAST\(TOTAL_ASSET_VALUE AS DECIMAL\(15,2\)\) >= 75000/);
   assert.doesNotMatch(sql, /\+0/);
 });
+
+test("the high-value question has a reference check: raw values, filtered one by one in JavaScript — never by SQL comparison", () => {
+  const t = tpl("AIQ.HighValueNoContract");
+  const ref = t.reference({ threshold: 50000, valueColumn: "TOTAL_ASSET_VALUE", useStatuses: ["1"] }, inv);
+  assert.doesNotMatch(ref.sql, /WHERE|[<>]=?|\+0|CAST/i, "the SQL only reads; nothing is compared in VistA");
+  assert.match(ref.sql, /SELECT IEN, TOTAL_ASSET_VALUE AS V, SERVICE_CONTRACT AS SC, USE_STATUS AS US FROM VISTA\.EQUIPMENT_INV_6914/);
+  const rows = [
+    { IEN: 1, V: "115748.20", SC: "N", US: "1" },   // text with cents, over the threshold
+    { IEN: 2, V: "695.00", SC: "", US: 1 },          // text that sorts above "50000"
+    { IEN: 3, V: 4200000, SC: "Y", US: "1" },        // under contract
+    { IEN: 4, V: 60000, SC: null, US: "2" },         // not in use
+    { IEN: 5, V: "", SC: "N", US: "1" },             // no value
+    { IEN: 6, V: 50000, SC: "N", US: "1" },          // exactly the threshold
+  ];
+  assert.deepEqual(rows.filter(ref.keep).map(r => r.IEN), [1, 6]);
+});

@@ -221,6 +221,9 @@ test("main() calls _buildChatApp with the spec's questions and ends Deployed —
         if (/^SELECT\s+COUNT\(\*\)\s+AS\s+n\s+FROM/i.test(sql)) {
           return { ok: true, json: () => Promise.resolve({ result: { content: [{ n: 295 }] }, status: { errors: [] } }) };
         }
+        if (/ AS V, SERVICE_CONTRACT AS SC, USE_STATUS AS US FROM /.test(sql)) {   // a reference check's raw read
+          return { ok: true, json: () => Promise.resolve({ result: { content: [{ IEN: "1", V: 9000000, SC: "N", US: "1" }, { IEN: "2", V: "9500000.00", SC: "", US: "1" }] }, status: { errors: [] } }) };
+        }
         return { ok: true, json: () => Promise.resolve({ result: { content: FAKE_ROWS }, status: { errors: [] } }) };
       }
       throw new Error("Unexpected URL in chat-app test fakeFetch: " + url);

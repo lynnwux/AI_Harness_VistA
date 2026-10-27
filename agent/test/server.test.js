@@ -1026,3 +1026,20 @@ test("a grounding retry never forces a tool (it is read-only)", async () => {
     assert.deepEqual(seen[1], { requireTool: false, readOnly: true });
   } finally { t.srv.close(); }
 });
+
+test("GET /api/specs says when the server's own code changed on disk since it started — the page then asks for a restart", async () => {
+  const codeDir = fs.mkdtempSync(path.join(os.tmpdir(), "code-"));
+  fs.mkdirSync(path.join(codeDir, "lib", "specs"), { recursive: true });
+  fs.writeFileSync(path.join(codeDir, "server.js"), "// a");
+  fs.writeFileSync(path.join(codeDir, "lib", "specs", "ai.js"), "// b");
+  const base = await setup();
+  base.srv.close();
+  const made = createApp({ paths: base.paths, runAgentImpl: async () => ({ reply: "ok", toolTrace: [] }), codeDir });
+  const srv = await new Promise(r => { const s = made.app.listen(0, "127.0.0.1", () => r(s)); });
+  const url = `http://127.0.0.1:${srv.address().port}/api/specs`;
+  try {
+    assert.equal((await (await fetch(url)).json()).codeChanged, false);
+    fs.writeFileSync(path.join(codeDir, "lib", "specs", "ai.js"), "// b, changed");   // a nested lib file
+    assert.equal((await (await fetch(url)).json()).codeChanged, true);
+  } finally { srv.close(); }
+});

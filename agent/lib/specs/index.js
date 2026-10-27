@@ -108,4 +108,19 @@ function loadInputs(paths = DEFAULT_PATHS, fallbackRecord) {
   };
 }
 
-module.exports = { DEFAULT_PATHS, LAYERS, canon, inputHashes, designHash, generate, render, writeSpecs, stage, loadInputs };
+// The spec a build should use. A spec whose inputs match the decisions but whose content differs from what this code
+// generates was written by a process running older code — a workbench server started before the code changed — so
+// it is regenerated here, and the spec files rewritten to match. A spec whose inputs no longer match is returned as
+// it is, for the caller's own stale check.
+function currentSpec(layer, spec, paths = DEFAULT_PATHS) {
+  const inputs = loadInputs(paths);
+  if (canon(spec.inputs) !== canon(inputHashes(layer, inputs))) return { spec, regenerated: false };
+  const specs = generate(inputs);
+  const fresh = JSON.parse(JSON.stringify(specs[layer]));
+  if (canon(fresh) === canon(spec)) return { spec, regenerated: false };
+  writeSpecs(paths.specsDir, specs, inputs);
+  return { spec: fresh, regenerated: true };
+}
+const REGENERATED_NOTE = layer => `the ${layer} spec on disk was written by older code (restart the workbench server: npm start in agent/) — regenerated it from the current code`;
+
+module.exports = { DEFAULT_PATHS, LAYERS, canon, inputHashes, designHash, generate, render, writeSpecs, stage, loadInputs, currentSpec, REGENERATED_NOTE };
