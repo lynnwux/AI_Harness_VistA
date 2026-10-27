@@ -327,3 +327,17 @@ test("the chat app has its own favicon, inline in index.html", () => {
   assert.ok(html.includes(FAVICON_LINK));
   assert.doesNotMatch(FAVICON_LINK, /href="[^"]*[#<>][^"]*"/);
 });
+
+test("chatAppFiles: every answer card plays back the question it answers — typed or quick — above the reply", () => {
+  const app = chatAppFiles({ questions: QUESTIONS })["src/app/app.ts"];
+  const card = app.slice(app.indexOf('class="answer-card"'), app.indexOf("</details>"));
+  assert.match(card, /\{\{ans\.question\}\}/, "the question is shown with a text binding");
+  assert.ok(card.indexOf("ans.question") < card.indexOf("ans.reply"), "the question comes before the reply");
+  assert.match(app, /askQuick\(q: any\)[\s\S]*?this\.ask\(q\.wording, q\.quickUrl/, "a quick question shows its wording");
+  assert.match(app, /askChat\(\)[\s\S]*?this\.ask\(msg, '\/ai\/chat'/, "a typed question shows what was typed");
+  // the card appears as soon as the question is asked, and the answer fills it in — keeping the question
+  assert.match(app, /const ans: any = \{ question, pending: true \};\s*this\.answers\.unshift\(ans\);/);
+  assert.match(card, /\*ngIf="ans\.pending"/);
+  assert.match(app, /Object\.assign\(ans, d, \{ question, pending: false \}\)/);
+  assert.match(app, /\.catch\([\s\S]*?Object\.assign\(ans, \{ reply: '', error:[\s\S]*?pending: false \}\)/, "a failed request ends the wait too");
+});

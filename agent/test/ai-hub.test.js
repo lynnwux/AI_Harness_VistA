@@ -231,7 +231,7 @@ test("GUARD_CASES is a regression suite covering every bypass class, with allowe
   assert.equal(new Set(GUARD_CASES.map(c => c.sql)).size, GUARD_CASES.length, "no duplicate cases");
   const kinds = ["charset", "number-run", "name-boundary", "plain", "case", "statement", "forbidden-word", "into", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "schema-less", "quoted", "dots", "implicit-join", "function", "cte"];
   for (const k of kinds) assert.ok(GUARD_CASES.some(c => c.kind === k), `kind ${k}`);
-  for (const k of ["charset", "number-run", "name-boundary", "plain", "case", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "function", "personal-data"]) {
+  for (const k of ["charset", "number-run", "name-boundary", "plain", "case", "comment", "string-literal", "comma-list", "join", "subquery-from", "subquery-where", "subquery-select", "union", "function", "personal-data", "amount"]) {
     assert.ok(GUARD_CASES.some(c => c.kind === k && c.allowed) && GUARD_CASES.some(c => c.kind === k && !c.allowed), `kind ${k} has both allowed and rejected cases`);
   }
   const has = (re, allowed = false) => assert.ok(GUARD_CASES.some(c => re.test(c.sql) && c.allowed === allowed), String(re));
@@ -404,9 +404,30 @@ test("every turn starts a session with the reply cap and imports the stored conv
   assert.match(keep, /Export\(\)/);
 });
 
-test("the agent's rules make every numeric sort, compare and aggregate numeric with column+0", () => {
+test("the agent's rules make every amount sort, compare, MIN and MAX numeric with CAST — +0 is not enough", () => {
   const t = byName(classes())["EquipmentAI.Agent"];
-  assert.match(t, /ORDER BY TOTAL_ASSET_VALUE\+0 DESC/);
-  assert.match(t, /MAX\(TOTAL_ASSET_VALUE\+0\)/);
-  assert.match(t, /695\.00/);
+  assert.match(t, /ORDER BY CAST\(TOTAL_ASSET_VALUE AS DECIMAL\(15,2\)\) DESC/);
+  assert.match(t, /MAX\(CAST\(TOTAL_ASSET_VALUE AS DECIMAL\(15,2\)\)\)/);
+  assert.match(t, /WHERE CAST\(TOTAL_ASSET_VALUE AS DECIMAL\(15,2\)\) >= 1000000/);
+  assert.match(t, /115748\.20/);
+  assert.doesNotMatch(t, /ORDER BY TOTAL_ASSET_VALUE\+0/);
+  assert.match(t, /When `truncated` is false the rows are the whole answer/, "a full result is never called truncated");
+});
+
+test("the guard rejects an amount compared, sorted or taken MIN/MAX of without CAST — the amount columns come from the inventory", () => {
+  const g = byName(classes())["EquipmentAI.Guard"];
+  const amounts = ((g.match(/Parameter AMOUNTS = "([^"]*)"/) || [])[1] || "").split(",");
+  for (const c of ["TOTAL_ASSET_VALUE", "ORIGINAL_ASSET_VALUE", "SERVICE_CONTRACT_COST", "LEASE_COST"]) assert.ok(amounts.includes(c), c);
+  assert.ok(!amounts.some(c => /ENTRY_NUMBER/.test(c)), "entry numbers are whole numbers, compared as they are");
+  for (const c of ["CRITICALITY", "LIFE_EXPECTANCY", "HOURS_SPENT", "BEDS"]) assert.ok(!amounts.includes(c), `${c} is not money`);
+  assert.match(g, /Quit \.\.Amounts\(\.tTok, tN\)/, "Check ends with the amount rule");
+  const is = (sql, allowed) => assert.ok(GUARD_CASES.some(c => c.kind === "amount" && c.sql.includes(sql) && c.allowed === allowed), sql);
+  is("WHERE TOTAL_ASSET_VALUE >= 1000000", false);
+  is("WHERE TOTAL_ASSET_VALUE+0 >= 1000000", false);
+  is("WHERE CAST(TOTAL_ASSET_VALUE AS DECIMAL(15,2)) >= 1000000", true);
+  is("MAX(TOTAL_ASSET_VALUE)", false);
+  is("ORDER BY TOTAL_ASSET_VALUE+0 DESC", false);
+  is("ORDER BY v DESC", false);   // the alias of a bare amount column
+  is("SUM(TOTAL_ASSET_VALUE)", true);
+  is("TOTAL_ASSET_VALUE IS NULL", true);
 });

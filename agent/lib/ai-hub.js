@@ -142,7 +142,17 @@ ClassMethod Query(sql As %String) As %DynamicArray
 `);
 }
 
-function guard(allowList, rowCap) {
+// The amount (money) columns of the allow-listed tables: NUMERIC columns named for a cost, value or price, or whose
+// data-dictionary meaning is a cost, a monetary value or an amount paid. Older records keep amounts as text with
+// cents (115748.20), which VistA compares and sorts as text. Counts, scores, years and entry numbers are left alone.
+const isAmount = c => /NUMERIC/i.test(c.type) && !/ENTRY_NUMBER/.test(c.column) && (/COST|VALUE|PRICE/i.test(c.column) || /\bcost\b|monetary|amount paid/i.test(c.meaning || ""));
+function amountColumns(inventory) {
+  const tables = (inventory.allowList || []).map(t => t.replace(/^VISTA\./, ""));
+  const cols = tables.flatMap(t => ((inventory.tables[t] || {}).columns || []).filter(isAmount).map(c => c.column));
+  return [...new Set(cols)].filter(c => /^[A-Za-z][A-Za-z0-9_]*$/.test(c)).sort();
+}
+
+function guard(allowList, rowCap, amounts = []) {
   if (allowList.some(t => !/^VISTA\.[A-Z0-9_]+$/.test(t))) throw new Error("the inventory allow-list must hold schema-qualified VISTA table names");
   return cls(`${PKG}.Guard`, `/// The read-only guard for the general question path (RunQuery): one SELECT over allow-listed tables only.
 /// The text it checks — comments removed — is the text that runs (see Cap), so a comment can never hide anything.
@@ -169,6 +179,9 @@ Parameter FUNCTIONS = ${os(FUNCTIONS.join(","))};
 
 /// SQL words that may stand before "(" without being a function call.
 Parameter BEFOREPAREN = ${os(BEFORE_PAREN.join(","))};
+
+/// The amount columns (NUMERIC, entry numbers aside): compared, sorted and taken MIN/MAX of only through CAST (see Amounts).
+Parameter AMOUNTS = ${os(amounts.map(c => c.toUpperCase()).join(","))};
 
 /// "" when sql is a single read-only SELECT over allow-listed tables; otherwise the reason it is rejected.
 ClassMethod Check(sql As %String) As %String
@@ -221,6 +234,50 @@ ClassMethod Check(sql As %String) As %String
         }
         If (t = "JOIN") && (tNext '= "(") && '$listfind(tAllow, tNext) {
             Set tWhy = ..NotTable(tNext)
+            Quit
+        }
+    }
+    Quit:tWhy'="" tWhy
+    Quit ..Amounts(.tTok, tN)
+}
+
+/// "" unless the query compares, sorts or takes MIN/MAX of an amount column without CAST(column AS DECIMAL(15,2)).
+/// Older records keep amounts as text (115748.20) and VistA compares and sorts those as text, so a bare column
+/// counts 115748.20 as at least 1000000 — and column+0 does not change that. Rejected: an amount column in WHERE,
+/// HAVING, ON or ORDER BY, beside a comparison, or inside MIN( or MAX(, unless it is the argument of
+/// CAST(... AS <a number type>); the alias given to a bare amount column in the select list counts as the column.
+/// Allowed as it is: the select list, GROUP BY, SUM, AVG, COUNT and IS [NOT] NULL.
+ClassMethod Amounts(ByRef pTok, pN As %Integer) As %String
+{
+    Set tCols = $listfromstring(..#AMOUNTS), tWhy = "", tClause = "", tDepth = 0
+    Set tCasts = $listfromstring("DECIMAL,NUMERIC,INTEGER,INT,DOUBLE,FLOAT,MONEY")
+    Set tClauses = $listfromstring("SELECT,FROM,WHERE,GROUP,HAVING,ORDER,ON"), tStrict = $listfromstring("WHERE,HAVING,ORDER,ON")
+    Set tOps = $listfromstring("=,<,>,!,BETWEEN,IN,LIKE,NOT"), tMinMax = $listfromstring("MIN,MAX")
+    For i=1:1:pN {
+        Set t = pTok(i)
+        If t = "(" {
+            Set tStack(tDepth) = tClause, tDepth = tDepth + 1
+            Continue
+        }
+        If t = ")" {
+            Set:tDepth>0 tDepth = tDepth - 1
+            Set tClause = $get(tStack(tDepth))
+            Continue
+        }
+        If $listfind(tClauses, t) {
+            Set tClause = t
+            Continue
+        }
+        Set tCol = $select($data(tAlias(t)): tAlias(t), 1: $piece(t, ".", $length(t, ".")))
+        Continue:'$listfind(tCols, tCol)
+        Set tPrev = $get(pTok(i - 1)), tPrev2 = $get(pTok(i - 2)), tNext = $get(pTok(i + 1)), tNext2 = $get(pTok(i + 2))
+        Continue:(tPrev = "(") && (tPrev2 = "CAST") && (tNext = "AS") && $listfind(tCasts, tNext2)
+        Continue:tNext = "IS"
+        If (tClause = "SELECT") && '$data(tAlias(t)) && (tNext = "AS") && ..IsName($extract(tNext2)) && '$listfind(tOps, tPrev) {
+            Set tAlias(tNext2) = tCol
+        }
+        If $listfind(tStrict, tClause) || $listfind(tOps, tPrev) || $listfind(tOps, tNext) || ((tPrev = "(") && $listfind(tMinMax, tPrev2)) {
+            Set tWhy = "compare, sort and take MIN or MAX of the amount column "_tCol_" as CAST("_tCol_" AS DECIMAL(15,2))"_$select($data(tAlias(t)): " (not by its alias "_t_")", 1: "")_": older records keep amounts as text such as 115748.20, which VistA compares as text — "_tCol_"+0 does not fix that"
             Quit
         }
     }
@@ -641,7 +698,7 @@ You answer questions about the equipment inventory in VistA: FileMan file 6914 (
 2. Call a quick-access tool only when the question asks exactly that quick-access question. Each one has the developer's decided filters built in (listed in its description), so never use one to answer a broader or different question — a plain "how many pieces of equipment do we have?" is a count of all of file 6914, not of one use status. For any other question, write one read-only SELECT with only the filters the question asks for and call \`RunQuery\`; if you add a filter the question did not ask for, say which filter in your answer.
 3. When a tool returns an error: if it says \"rejected by the read-only guard\" or \"VistA rejected the query\", the query itself was wrong — correct the SQL and call \`RunQuery\` again (twice at most). Any other error means VistA could not be reached: say so plainly and stop — do not retry and do not answer another way.
 4. Show names, not pointer entry numbers: select a pointer's name column — ${names.join(", ")} and the others the schema guide names ("use … for the name"). For a coded column, show the code's meaning from the guide.
-5. A result holds at most ${rowCap} rows. When \`truncated\` is true, say that only the first ${rowCap} rows are shown and the full list is longer — never present it as complete. Count and total with COUNT(*) and SUM(column) in SQL, not by counting rows. Numeric columns can hold values stored as text (older records keep amounts like 695.00), and text sorts above every number: whenever you ORDER BY, compare, or take MAX, MIN, AVG or SUM of a numeric column, write it as column+0 — e.g. ORDER BY TOTAL_ASSET_VALUE+0 DESC, MAX(TOTAL_ASSET_VALUE+0), WHERE TOTAL_ASSET_VALUE+0 >= 50000.
+5. A result holds at most ${rowCap} rows. When \`truncated\` is true, say that only the first ${rowCap} rows are shown and the full list is longer — never present it as complete. When \`truncated\` is false the rows are the whole answer: never call them truncated, partial or "the first" of more, and never state a larger total. Count and total with COUNT(*) and SUM(column) in SQL, not by counting rows — and state a count only from a COUNT(*) you ran or the rows you got. Amount columns (${amountColumns(inventory).join(", ")}) can hold values stored as text — older records keep amounts like 115748.20 — and VistA compares and sorts those as text, so 115748.20 counts as "at least 1000000"; column+0 is not enough. Whenever you compare, ORDER BY, or take MIN or MAX of an amount column, write it as CAST(column AS DECIMAL(15,2)) — e.g. WHERE CAST(TOTAL_ASSET_VALUE AS DECIMAL(15,2)) >= 1000000, ORDER BY CAST(TOTAL_ASSET_VALUE AS DECIMAL(15,2)) DESC, MAX(CAST(TOTAL_ASSET_VALUE AS DECIMAL(15,2))); sorting by the column's alias does not count. The guard rejects a query that does not.
 6. You are read-only: you never change VistA. \`RunQuery\` takes one SELECT statement (no semicolon) over the allow-listed tables of the schema guide, written schema-qualified (e.g. VISTA.EQUIPMENT_INV_6914); anything else is rejected. Write FROM only before table names (no TRIM(x FROM y) or EXTRACT(x FROM y)), join tables explicitly (no ->), use plain unquoted names, write the query in plain ASCII (outside string literals only letters, digits, spaces and _ % $ . , ( ) * + - / = < > ' | and != ), and call only these functions: ${FUNCTIONS.join(", ")}.
 7. Dates are stored as FileMan dates (YYYMMDD, where YYY is the year minus 1700, e.g. 3301015 is 2030-10-15): compare them as CAST(column AS INTEGER) against (year - 1700) * 10000 + month * 100 + day. When you mention a date, write it as YYYY-MM-DD (year = YYY + 1700) — never show the raw FileMan number. The federal fiscal year N runs from October 1 of N - 1 through September 30 of N.
 8. Be brief and write plain text — no markdown (no tables, headings or bullet markup). Lead with the count or total, then a short summary of what the rows show. The app shows the rows as a table below your reply: do not repeat them.
@@ -923,7 +980,7 @@ function aiClasses({ ai, inventory, model }) {
   const d = (ai && ai.detail) || ai;
   if (!d || !Array.isArray(d.questions) || d.questions.some(q => !q.sql)) throw new Error("the AI layer spec is not complete — a kept question has no SQL");
   const rowCap = Number(d.general && d.general.rowCap) || 200;
-  return [config(), vademo(), guard(inventory.allowList, rowCap), tools(d.questions, rowCap, inventory), agent(model, d.questions, inventory, rowCap), chat(d.questions), dispatch()];
+  return [config(), vademo(), guard(inventory.allowList, rowCap, amountColumns(inventory)), tools(d.questions, rowCap, inventory), agent(model, d.questions, inventory, rowCap), chat(d.questions), dispatch()];
 }
 
 // The guard's regression suite: every case must come back from EquipmentAI.Guard.Check (POST /guard) as `allowed`.
@@ -935,7 +992,7 @@ const GUARD_CASES = [
   { kind: "plain", allowed: true, sql: `SELECT COUNT(*) AS n FROM ${E}` },
   { kind: "plain", allowed: true, sql: "SELECT 1" },
   { kind: "plain", allowed: true, sql: `SELECT TOP 5 IEN FROM ${E}\nORDER BY IEN DESC` },
-  { kind: "plain", allowed: true, sql: `SELECT TOP 5 ENTRY_NUMBER, TOTAL_ASSET_VALUE FROM ${E} ORDER BY TOTAL_ASSET_VALUE+0 DESC` },   // numeric sort over text-stored amounts
+  { kind: "plain", allowed: true, sql: `SELECT TOP 5 ENTRY_NUMBER, TOTAL_ASSET_VALUE FROM ${E} ORDER BY CAST(TOTAL_ASSET_VALUE AS DECIMAL(15,2)) DESC` },   // numeric sort over text-stored amounts
   { kind: "plain", allowed: true, sql: `SELECT IEN FROM ${E}\tWHERE\tIEN=1` },
   { kind: "plain", allowed: true, sql: `SELECT IEN FROM ${E} WHERE IEN > .5 AND IEN < 5.` },
   { kind: "plain", allowed: true, sql: `SELECT SERVICE_POINTER_NAME, COUNT(*) FROM ${E} GROUP BY SERVICE_POINTER_NAME, USE_STATUS ORDER BY 2 DESC` },
@@ -1048,8 +1105,8 @@ const GUARD_CASES = [
   { kind: "number-run", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN = 1.5.3` },
   { kind: "number-run", allowed: false, sql: `SELECT IEN FROM ${E} WHERE IEN = 1ENAME` },
   { kind: "number-run", allowed: false, sql: "SELECT e.1FROM VISTA.NEW_PERSON200" },
-  { kind: "number-run", allowed: true, sql: `SELECT IEN FROM ${E} WHERE TOTAL_ASSET_VALUE > 1.5E3` },
-  { kind: "number-run", allowed: true, sql: `SELECT IEN FROM ${E} WHERE TOTAL_ASSET_VALUE > 1e+3 AND TOTAL_ASSET_VALUE < .5E7 AND IEN <> 0` },
+  { kind: "number-run", allowed: true, sql: `SELECT IEN FROM ${E} WHERE IEN > 1.5E3` },
+  { kind: "number-run", allowed: true, sql: `SELECT IEN FROM ${E} WHERE IEN > 1e+3 AND ENTRY_NUMBER < .5E7 AND IEN <> 0` },
   // name boundaries: IRIS starts a new token at a mid-name %; odd name starts
   { kind: "name-boundary", allowed: false, sql: "SELECT * FROM%Dictionary.ClassDefinition" },
   { kind: "name-boundary", allowed: false, sql: `SELECT IEN FROM ${E} e JOIN%Dictionary.ClassDefinition c ON 1=1` },
@@ -1090,6 +1147,23 @@ const GUARD_CASES = [
   // CTEs
   { kind: "cte", allowed: false, sql: `WITH x AS (SELECT 1 FROM ${E}) SELECT * FROM x` },
   { kind: "cte", allowed: false, sql: `WITH x AS (SELECT IEN FROM ${E}) SELECT IEN FROM ${E}` },
+  // amounts: older records keep them as text (115748.20), which VistA compares as text — only CAST compares numbers
+  { kind: "amount", allowed: false, sql: `SELECT ENTRY_NUMBER FROM ${E} WHERE TOTAL_ASSET_VALUE >= 1000000` },
+  { kind: "amount", allowed: false, sql: `SELECT ENTRY_NUMBER FROM ${E} WHERE TOTAL_ASSET_VALUE+0 >= 1000000` },
+  { kind: "amount", allowed: false, sql: `SELECT ENTRY_NUMBER FROM ${E} e WHERE e.TOTAL_ASSET_VALUE BETWEEN 1 AND 5` },
+  { kind: "amount", allowed: false, sql: `SELECT ENTRY_NUMBER FROM ${E} WHERE 50000 < SERVICE_CONTRACT_COST` },
+  { kind: "amount", allowed: false, sql: `SELECT MAX(TOTAL_ASSET_VALUE) FROM ${E}` },
+  { kind: "amount", allowed: false, sql: `SELECT TOP 5 ENTRY_NUMBER, TOTAL_ASSET_VALUE FROM ${E} ORDER BY TOTAL_ASSET_VALUE+0 DESC` },
+  { kind: "amount", allowed: false, sql: `SELECT TOP 5 ENTRY_NUMBER, TOTAL_ASSET_VALUE AS v FROM ${E} ORDER BY v DESC` },
+  { kind: "amount", allowed: false, sql: `SELECT ENTRY_NUMBER, CASE WHEN LEASE_COST > 100 THEN 'HIGH' ELSE 'LOW' END AS c FROM ${E}` },
+  { kind: "amount", allowed: false, sql: `SELECT EQUIPMENT_CATEGORY_NAME FROM ${E} GROUP BY EQUIPMENT_CATEGORY_NAME HAVING SUM(TOTAL_ASSET_VALUE) > 1000000` },
+  { kind: "amount", allowed: false, sql: `SELECT ENTRY_NUMBER FROM ${E} WHERE IEN IN (SELECT IEN FROM ${E}) AND TOTAL_ASSET_VALUE > 5` },
+  { kind: "amount", allowed: true, sql: `SELECT ENTRY_NUMBER, TOTAL_ASSET_VALUE FROM ${E} WHERE CAST(TOTAL_ASSET_VALUE AS DECIMAL(15,2)) >= 1000000` },
+  { kind: "amount", allowed: true, sql: `SELECT TOP 3 e.ENTRY_NUMBER FROM ${E} e ORDER BY CAST(e.SERVICE_CONTRACT_COST AS DECIMAL(15,2)) DESC` },
+  { kind: "amount", allowed: true, sql: `SELECT MAX(CAST(e.TOTAL_ASSET_VALUE AS DECIMAL(15,2))), SUM(TOTAL_ASSET_VALUE), AVG(LEASE_COST) FROM ${E} e` },
+  { kind: "amount", allowed: true, sql: `SELECT COUNT(*) FROM ${E} WHERE TOTAL_ASSET_VALUE IS NULL OR CAST(TOTAL_ASSET_VALUE AS DECIMAL(15,2)) BETWEEN 1 AND 5` },
+  { kind: "amount", allowed: true, sql: `SELECT TOTAL_ASSET_VALUE, COUNT(*) FROM ${E} GROUP BY TOTAL_ASSET_VALUE` },
+  { kind: "amount", allowed: true, sql: `SELECT ENTRY_NUMBER, TOTAL_ASSET_VALUE AS v FROM ${E} WHERE ENTRY_NUMBER > 400 ORDER BY ENTRY_NUMBER` },
 ];
 
 module.exports = { PKG, WEB_APP, CREDENTIALS, CONFIG_KEYS, TOKEN_EXPIRED, GUARD_CASES, CHARSET, aiClasses, agingSqlTemplate, fillFiscalYear };

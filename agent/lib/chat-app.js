@@ -21,6 +21,9 @@ const VA_CSS = `
 button{font:inherit;font-weight:700;padding:10px 20px;border-radius:5px;border:2px solid var(--accent);background:#fff;color:var(--accent);cursor:pointer}
 button.primary{background:var(--accent);color:#fff}button:disabled{opacity:.5;cursor:default}
 .answer-card{background:var(--card);border:1px solid var(--line);border-top:4px solid var(--navy);border-radius:4px;padding:18px 20px;margin-bottom:14px}
+.q-asked{font-weight:700;color:var(--navy);margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--line);white-space:pre-line}
+.q-label{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-bottom:2px}
+.pending{margin:0 0 10px;color:var(--dim);font-style:italic}
 .reply-text{margin:0 0 10px;line-height:1.6;white-space:pre-line}
 .err-notice{background:#fdeaee;color:var(--err);border:1px solid #f5c6cb;border-radius:4px;padding:9px 12px;margin-bottom:10px;font-size:14px}
 .trunc-note{background:#eaf1fc;color:var(--accent);border:1px solid #b8d4f0;border-radius:4px;padding:8px 12px;margin-bottom:10px;font-size:13px}
@@ -60,6 +63,8 @@ const ROW_CAP: number = /*__ROW_CAP__*/;
       <button class="primary" (click)="askChat()" [disabled]="busy || !chatMsg.trim()">Send</button>
     </div>
     <div *ngFor="let ans of answers" class="answer-card">
+      <div class="q-asked" *ngIf="ans.question"><span class="q-label">Question</span>{{ans.question}}</div>
+      <p class="pending" *ngIf="ans.pending">Looking it up in VistA…</p>
       <p class="reply-text" *ngIf="ans.reply">{{ans.reply}}</p>
       <div class="err-notice" *ngIf="ans.error">{{ans.error}}</div>
       <p class="trunc-note" *ngIf="ans.truncated">
@@ -84,31 +89,30 @@ export class App {
   busy:      boolean = false;
   answers:   any[]  = [];
 
-  askQuick(q: any): void {
+  // The card shows the question at once, so the user can judge the answer against it; the answer fills it in.
+  ask(question: string, url: string, body: any): void {
+    const ans: any = { question, pending: true };
+    this.answers.unshift(ans);
     this.busy = true;
-    fetch(q.quickUrl, {
+    fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: this.sessionId }),
+      body: JSON.stringify(body),
     })
       .then(r => r.json())
-      .then((d: any) => { this.answers.unshift(d); this.busy = false; })
-      .catch((e: any) => { this.answers.unshift({ reply: '', error: String(e?.message ?? e) }); this.busy = false; });
+      .then((d: any) => { Object.assign(ans, d, { question, pending: false }); this.busy = false; })
+      .catch((e: any) => { Object.assign(ans, { reply: '', error: String(e?.message ?? e), pending: false }); this.busy = false; });
+  }
+
+  askQuick(q: any): void {
+    this.ask(q.wording, q.quickUrl, { sessionId: this.sessionId });
   }
 
   askChat(): void {
     const msg = this.chatMsg.trim();
     if (!msg) return;
     this.chatMsg = '';
-    this.busy = true;
-    fetch('/ai/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: this.sessionId, message: msg }),
-    })
-      .then(r => r.json())
-      .then((d: any) => { this.answers.unshift(d); this.busy = false; })
-      .catch((e: any) => { this.answers.unshift({ reply: '', error: String(e?.message ?? e) }); this.busy = false; });
+    this.ask(msg, '/ai/chat', { sessionId: this.sessionId, message: msg });
   }
 }
 `;

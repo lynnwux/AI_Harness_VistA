@@ -167,7 +167,8 @@ const TEMPLATES = [
         ? `(SERVICE_CONTRACT != ${qsql(scYes)} OR SERVICE_CONTRACT IS NULL)`
         : "SERVICE_CONTRACT IS NULL";
       const statusCond = useStatusClause(params.useStatuses);
-      const wheres = [`${valueCol}+0 >= ${threshold}`, noContract];   // +0: older records store the value as text (695.00)
+      // older records store the value as text (115748.20), which VistA compares as text — +0 does not change that, CAST does
+      const wheres = [`CAST(${valueCol} AS DECIMAL(15,2)) >= ${threshold}`, noContract];
       if (statusCond) wheres.push(statusCond);
       return [
         `SELECT IEN, MFGR__EQUIPMENT_NAME, EQUIPMENT_CATEGORY_NAME, SERVICE_POINTER_NAME, LOCATION_ROOM_NUMBER, ${valueCol},`,
