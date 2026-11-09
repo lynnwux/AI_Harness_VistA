@@ -1,0 +1,19 @@
+{
+ "pid": 15424,
+ "namespace": "VISTA-DIEGO",
+ "user": "_SYSTEM",
+ "device": "|TRM|:|15424",
+ "routine": "shell",
+ "jobType": 1,
+ "state": "READ",
+ "ok": 1,
+ "startedAtUTC": "2026-11-09 15:24:43.409Z",
+ "status": "OK",
+ "file": "C:\\InterSystems\\IRISHealth\\mgr\\Temp\\harness-runtime-trace\\iristrace_15424.txt",
+ "events": [
+  "RtnLoad",
+  "GloRef"
+ ],
+ "maxMB": 50,
+ "controllerJob": "14284"
+}

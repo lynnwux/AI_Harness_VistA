@@ -26,6 +26,20 @@ test("one-way rule: no orchestrator-layer decision changes the API spec or its m
   }
 });
 
+test("discovery candidates are not spec inputs: adding one leaves every spec, hash and the API design hash unchanged", () => {
+  const withCandidates = JSON.parse(JSON.stringify(graph));
+  withCandidates.capabilities[0].discoveryCandidates = [{ id: "DC.Test", status: "candidate", finding: "x" }];
+  const a = inputs(rec()), b = { ...a, graph: withCandidates };
+  const sa = generate(a), sb = generate(b);
+  for (const l of ["api", "orchestrator", "ai"]) {
+    assert.deepEqual(inputHashes(l, b), inputHashes(l, a), l);
+    assert.equal(JSON.stringify(sb[l]), JSON.stringify(sa[l]), l);
+  }
+  assert.equal(designHash(sb.api), designHash(sa.api));
+  assert.equal(render("api", sb.api, b), render("api", sa.api, a));
+  assert.equal(render("orchestrator", sb.orchestrator, b), render("orchestrator", sa.orchestrator, a));
+});
+
 test("a Phase 1 decision does change the API spec", () => {
   assert.notEqual(JSON.stringify(generate(inputs(rec({ dec: { "FLD.serial": "Omit" } }))).api), JSON.stringify(generate(inputs(rec())).api));
 });

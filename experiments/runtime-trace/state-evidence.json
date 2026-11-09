@@ -1,0 +1,52 @@
+{
+  "evidenceType": "state",
+  "readAt": "2026-11-09T15:44Z",
+  "method": "Atelier SQL on VISTA.EQUIPMENT_INV_6914 / WORK_ORDER_6920 / TASKS14_4, and $Data on named nodes (no values) via the probe; raw answers in raw/state-*.json",
+  "records": [
+    {
+      "scenario": "NewInventoryEntry-runtime-001",
+      "ien": 487,
+      "exists": true,
+      "serial": "10100",
+      "serialCanonical": "10100 ",
+      "totalAssetValue": 50001,
+      "functionalClass": "PC",
+      "enteredBy": "1 (BLACK,JOHN)",
+      "dateEntered": "3261109 (2026-11-09)",
+      "nodes": ["0", "1", "2", "9"],
+      "crossReferences": {
+        "^ENG(6914,\"B\",487,487)": 1,
+        "^ENG(6914,\"F\",10100,487)": 1,
+        "^ENG(6914,\"FC\",\"10100 \",487)": 1
+      },
+      "sideEffects": {
+        "incomingInspectionWorkOrder": { "answer": "YES", "observed": "WORK_ORDER_6920 IEN 5438, RA261109-001, EQUIPMENT_ID 487, SERIAL 10100, requested 3261109.1031; ^ENG(6920,5438,0) defined" },
+        "newEquipmentBulletin": { "observed": "TaskMan task 6002674 TASK^XMXBULL 'MailMan: Bulletin EN NEW EQUIPMENT', option ENINVNEW, created $H 67883,38010 (10:33:30 local), status 1, Job 0 — queued, not run" },
+        "pmSchedule": { "observed": "no PM prompt reported by the user; not checked further" },
+        "faDocument": { "observed": "no FA prompt reported; the record is not NX/capitalized as entered" }
+      }
+    },
+    {
+      "scenario": "NewInventoryEntry-runtime-002",
+      "ien": 488,
+      "exists": true,
+      "serial": "10101",
+      "serialCanonical": "10101 ",
+      "totalAssetValue": "not stored (node 2 absent; SQL shows 0)",
+      "functionalClass": "PC",
+      "enteredBy": "1 (BLACK,JOHN)",
+      "dateEntered": "3261109 (2026-11-09)",
+      "nodes": ["0", "1", "9"],
+      "crossReferences": {
+        "^ENG(6914,\"B\",488,488)": 1,
+        "^ENG(6914,\"F\",10101,488)": 1,
+        "^ENG(6914,\"FC\",\"10101 \",488)": 1
+      },
+      "sideEffects": {
+        "incomingInspectionWorkOrder": { "answer": "NO", "observed": "no WORK_ORDER_6920 row with EQUIPMENT_ID 488 or SERIAL 10101 — declined side effect did not occur" },
+        "newEquipmentBulletin": { "observed": "TaskMan task 6002675 TASK^XMXBULL 'MailMan: Bulletin EN NEW EQUIPMENT', option ENINVNEW, created $H 67883,38417 (10:40:17 local), status 1, Job 0 — queued, not run" }
+      }
+    }
+  ],
+  "taskman": "Every task from 6002660 (created $H 67834) on is status 1 with Job 0, so TaskMan does not appear to be processing queued tasks on VADEMO; the bulletins were queued but not delivered."
+}

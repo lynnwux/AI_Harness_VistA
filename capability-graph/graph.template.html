@@ -55,6 +55,8 @@
   .node.group text.lbl{fill:var(--dim);font-weight:700;text-transform:uppercase;letter-spacing:.5px;font-size:10px}
   .node.question rect.box{fill:#2a1713;stroke:var(--question)}
   .node.question text.lbl{fill:#ffb3aa}
+  .node.candidate rect.box{stroke-dasharray:4 3;stroke:#4a5868}
+  .node.candidate:hover rect.box,.node.candidate.sel rect.box{stroke:#3d9cf5}
 
   /* detail panel */
   #detail{width:320px;flex:0 0 auto;border-left:1px solid var(--edge);background:var(--panel);
@@ -72,6 +74,12 @@
   .conf{font-family:var(--mono);font-size:12px;color:var(--dim);margin-left:6px}
   .cond{color:var(--inferred);font-size:11.5px}
   .empty{color:var(--faint);font-style:italic;margin-top:40px;text-align:center}
+  .chip{display:inline-block;font-size:10.5px;border:1px solid var(--edge);border-radius:10px;padding:1px 8px;
+    margin:0 4px 4px 0;color:var(--ink);background:var(--panel2)}
+  .cand{border:1px dashed #4a5868;border-radius:7px;padding:8px 11px;color:var(--dim);font-size:11.5px}
+  #detail a.goto{color:#9ecbff;font-family:var(--mono);font-size:11.5px;cursor:pointer;text-decoration:none;display:block;margin-bottom:3px}
+  #detail a.goto:hover{text-decoration:underline}
+  #detail .ev li{font-family:var(--mono);font-style:normal;font-size:10.5px;word-break:break-word}
 
   /* ---- print / PDF: light theme, whole graph fit to page ---- */
   @media print{
@@ -103,6 +111,7 @@
     <span><i class="d" style="background:var(--derived)"></i>derived</span>
     <span><i class="d" style="background:var(--inferred)"></i>AI-inferred</span>
     <span><i class="d" style="background:var(--question)"></i>needs confirmation</span>
+    <span><i class="d" style="border:1.5px dashed #8b98a5;background:none"></i>discovery candidate</span>
   </div>
   <button class="btn" id="expandBtn">Expand all</button>
   <button class="btn" id="collapseBtn">Collapse hubs</button>
@@ -164,9 +173,13 @@ function buildTree(g){
       if(mc.interopProduction){ h.children.push(N("mod:prod", mc.interopProduction.service, "mod", mc.meta, {sub:"interop production", detail:mc.interopProduction})); cnt++; }
       h.extra.count=cnt; c.children.push(h);
     }
+    hub("hub.discovery","Discovery candidates", cap.discoveryCandidates, d=>N(d.id, d.name, "candidate", d.meta,
+      {sub:d.kind+" · "+d.source.map(s=>SOURCE[s]||s).join(" + "), detail:d}));
   });
+  (function parents(n){ n.children.forEach(k=>{ k.parent=n; parents(k); }); })(root);
   return root;
 }
+const SOURCE = {"xindex":"XINDEX","screen-action-survey":"screen survey","tmp-sampler":"sampled run","runtime-trace":"runtime trace"};
 
 /* ---------- layout (left-to-right tidy tree) ---------- */
 const COLW=215, ROWH=30, NW=185, NH=23;
@@ -239,7 +252,7 @@ function select(n){
   const d=document.getElementById("detail"); const m=n.meta; const x=n.extra;
   let h=`<div class="kind">${esc(n.kind)}</div><h2>${esc(n.label)}</h2>`;
   if(m){ h+=`<div class="row"><span class="pv" style="background:${PHEX[m.provenance]||'#64748b'}">${esc(m.provenance)}</span><span class="conf">${(m.confidence*100|0)}% confidence</span></div>`; }
-  if(x.sub){ h+=`<div class="row"><div class="lab">${n.kind==='routine'?'role':n.kind==='rule'?'condition':n.kind==='data'?'detail':'summary'}</div><div class="val">${esc(x.sub)}</div></div>`; }
+  if(x.sub && n.kind!=="candidate"){ h+=`<div class="row"><div class="lab">${n.kind==='routine'?'role':n.kind==='rule'?'condition':n.kind==='data'?'detail':'summary'}</div><div class="val">${esc(x.sub)}</div></div>`; }
   if(x.access){ h+=`<div class="row"><div class="lab">access</div><div class="val">${esc(x.access)}</div></div>`; }
   if(x.fired!=null){ h+=`<div class="row"><div class="lab">fired in this run</div><div class="val">${x.fired?"yes":"no"}</div></div>`; }
   // pull richer fields from the raw detail object
@@ -252,6 +265,21 @@ function select(n){
     if(dt.whatIsNotCoded){ h+=`<div class="row"><div class="lab" style="color:var(--question)">not coded — needs confirmation</div><div class="val" style="color:#ffb3aa">${esc(dt.whatIsNotCoded)}</div></div>`; }
     if(dt.candidateInterpretations){ h+=`<div class="row"><div class="lab">candidate interpretations</div><ul>${dt.candidateInterpretations.map(c=>`<li>${esc(c)}</li>`).join("")}</ul></div>`; }
   }
+  if(n.id==="hub.discovery"){
+    const by={}; n.children.forEach(k=>k.extra.detail.source.forEach(s=>{ by[s]=(by[s]||0)+1; }));
+    h+=`<div class="row cand">What the read-only discovery checks on VADEMO found beyond the hand-built graph. None is a graph item yet; each waits to be promoted and decided in the Decide chat, and none feeds a spec.</div>`;
+    h+=`<div class="row"><div class="lab">candidates by discovery method</div>${Object.entries(by).map(([s,c])=>`<span class="chip">${esc(SOURCE[s]||s)} · ${c}</span>`).join("")}</div>`;
+    h+=`<div class="row"><div class="lab">candidates</div>${n.children.map(k=>`<a class="goto" data-goto="${esc(k.id)}">${esc(k.id)}</a>`).join("")}</div>`;
+  }
+  if(n.kind==="candidate"){
+    h+=`<div class="row cand">Found by discovery, not yet in the graph's items. It becomes one when it is promoted and decided in the Decide chat.</div>`;
+    h+=`<div class="row"><div class="lab">kind</div><div class="val">${esc(dt.kind)}</div></div>`;
+    h+=`<div class="row"><div class="lab">found by</div><div>${dt.source.map(s=>`<span class="chip">${esc(SOURCE[s]||s)}</span>`).join("")}</div></div>`;
+    h+=`<div class="row"><div class="lab">finding</div><div class="val">${esc(dt.finding)}</div></div>`;
+    h+=`<div class="row"><div class="lab">legacy evidence</div><ul class="ev">${dt.evidence.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`;
+    if(dt.relatesTo.length){ h+=`<div class="row"><div class="lab">relates to</div>${dt.relatesTo.map(r=>`<a class="goto" data-goto="${esc(r)}">${esc(r)}${NODES[r]?" — "+esc(trunc(NODES[r].label,34)):""}</a>`).join("")}</div>`; }
+    h+=`<div class="row"><div class="lab">suggested as</div><div class="val">${esc(dt.suggestedAs)}</div></div>`;
+  }
   if(dt.determinacy){ h+=`<div class="row"><div class="lab">determinacy</div><div class="val">${esc(dt.determinacy)}</div></div>`; }
   if(dt.openQuestion){ h+=`<div class="row"><div class="lab">open question</div><div class="val" style="color:var(--question)">${esc(dt.openQuestion)} — decision not coded</div></div>`; }
   if(dt.global){ h+=`<div class="row"><div class="lab">global</div><div class="val k">${esc(dt.global)}</div></div>`; }
@@ -262,9 +290,21 @@ function select(n){
   if(dt.effect){ h+=`<div class="row"><div class="lab">effect</div><div class="val">${esc(dt.effect)}</div></div>`; }
   if(dt.indexes){ h+=`<div class="row"><div class="lab">indexes</div><div class="val">${Object.entries(dt.indexes).map(([k,v])=>`<b>${k}</b>=${esc(v)}`).join("<br>")}</div></div>`; }
   if(m && m.conditions && m.conditions.length){ h+=`<div class="row"><div class="lab">gates / conditions</div><div class="val cond">${m.conditions.map(esc).join("; ")}</div></div>`; }
-  if(m && m.evidence && m.evidence.length){ h+=`<div class="row"><div class="lab">evidence</div><ul>${m.evidence.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`; }
+  if(m && m.evidence && m.evidence.length){ h+=`<div class="row"><div class="lab">${n.kind==="candidate"?"source files":"evidence"}</div><ul>${m.evidence.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></div>`; }
   if(m && m.workflows){ h+=`<div class="row"><div class="lab">observed in</div><div class="val">${m.workflows.map(esc).join(", ")}</div></div>`; }
   d.innerHTML=h;
+}
+document.getElementById("detail").addEventListener("click", e=>{
+  const a=e.target.closest("a.goto"); if(a) reveal(a.dataset.goto);
+});
+
+/* expand the path to a node, select it and bring it into view */
+function reveal(id){
+  const n=NODES[id]; if(!n) return;
+  for(let p=n.parent; p; p=p.parent) p.collapsed=false;
+  render(); select(n);
+  const r=wrap.getBoundingClientRect();
+  tx=r.width/2-(n.x+NW/2)*sc; ty=r.height/2-(n.y+NH/2)*sc; apply();
 }
 
 /* ---------- pan / zoom ---------- */
@@ -281,6 +321,13 @@ function fit(){
   const r=wrap.getBoundingClientRect(); const pad=30;
   sc=Math.min((r.width-2*pad)/maxX,(r.height-2*pad)/maxY,1.2); sc=Math.max(sc,0.2);
   tx=pad; ty=Math.max(pad,(r.height-maxY*sc)/2); apply();
+}
+function fitTo(nodes){
+  const x0=Math.min(...nodes.map(n=>n.x)), y0=Math.min(...nodes.map(n=>n.y));
+  const x1=Math.max(...nodes.map(n=>n.x+NW)), y1=Math.max(...nodes.map(n=>n.y+NH));
+  const r=wrap.getBoundingClientRect(), pad=40;
+  sc=Math.max(0.2, Math.min((r.width-2*pad)/(x1-x0), (r.height-2*pad)/(y1-y0), 1.6));
+  tx=(r.width-(x1-x0)*sc)/2-x0*sc; ty=(r.height-(y1-y0)*sc)/2-y0*sc; apply();
 }
 document.getElementById("fitBtn").onclick=()=>{ layout(); fit(); };
 document.getElementById("expandBtn").onclick=()=>{ Object.values(NODES).forEach(n=>n.collapsed=false); render(); markSel(); fit(); };
@@ -317,7 +364,18 @@ document.getElementById("pdfBtn").onclick=()=>window.print();
   try{ const r=await fetch("new-inventory-entry.json",{cache:"no-store"}); if(r.ok) g=await r.json(); }catch(e){}
   document.getElementById("hdrSub").textContent = g.workflow.name + "  ·  " + (g.sandbox? (g.sandbox.node+" / "+g.sandbox.namespace):"");
   ROOT=buildTree(g); render(); fit();
+  openFromHash();
 })();
+// #discovery opens the page on the discovery candidates alone; #<node id> selects that node
+function openFromHash(){
+  const h=decodeURIComponent(location.hash.slice(1)); if(!h) return;
+  if(h==="discovery" && NODES["hub.discovery"]){
+    Object.values(NODES).forEach(n=>{ if(n.id.indexOf("hub.")===0||n.id==="grp.ix") n.collapsed=n.id!=="hub.discovery"; });
+    render(); const hub=NODES["hub.discovery"]; fitTo([hub, ...hub.children]); select(hub); return;
+  }
+  if(NODES[h]) reveal(h);
+}
+window.addEventListener("hashchange", openFromHash);
 </script>
 </body>
 </html>

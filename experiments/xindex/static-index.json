@@ -1,0 +1,991 @@
+{
+ "entry": "EQAD^ENEQ1",
+ "generatedAt": "2026-11-09T16:06:55.896Z",
+ "source": "Toolkit ^XINDEX (7.3) on VADEMO via SETUP^XINDX7 / BEG^XINDEX; index of the EN* routines reachable from ENEQ1",
+ "indexed": {
+  "routines": 54,
+  "missing": [
+   "ENZWO1",
+   "ENZWO2"
+  ]
+ },
+ "reached": {
+  "tags": 75,
+  "routines": [
+   "ENEQ1",
+   "ENEQ3",
+   "ENEQPMP",
+   "ENEQPMP1",
+   "ENEQPMP3",
+   "ENFAACQ",
+   "ENFAAV",
+   "ENFABAL",
+   "ENFAUTL",
+   "ENFAVAL",
+   "ENFAXMT",
+   "ENFAXMTM",
+   "ENJ",
+   "ENJC2",
+   "ENJDPL",
+   "ENJINJ",
+   "ENJINJ1",
+   "ENJINJ2",
+   "ENJINJ3",
+   "ENJINQ",
+   "ENJPARAM",
+   "ENLIB1",
+   "ENUTL",
+   "ENWONEW",
+   "ENWONEW3"
+  ],
+  "tagsByRoutine": {
+   "ENEQ1": [
+    "ADDEQ",
+    "ASKEDM",
+    "ASKSER",
+    "ENR",
+    "EQAD",
+    "EQADX"
+   ],
+   "ENEQ3": [
+    "BULL",
+    "CHKMGRP"
+   ],
+   "ENEQPMP": [
+    "EXIT",
+    "HLD",
+    "PMSE",
+    "PMSE1",
+    "PMSE2",
+    "XNPMSE"
+   ],
+   "ENEQPMP1": [
+    "EXIT"
+   ],
+   "ENEQPMP3": [
+    "DDT",
+    "DINV",
+    "DPM",
+    "DPM1",
+    "EXIT",
+    "HLD",
+    "W"
+   ],
+   "ENFAACQ": [
+    "ADDFA",
+    "BAD",
+    "DEL",
+    "ENFAACQ",
+    "SETUP",
+    "UPDATE",
+    "VALEQ",
+    "WRAPUP"
+   ],
+   "ENFAAV": [
+    "AVP",
+    "AVPX"
+   ],
+   "ENFABAL": [
+    "ADJBAL",
+    "GETBAL"
+   ],
+   "ENFAUTL": [
+    "CHKFA",
+    "DEC",
+    "DECDUN"
+   ],
+   "ENFAVAL": [
+    "ENFAVAL"
+   ],
+   "ENFAXMT": [
+    "ENFAXMT"
+   ],
+   "ENFAXMTM": [
+    "LISTP"
+   ],
+   "ENJ": [
+    "D",
+    "EN",
+    "EXIT1"
+   ],
+   "ENJC2": [
+    "ENJC2"
+   ],
+   "ENJDPL": [
+    "ENJDPL",
+    "ER",
+    "HDH",
+    "N",
+    "N1",
+    "N2"
+   ],
+   "ENJINJ": [
+    "EN",
+    "EN2",
+    "ENJINJ",
+    "LH",
+    "LST",
+    "NXT",
+    "PRACTW",
+    "PSACTW",
+    "TK"
+   ],
+   "ENJINJ1": [
+    "CONT",
+    "E",
+    "EN2",
+    "EN3",
+    "WP"
+   ],
+   "ENJINJ2": [
+    "ENJINJ2"
+   ],
+   "ENJINJ3": [
+    "N"
+   ],
+   "ENJINQ": [
+    "FUNC"
+   ],
+   "ENJPARAM": [
+    "BD",
+    "ENJPARAM"
+   ],
+   "ENLIB1": [
+    "MNTH"
+   ],
+   "ENUTL": [
+    "ZIS"
+   ],
+   "ENWONEW": [
+    "WOFILL",
+    "WONUM"
+   ],
+   "ENWONEW3": [
+    "EXIT",
+    "IIWO"
+   ]
+  },
+  "path": {
+   "ADDEQ^ENEQ1": {
+    "depth": 1,
+    "via": "EQAD+12^ENEQ1"
+   },
+   "ADDFA^ENFAACQ": {
+    "depth": 3,
+    "via": "ENFAACQ+15^ENFAACQ"
+   },
+   "ADJBAL^ENFABAL": {
+    "depth": 4,
+    "via": "UPDATE+21^ENFAACQ"
+   },
+   "ASKEDM^ENEQ1": {
+    "depth": 1,
+    "via": "EQAD+3^ENEQ1"
+   },
+   "ASKSER^ENEQ1": {
+    "depth": 1,
+    "via": "EQAD+11^ENEQ1"
+   },
+   "AVPX^ENFAAV": {
+    "depth": 4,
+    "via": "AVP+26^ENFAAV"
+   },
+   "AVP^ENFAAV": {
+    "depth": 3,
+    "via": "ENFAACQ+17^ENFAACQ"
+   },
+   "BAD^ENFAACQ": {
+    "depth": 4,
+    "via": "ADDFA+5^ENFAACQ"
+   },
+   "BD^ENJPARAM": {
+    "depth": 5,
+    "via": "ENJPARAM+7^ENJPARAM"
+   },
+   "BULL^ENEQ3": {
+    "depth": 2,
+    "via": "ADDEQ+55^ENEQ1"
+   },
+   "CHKFA^ENFAUTL": {
+    "depth": 3,
+    "via": "BULL+34^ENEQ3"
+   },
+   "CHKMGRP^ENEQ3": {
+    "depth": 3,
+    "via": "BULL+15^ENEQ3"
+   },
+   "CONT^ENJINJ1": {
+    "depth": 7,
+    "via": "WP+3^ENJINJ1"
+   },
+   "DDT^ENEQPMP3": {
+    "depth": 4,
+    "via": "PMSE1+2^ENEQPMP"
+   },
+   "DECDUN^ENFAUTL": {
+    "depth": 5,
+    "via": "DEC+4^ENFAUTL"
+   },
+   "DEC^ENFAUTL": {
+    "depth": 4,
+    "via": "UPDATE+8^ENFAACQ"
+   },
+   "DEL^ENFAACQ": {
+    "depth": 3,
+    "via": "ENFAACQ+19^ENFAACQ"
+   },
+   "DINV^ENEQPMP3": {
+    "depth": 2,
+    "via": "ADDEQ+33^ENEQ1"
+   },
+   "DPM1^ENEQPMP3": {
+    "depth": 4,
+    "via": "DPM+7^ENEQPMP3"
+   },
+   "DPM^ENEQPMP3": {
+    "depth": 3,
+    "via": "DINV+11^ENEQPMP3"
+   },
+   "D^ENJ": {
+    "depth": 3,
+    "via": "EN+2^ENJ"
+   },
+   "EN2^ENJINJ": {
+    "depth": 6,
+    "via": "TK^ENJINJ"
+   },
+   "EN2^ENJINJ1": {
+    "depth": 5,
+    "via": "ENJINJ+3^ENJINJ"
+   },
+   "EN3^ENJINJ1": {
+    "depth": 6,
+    "via": "TK+1^ENJINJ"
+   },
+   "ENFAACQ^ENFAACQ": {
+    "depth": 2,
+    "via": "ADDEQ+53^ENEQ1"
+   },
+   "ENFAVAL^ENFAVAL": {
+    "depth": 4,
+    "via": "VALEQ+2^ENFAACQ"
+   },
+   "ENFAXMT^ENFAXMT": {
+    "depth": 4,
+    "via": "UPDATE+24^ENFAACQ"
+   },
+   "ENJC2^ENJC2": {
+    "depth": 4,
+    "via": "D+2^ENJ"
+   },
+   "ENJDPL^ENJDPL": {
+    "depth": 4,
+    "via": "D+1^ENJ"
+   },
+   "ENJINJ2^ENJINJ2": {
+    "depth": 7,
+    "via": "LST^ENJINJ"
+   },
+   "ENJINJ^ENJINJ": {
+    "depth": 4,
+    "via": "D+1^ENJ"
+   },
+   "ENJPARAM^ENJPARAM": {
+    "depth": 4,
+    "via": "D^ENJ"
+   },
+   "ENR^ENEQ1": {
+    "depth": 2,
+    "via": "ADDEQ+14^ENEQ1"
+   },
+   "EN^ENJ": {
+    "depth": 2,
+    "via": "ADDEQ+23^ENEQ1"
+   },
+   "EN^ENJINJ": {
+    "depth": 4,
+    "via": "D+2^ENJ"
+   },
+   "EQADX^ENEQ1": {
+    "depth": 1,
+    "via": "EQAD+3^ENEQ1"
+   },
+   "EQAD^ENEQ1": {
+    "depth": 0,
+    "via": null
+   },
+   "ER^ENJDPL": {
+    "depth": 5,
+    "via": "ENJDPL+2^ENJDPL"
+   },
+   "EXIT1^ENJ": {
+    "depth": 4,
+    "via": "D+1^ENJ"
+   },
+   "EXIT^ENEQPMP": {
+    "depth": 4,
+    "via": "PMSE1+2^ENEQPMP"
+   },
+   "EXIT^ENEQPMP1": {
+    "depth": 5,
+    "via": "EXIT^ENEQPMP"
+   },
+   "EXIT^ENEQPMP3": {
+    "depth": 3,
+    "via": "DINV+12^ENEQPMP3"
+   },
+   "EXIT^ENWONEW3": {
+    "depth": 3,
+    "via": "IIWO+37^ENWONEW3"
+   },
+   "E^ENJINJ1": {
+    "depth": 7,
+    "via": "EN3+1^ENJINJ1"
+   },
+   "FUNC^ENJINQ": {
+    "depth": 7,
+    "via": "EN2^ENJINJ"
+   },
+   "GETBAL^ENFABAL": {
+    "depth": 5,
+    "via": "ADJBAL+22^ENFABAL"
+   },
+   "HDH^ENJDPL": {
+    "depth": 7,
+    "via": "N+3^ENJDPL"
+   },
+   "HLD^ENEQPMP": {
+    "depth": 5,
+    "via": "PMSE+1^ENEQPMP"
+   },
+   "HLD^ENEQPMP3": {
+    "depth": 3,
+    "via": "DINV+2^ENEQPMP3"
+   },
+   "IIWO^ENWONEW3": {
+    "depth": 2,
+    "via": "ADDEQ+41^ENEQ1"
+   },
+   "LH^ENJINJ": {
+    "depth": 6,
+    "via": "TK^ENJINJ"
+   },
+   "LISTP^ENFAXMTM": {
+    "depth": 4,
+    "via": "VALEQ+3^ENFAACQ"
+   },
+   "LST^ENJINJ": {
+    "depth": 6,
+    "via": "TK+3^ENJINJ"
+   },
+   "MNTH^ENLIB1": {
+    "depth": 3,
+    "via": "DINV+11^ENEQPMP3"
+   },
+   "N1^ENJDPL": {
+    "depth": 7,
+    "via": "N+3^ENJDPL"
+   },
+   "N2^ENJDPL": {
+    "depth": 8,
+    "via": "N1+3^ENJDPL"
+   },
+   "NXT^ENJINJ": {
+    "depth": 6,
+    "via": "TK^ENJINJ"
+   },
+   "N^ENJDPL": {
+    "depth": 6,
+    "via": "TK+1^ENJINJ"
+   },
+   "N^ENJINJ3": {
+    "depth": 6,
+    "via": "TK+1^ENJINJ"
+   },
+   "PMSE1^ENEQPMP": {
+    "depth": 3,
+    "via": "XNPMSE+1^ENEQPMP"
+   },
+   "PMSE2^ENEQPMP": {
+    "depth": 3,
+    "via": "XNPMSE^ENEQPMP"
+   },
+   "PMSE^ENEQPMP": {
+    "depth": 4,
+    "via": "PMSE2^ENEQPMP"
+   },
+   "PRACTW^ENJINJ": {
+    "depth": 6,
+    "via": "TK+1^ENJINJ"
+   },
+   "PSACTW^ENJINJ": {
+    "depth": 6,
+    "via": "TK+1^ENJINJ"
+   },
+   "SETUP^ENFAACQ": {
+    "depth": 3,
+    "via": "ENFAACQ+13^ENFAACQ"
+   },
+   "TK^ENJINJ": {
+    "depth": 5,
+    "via": "EN+2^ENJINJ"
+   },
+   "UPDATE^ENFAACQ": {
+    "depth": 3,
+    "via": "ENFAACQ+20^ENFAACQ"
+   },
+   "VALEQ^ENFAACQ": {
+    "depth": 3,
+    "via": "ENFAACQ+14^ENFAACQ"
+   },
+   "WOFILL^ENWONEW": {
+    "depth": 3,
+    "via": "IIWO+50^ENWONEW3"
+   },
+   "WONUM^ENWONEW": {
+    "depth": 3,
+    "via": "IIWO+40^ENWONEW3"
+   },
+   "WP^ENJINJ1": {
+    "depth": 6,
+    "via": "TK+2^ENJINJ"
+   },
+   "WRAPUP^ENFAACQ": {
+    "depth": 3,
+    "via": "ENFAACQ+21^ENFAACQ"
+   },
+   "W^ENEQPMP3": {
+    "depth": 3,
+    "via": "DINV+5^ENEQPMP3"
+   },
+   "XNPMSE^ENEQPMP": {
+    "depth": 2,
+    "via": "ADDEQ+34^ENEQ1"
+   },
+   "ZIS^ENUTL": {
+    "depth": 1,
+    "via": "EQAD+2^ENEQ1"
+   }
+  }
+ },
+ "boundaryCalls": {
+  "%DT^%DT": [
+   "WONUM+2^ENWONEW"
+  ],
+  "%ZIS^%ZIS": [
+   "ENJPARAM+6^ENJPARAM"
+  ],
+  "DIC^DIC": [
+   "IIWO+33^ENWONEW3",
+   "PMSE+2^ENEQPMP"
+  ],
+  "DIE^DIE": [
+   "ADDEQ+19^ENEQ1",
+   "ADDEQ+25^ENEQ1",
+   "XNPMSE+3^ENEQPMP",
+   "IIWO+57^ENWONEW3",
+   "IIWO+64^ENWONEW3",
+   "IIWO+89^ENWONEW3",
+   "PMSE2^ENEQPMP",
+   "UPDATE+27^ENFAACQ",
+   "WOFILL+3^ENWONEW",
+   "WOFILL+7^ENWONEW",
+   "TK+1^ENJINJ",
+   "TK+4^ENJINJ"
+  ],
+  "DIK^DIK": [
+   "DEL+2^ENFAACQ"
+  ],
+  "DIR^DIR": [
+   "EQAD+10^ENEQ1",
+   "ADDEQ+14^ENEQ1",
+   "ADDEQ+30^ENEQ1",
+   "ADDEQ+40^ENEQ1",
+   "ADDEQ+52^ENEQ1",
+   "ASKEDM+7^ENEQ1",
+   "ASKSER+9^ENEQ1",
+   "ASKSER+25^ENEQ1",
+   "DEL+6^ENFAACQ",
+   "AVP+26^ENFAAV"
+  ],
+  "DIWP^DIWP": [
+   "WP+2^ENJINJ1"
+  ],
+  "DT^DICRW": [
+   "ENJPARAM+5^ENJPARAM"
+  ],
+  "ENDR^%ZISS": [
+   "ZIS+4^ENUTL"
+  ],
+  "FILE^DICN": [
+   "ENR+14^ENEQ1",
+   "ADDFA+3^ENFAACQ",
+   "WONUM+7^ENWONEW"
+  ],
+  "FIND1^DIC": [
+   "CHKMGRP+7^ENEQ3"
+  ],
+  "GET1^DIQ": [
+   "ASKSER+21^ENEQ1",
+   "ASKSER+22^ENEQ1",
+   "ASKSER+23^ENEQ1",
+   "BULL+11^ENEQ3",
+   "BULL+13^ENEQ3",
+   "IIWO+63^ENWONEW3"
+  ],
+  "LIST^DIC": [
+   "CHKMGRP+10^ENEQ3"
+  ],
+  "MSG^DIALOG": [
+   "ADJBAL+18^ENFABAL"
+  ],
+  "UPDATE^DIE": [
+   "IIWO+59^ENWONEW3",
+   "ADJBAL+18^ENFABAL"
+  ],
+  "UP^XLFSTR": [
+   "ASKSER+13^ENEQ1"
+  ],
+  "WP^DIE": [
+   "IIWO+70^ENWONEW3"
+  ],
+  "XMB^XMB": [
+   "BULL+38^ENEQ3"
+  ],
+  "YN^DICN": [
+   "XNPMSE^ENEQPMP",
+   "XNPMSE+3^ENEQPMP",
+   "PMSE1+2^ENEQPMP"
+  ]
+ },
+ "globals": {
+  "^%ZIS(2": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "ENJPARAM+6^ENJPARAM"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^%ZOSF(\"OS": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "ENJPARAM+7^ENJPARAM"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^%ZOSF(\"XY": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "ENJPARAM+7^ENJPARAM"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^DD(": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "N+4^ENJDPL",
+    "TK^ENJINJ"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^DIC(": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "EN+1^ENJ",
+    "N+5^ENJDPL"
+   ],
+   "temporary": false,
+   "inGraph": true
+  },
+  "^DIC(49": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "BULL+29^ENEQ3"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^DIC(6910": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "IIWO+23^ENWONEW3",
+    "IIWO+27^ENWONEW3"
+   ],
+   "temporary": false,
+   "inGraph": true
+  },
+  "^DIC(6922": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "DPM+2^ENEQPMP3",
+    "IIWO+31^ENWONEW3",
+    "WONUM+3^ENWONEW",
+    "WONUM+4^ENWONEW"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^DIE(\"B": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "ASKEDM+8^ENEQ1"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^ENG(\"EMP": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "DPM+2^ENEQPMP3",
+    "IIWO+83^ENWONEW3"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^ENG(6910.2": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "ADDEQ+36^ENEQ1",
+    "ADDEQ+37^ENEQ1",
+    "ADDEQ+39^ENEQ1"
+   ],
+   "temporary": false,
+   "inGraph": true
+  },
+  "^ENG(6910.9": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "EN^ENJ",
+    "EN+1^ENJ",
+    "EN+2^ENJ",
+    "ENJDPL+2^ENJDPL",
+    "N+1^ENJDPL",
+    "N+6^ENJDPL",
+    "N1^ENJDPL",
+    "N1+2^ENJDPL",
+    "N2^ENJDPL",
+    "TK+3^ENJINJ",
+    "TK+4^ENJINJ",
+    "PRACTW+1^ENJINJ",
+    "PSACTW+1^ENJINJ"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^ENG(6911": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "BULL+28^ENEQ3",
+    "PMSE1+1^ENEQPMP",
+    "PMSE1+2^ENEQPMP",
+    "DDT+2^ENEQPMP3",
+    "DDT+4^ENEQPMP3",
+    "DDT+5^ENEQPMP3",
+    "DDT+9^ENEQPMP3",
+    "DINV+4^ENEQPMP3"
+   ],
+   "temporary": false,
+   "inGraph": true
+  },
+  "^ENG(6914": {
+   "set": true,
+   "kill": false,
+   "lines": [
+    "ASKSER+15^ENEQ1",
+    "ADDEQ+16^ENEQ1",
+    "ADDEQ+33^ENEQ1",
+    "ADDEQ+47^ENEQ1",
+    "ADDEQ+57^ENEQ1",
+    "ENR+7^ENEQ1",
+    "ENR+10^ENEQ1",
+    "ENR+11^ENEQ1",
+    "ENR+16^ENEQ1",
+    "BULL+8^ENEQ3",
+    "BULL+26^ENEQ3",
+    "BULL+28^ENEQ3",
+    "BULL+29^ENEQ3",
+    "BULL+33^ENEQ3",
+    "XNPMSE^ENEQPMP",
+    "XNPMSE+1^ENEQPMP",
+    "XNPMSE+3^ENEQPMP (set)",
+    "PMSE1^ENEQPMP",
+    "PMSE1+1^ENEQPMP",
+    "DINV+2^ENEQPMP3",
+    "DINV+4^ENEQPMP3",
+    "DINV+7^ENEQPMP3",
+    "DINV+11^ENEQPMP3",
+    "SETUP+4^ENFAACQ",
+    "UPDATE+4^ENFAACQ (set)",
+    "UPDATE+9^ENFAACQ (set)",
+    "UPDATE+13^ENFAACQ (set)",
+    "UPDATE+17^ENFAACQ (set)",
+    "IIWO+25^ENWONEW3",
+    "IIWO+26^ENWONEW3",
+    "IIWO+81^ENWONEW3",
+    "IIWO+82^ENWONEW3"
+   ],
+   "temporary": false,
+   "inGraph": true
+  },
+  "^ENG(6914.2": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "DPM1+5^ENEQPMP3"
+   ],
+   "temporary": false,
+   "inGraph": true
+  },
+  "^ENG(6915.1": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "SETUP+5^ENFAACQ"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^ENG(6915.2": {
+   "set": true,
+   "kill": false,
+   "lines": [
+    "ADDFA+8^ENFAACQ",
+    "ADDFA+12^ENFAACQ",
+    "UPDATE+19^ENFAACQ (set)",
+    "WRAPUP+1^ENFAACQ",
+    "CHKFA+6^ENFAUTL",
+    "CHKFA+7^ENFAUTL"
+   ],
+   "temporary": false,
+   "inGraph": true
+  },
+  "^ENG(6915.5": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "CHKFA+8^ENFAUTL",
+    "CHKFA+9^ENFAUTL"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^ENG(6915.9": {
+   "set": true,
+   "kill": false,
+   "lines": [
+    "ADJBAL+20^ENFABAL",
+    "ADJBAL+25^ENFABAL (set)",
+    "ADJBAL+26^ENFABAL",
+    "ADJBAL+29^ENFABAL",
+    "ADJBAL+30^ENFABAL",
+    "ADJBAL+31^ENFABAL",
+    "ADJBAL+32^ENFABAL",
+    "ADJBAL+34^ENFABAL (set)",
+    "ADJBAL+35^ENFABAL",
+    "GETBAL+10^ENFABAL",
+    "GETBAL+11^ENFABAL",
+    "GETBAL+13^ENFABAL",
+    "GETBAL+15^ENFABAL",
+    "GETBAL+16^ENFABAL"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^ENG(6920": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "IIWO+21^ENWONEW3",
+    "IIWO+46^ENWONEW3",
+    "IIWO+69^ENWONEW3",
+    "IIWO+72^ENWONEW3",
+    "IIWO+74^ENWONEW3",
+    "IIWO+76^ENWONEW3",
+    "WONUM+5^ENWONEW",
+    "WONUM+6^ENWONEW",
+    "WONUM+8^ENWONEW"
+   ],
+   "temporary": false,
+   "inGraph": true
+  },
+  "^TMP($J": {
+   "set": true,
+   "kill": true,
+   "lines": [
+    "VALEQ+1^ENFAACQ (kill)",
+    "VALEQ+3^ENFAACQ",
+    "BAD+2^ENFAACQ",
+    "BAD+3^ENFAACQ (set)",
+    "BAD+4^ENFAACQ (set)",
+    "EN^ENJ (kill)",
+    "LISTP+12^ENFAXMTM",
+    "LISTP+13^ENFAXMTM",
+    "LISTP+14^ENFAXMTM (kill)",
+    "N+5^ENJDPL",
+    "HDH+2^ENJDPL",
+    "HDH+3^ENJDPL",
+    "WP+1^ENJINJ1 (kill)",
+    "WP+3^ENJINJ1",
+    "WP+4^ENJINJ1 (kill)"
+   ],
+   "temporary": true,
+   "inGraph": true
+  },
+  "^VA(200": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "BULL+26^ENEQ3",
+    "WOFILL+5^ENWONEW",
+    "WOFILL+6^ENWONEW"
+   ],
+   "temporary": false,
+   "inGraph": false
+  },
+  "^XUSEC(\"ENEDPM": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "ADDEQ+27^ENEQ1",
+    "PMSE+1^ENEQPMP",
+    "IIWO+19^ENWONEW3"
+   ],
+   "temporary": false,
+   "inGraph": true
+  },
+  "^XUSEC(\"ENFACS": {
+   "set": false,
+   "kill": false,
+   "lines": [
+    "ADDEQ+47^ENEQ1"
+   ],
+   "temporary": false,
+   "inGraph": true
+  }
+ },
+ "nakedReferences": [
+  "^(8 at ADDEQ+47^ENEQ1",
+  "^(1 at BULL+28^ENEQ3",
+  "^(3 at BULL+29^ENEQ3",
+  "^(8 at BULL+33^ENEQ3",
+  "^( at DPM+2^ENEQPMP3",
+  "^(0 at DDT+9^ENEQPMP3",
+  "^(0 at DINV+11^ENEQPMP3",
+  "^(0 at DPM+6^ENEQPMP3",
+  "^(1 at DDT+9^ENEQPMP3",
+  "^(1 at DINV+4^ENEQPMP3",
+  "^(1 at DINV+11^ENEQPMP3",
+  "^(3 at DINV+4^ENEQPMP3",
+  "^(\"GL\" at EN+1^ENJ",
+  "^( at WOFILL+6^ENWONEW",
+  "^( at N+6^ENJDPL",
+  "^(\"NM\" at N+4^ENJDPL",
+  "^(\"UP\" at N+4^ENJDPL",
+  "^(1 at PSACTW+1^ENJINJ",
+  "^(2 at TK+3^ENJINJ",
+  "^(2 at PRACTW+1^ENJINJ",
+  "^(3 at TK+4^ENJINJ",
+  "^(1 at ENJPARAM+6^ENJPARAM",
+  "^(5 at ENJPARAM+6^ENJPARAM",
+  "^(7 at ENJPARAM+6^ENJPARAM",
+  "^( at WP+3^ENJINJ1"
+ ],
+ "comparison": {
+  "graphTagsFound": [
+   "ADDEQ^ENEQ1",
+   "ADJBAL^ENFABAL",
+   "ASKEDM^ENEQ1",
+   "ASKSER^ENEQ1",
+   "AVP^ENFAAV",
+   "BULL^ENEQ3",
+   "CHKFA^ENFAUTL",
+   "DINV^ENEQPMP3",
+   "ENR^ENEQ1",
+   "EN^ENJ",
+   "EQAD^ENEQ1",
+   "FILE^DICN",
+   "GET1^DIQ",
+   "IIWO^ENWONEW3",
+   "UP^XLFSTR",
+   "WOFILL^ENWONEW",
+   "WONUM^ENWONEW",
+   "XNPMSE^ENEQPMP",
+   "ZIS^ENUTL"
+  ],
+  "graphTagsNotReached": [],
+  "routinesNotInGraph": [
+   "ENEQPMP1",
+   "ENFAXMTM",
+   "ENJC2",
+   "ENJDPL",
+   "ENJINJ",
+   "ENJINJ1",
+   "ENJINJ2",
+   "ENJINJ3",
+   "ENJINQ",
+   "ENJPARAM",
+   "ENLIB1"
+  ],
+  "boundaryRoutinesNotInGraph": [
+   "%DT",
+   "%ZIS",
+   "%ZISS",
+   "DIALOG",
+   "DICRW",
+   "DIK",
+   "DIWP",
+   "XMB"
+  ],
+  "globalsNotInGraph": [
+   "^%ZIS(2",
+   "^%ZOSF(\"OS",
+   "^%ZOSF(\"XY",
+   "^DD(",
+   "^DIC(49",
+   "^DIC(6922",
+   "^DIE(\"B",
+   "^ENG(\"EMP",
+   "^ENG(6910.9",
+   "^ENG(6915.1",
+   "^ENG(6915.5",
+   "^ENG(6915.9",
+   "^VA(200"
+  ],
+  "graphGlobals": [
+   "^DIC(6910",
+   "^ENG(6910.2 'ASK INCOMING INSPECTION W.O.'",
+   "^ENG(6910.2 'ASK INCOMING INSPECTION W.O.' enabled",
+   "^ENG(6910.2 'ASK INCOMING INSPECTION W.O.' is enabled; if the user answers YES",
+   "^ENG(6910.2 piece 2 = 2",
+   "^ENG(6911",
+   "^ENG(6914",
+   "^ENG(6915.2",
+   "^ENG(6920",
+   "^ENWONEW3(ENNXL",
+   "^ENWONEW3(IEN",
+   "^TMP($J",
+   "^XLFSTR($TR(ENSERIAL",
+   "^XLFSTR(serial",
+   "^XUSEC(\"ENEDPM\"",
+   "^XUSEC(\"ENFACS\"",
+   "^XUSEC('ENEDPM'"
+  ]
+ }
+}

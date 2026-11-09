@@ -1,0 +1,364 @@
+{
+  "experiment": "runtime-trace",
+  "generatedAt": "2026-11-09T15:46:54.461Z",
+  "instance": "VADEMO — IRIS for Windows (x86-64) 2026.1 (Build 233U), namespace VISTA-DIEGO",
+  "evidenceTypes": {
+    "runtime": "what the trace recorded as executing / referenced",
+    "state": "what VistA holds afterwards, read independently by SQL and $Data"
+  },
+  "runs": [
+    {
+      "scenario": "NewInventoryEntry-runtime-001",
+      "pid": 15424,
+      "namespace": "VISTA-DIEGO",
+      "events": [
+        "RtnLoad",
+        "GloRef"
+      ],
+      "startedAtUTC": "2026-11-09T15:24:43.409Z",
+      "stoppedAtUTC": "2026-11-09T15:34:48.574Z",
+      "stoppedBy": "StopPID",
+      "startedFrom": "programmer prompt; user then ran D ^XUP and option ENINVNEW",
+      "traceFile": "C:\\InterSystems\\IRISHealth\\mgr\\Temp\\harness-runtime-trace\\iristrace_15424.txt (deleted after copy)",
+      "localCopies": {
+        "raw": "raw/run1/iristrace_15424.raw.txt",
+        "rows": "raw/run1/iristrace_15424.rows.json"
+      },
+      "userInputs": {
+        "serial": "10100",
+        "14 ASSET VALUE": "50001",
+        "20 FUNCTIONAL CLASS": "PC",
+        "Create an Incoming Inspection Work Order": "YES"
+      },
+      "coverage": {
+        "rawRecords": 17,
+        "parsedRows": 16,
+        "fileEnding": "none (file ends mid-record: \"38,2171385659,16,DIC2+0,0,7x\")",
+        "eventSpanSec": 24.634,
+        "gloRefEvents": 4,
+        "callEvents": 3,
+        "note": "The trace stopped recording events shortly after it began; see NOTES.md (operational observations)."
+      },
+      "stackAtStart": [
+        "[ 0] X - @ +0"
+      ],
+      "routinesObserved": [
+        "%ZIS1",
+        "%ZIS3",
+        "DIC1",
+        "XUP"
+      ],
+      "routineEvidence": {
+        "XUP": [
+          "RtnLoad",
+          "QUIT"
+        ],
+        "%ZIS3": [
+          "RtnLoad",
+          "QUIT"
+        ],
+        "%ZIS1": [
+          "RtnLoad"
+        ],
+        "DIC1": [
+          "CALL-site"
+        ]
+      },
+      "globalRootsObserved": [
+        "^%ZOSF",
+        "^DIC",
+        "^rOBJ"
+      ],
+      "globalReferences": [
+        {
+          "tSec": 11.88529,
+          "routine": "(direct mode / routine load)",
+          "line": null,
+          "reference": "^rOBJ(\"XUP\")",
+          "root": "^rOBJ",
+          "srcLine": null,
+          "database": null,
+          "evidenceType": "runtime"
+        },
+        {
+          "tSec": 11.885308,
+          "routine": "(direct mode / routine load)",
+          "line": null,
+          "reference": "^rOBJ(\"XUP\")",
+          "root": "^rOBJ",
+          "srcLine": null,
+          "database": null,
+          "evidenceType": "runtime"
+        },
+        {
+          "tSec": 11.89868,
+          "routine": "XUP",
+          "line": "+6^XUP",
+          "reference": "^%ZOSF(\"TYPE-AHEAD\")",
+          "root": "^%ZOSF",
+          "srcLine": "X ^%ZOSF(\"TYPE-AHEAD\")",
+          "database": "^^c:\\intersystems\\irishealth\\mgr\\vista-diego\\",
+          "evidenceType": "runtime"
+        },
+        {
+          "tSec": 24.634088,
+          "routine": "DIC1",
+          "line": "+137^DIC1",
+          "reference": "^DIC(19,28,0)",
+          "root": "^DIC",
+          "srcLine": "I DIY(DIY)=\"\" S DIY(DIY)=$P($G(@(DIC_\"Y,0)\")),U)",
+          "database": "^^c:\\intersystems\\irishealth\\mgr\\vista-diego\\",
+          "evidenceType": "runtime"
+        }
+      ],
+      "calls": [
+        {
+          "tSec": 11.885252,
+          "at": "(direct mode)",
+          "level": "0",
+          "srcLine": ""
+        },
+        {
+          "tSec": 24.63407,
+          "at": "+97^DIC1",
+          "level": -2,
+          "srcLine": "I DIY?1.N.1\".\".N D  I DIY,DIY'>DD,$G(DS(DIY)) S Y=+DS(DIY) D GOT S DS(0)=1_\"^\"_+Y Q"
+        },
+        {
+          "tSec": 24.634101,
+          "at": "+146^DIC1",
+          "level": -1,
+          "srcLine": "D C^DIC2 Q"
+        }
+      ],
+      "stringArguments": [
+        {
+          "afterCallAt": "(direct mode)",
+          "text": "[ 0] STR (len=3): \"XUP\""
+        }
+      ],
+      "temporaryStructuresObserved": []
+    },
+    {
+      "scenario": "NewInventoryEntry-runtime-002",
+      "pid": 15424,
+      "namespace": "VISTA-DIEGO",
+      "events": [
+        "RtnLoad",
+        "GloRef"
+      ],
+      "startedAtUTC": "2026-11-09T15:38:28.298Z",
+      "stoppedAtUTC": "2026-11-09T15:42:22Z (approx., process HALT)",
+      "stoppedBy": "process HALT",
+      "startedFrom": "Equipment menu (no sign-on)",
+      "traceFile": "C:\\InterSystems\\IRISHealth\\mgr\\Temp\\harness-runtime-trace\\iristrace_15424.txt (deleted after copy)",
+      "localCopies": {
+        "raw": "raw/run2/iristrace_15424.raw.txt",
+        "rows": "raw/run2/iristrace_15424.rows.json"
+      },
+      "userInputs": {
+        "serial": "10101",
+        "14 ASSET VALUE": "50001 (reported by the user; not stored — see stateEvidence)",
+        "20 FUNCTIONAL CLASS": "PC",
+        "Create an Incoming Inspection Work Order": "NO"
+      },
+      "coverage": {
+        "rawRecords": 22,
+        "parsedRows": 22,
+        "fileEnding": "HALT",
+        "eventSpanSec": 9.893,
+        "gloRefEvents": 0,
+        "callEvents": 2,
+        "note": "The trace stopped recording events shortly after it began; see NOTES.md (operational observations)."
+      },
+      "stackAtStart": [
+        "[ 0] X - @ +1",
+        "[ 1] D - ZIS2+9^XUP +3",
+        "[ 2] D - R+2^XQ1 +1",
+        "[ 3] D - EQMAD+14^ENEQ1 +2",
+        "[ 4] D - A+2^DIR +1",
+        "[ 5] D - DIRB+2^DIR +1"
+      ],
+      "routinesObserved": [
+        "DIR",
+        "DIR1",
+        "DIRQ",
+        "ENEQ1",
+        "XQ1",
+        "XUP"
+      ],
+      "routineEvidence": {
+        "XUP": [
+          "stack-at-start"
+        ],
+        "XQ1": [
+          "stack-at-start",
+          "RtnLoad",
+          "QUIT"
+        ],
+        "ENEQ1": [
+          "stack-at-start",
+          "RtnLoad",
+          "QUIT"
+        ],
+        "DIR": [
+          "stack-at-start",
+          "QUIT",
+          "CALL-site",
+          "RtnLoad"
+        ],
+        "DIR1": [
+          "RtnLoad",
+          "CALL-site",
+          "QUIT"
+        ],
+        "DIRQ": [
+          "RtnLoad",
+          "QUIT"
+        ]
+      },
+      "globalRootsObserved": [],
+      "globalReferences": [],
+      "calls": [
+        {
+          "tSec": 0.003481,
+          "at": "+23^DIR",
+          "level": 4,
+          "srcLine": "X I X'?1.\"?\" K DDQ D ^DIR1 D"
+        },
+        {
+          "tSec": 0.003503,
+          "at": "^DIR1",
+          "level": 5,
+          "srcLine": ""
+        }
+      ],
+      "stringArguments": [
+        {
+          "afterCallAt": "^DIR1",
+          "text": "[ 0] STR (len=1): \"E\""
+        }
+      ],
+      "temporaryStructuresObserved": []
+    },
+    {
+      "scenario": "SelfTest-control-001",
+      "pid": 22380,
+      "namespace": "VISTA-DIEGO",
+      "events": [
+        "RtnLoad",
+        "GloRef"
+      ],
+      "startedAtUTC": "2026-11-09T15:43:18.520Z",
+      "stoppedAtUTC": "2026-11-09T15:43:40.974Z",
+      "stoppedBy": "process HALT",
+      "startedFrom": "background job started by the probe: 40 × $$GET1^DIQ(6914,487,5) and $D(^ENG(6914,\"FC\")) over 20 s",
+      "traceFile": "C:\\InterSystems\\IRISHealth\\mgr\\Temp\\harness-runtime-trace\\iristrace_22380.txt (deleted after copy)",
+      "localCopies": {
+        "raw": "raw/selftest/iristrace_22380.raw.txt",
+        "rows": "raw/selftest/iristrace_22380.rows.json"
+      },
+      "coverage": {
+        "rawRecords": 4,
+        "parsedRows": 4,
+        "fileEnding": "HALT",
+        "eventSpanSec": 20.287,
+        "gloRefEvents": 0,
+        "callEvents": 0,
+        "note": "The trace stopped recording events shortly after it began; see NOTES.md (operational observations)."
+      },
+      "stackAtStart": [
+        "[ 0] D - zWorker+3^Harness.Experiment.RuntimeTrace.1 +1"
+      ],
+      "routinesObserved": [
+        "Harness.Experiment.RuntimeTrace.1"
+      ],
+      "routineEvidence": {
+        "Harness.Experiment.RuntimeTrace.1": [
+          "stack-at-start",
+          "QUIT"
+        ]
+      },
+      "globalRootsObserved": [],
+      "globalReferences": [],
+      "calls": [],
+      "stringArguments": [],
+      "temporaryStructuresObserved": []
+    }
+  ],
+  "stateEvidence": {
+    "evidenceType": "state",
+    "readAt": "2026-11-09T15:44Z",
+    "method": "Atelier SQL on VISTA.EQUIPMENT_INV_6914 / WORK_ORDER_6920 / TASKS14_4, and $Data on named nodes (no values) via the probe; raw answers in raw/state-*.json",
+    "records": [
+      {
+        "scenario": "NewInventoryEntry-runtime-001",
+        "ien": 487,
+        "exists": true,
+        "serial": "10100",
+        "serialCanonical": "10100 ",
+        "totalAssetValue": 50001,
+        "functionalClass": "PC",
+        "enteredBy": "1 (BLACK,JOHN)",
+        "dateEntered": "3261109 (2026-11-09)",
+        "nodes": [
+          "0",
+          "1",
+          "2",
+          "9"
+        ],
+        "crossReferences": {
+          "^ENG(6914,\"B\",487,487)": 1,
+          "^ENG(6914,\"F\",10100,487)": 1,
+          "^ENG(6914,\"FC\",\"10100 \",487)": 1
+        },
+        "sideEffects": {
+          "incomingInspectionWorkOrder": {
+            "answer": "YES",
+            "observed": "WORK_ORDER_6920 IEN 5438, RA261109-001, EQUIPMENT_ID 487, SERIAL 10100, requested 3261109.1031; ^ENG(6920,5438,0) defined"
+          },
+          "newEquipmentBulletin": {
+            "observed": "TaskMan task 6002674 TASK^XMXBULL 'MailMan: Bulletin EN NEW EQUIPMENT', option ENINVNEW, created $H 67883,38010 (10:33:30 local), status 1, Job 0 — queued, not run"
+          },
+          "pmSchedule": {
+            "observed": "no PM prompt reported by the user; not checked further"
+          },
+          "faDocument": {
+            "observed": "no FA prompt reported; the record is not NX/capitalized as entered"
+          }
+        }
+      },
+      {
+        "scenario": "NewInventoryEntry-runtime-002",
+        "ien": 488,
+        "exists": true,
+        "serial": "10101",
+        "serialCanonical": "10101 ",
+        "totalAssetValue": "not stored (node 2 absent; SQL shows 0)",
+        "functionalClass": "PC",
+        "enteredBy": "1 (BLACK,JOHN)",
+        "dateEntered": "3261109 (2026-11-09)",
+        "nodes": [
+          "0",
+          "1",
+          "9"
+        ],
+        "crossReferences": {
+          "^ENG(6914,\"B\",488,488)": 1,
+          "^ENG(6914,\"F\",10101,488)": 1,
+          "^ENG(6914,\"FC\",\"10101 \",488)": 1
+        },
+        "sideEffects": {
+          "incomingInspectionWorkOrder": {
+            "answer": "NO",
+            "observed": "no WORK_ORDER_6920 row with EQUIPMENT_ID 488 or SERIAL 10101 — declined side effect did not occur"
+          },
+          "newEquipmentBulletin": {
+            "observed": "TaskMan task 6002675 TASK^XMXBULL 'MailMan: Bulletin EN NEW EQUIPMENT', option ENINVNEW, created $H 67883,38417 (10:40:17 local), status 1, Job 0 — queued, not run"
+          }
+        }
+      }
+    ],
+    "taskman": "Every task from 6002660 (created $H 67834) on is status 1 with Job 0, so TaskMan does not appear to be processing queued tasks on VADEMO; the bulletins were queued but not delivered."
+  }
+}

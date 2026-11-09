@@ -1,0 +1,62 @@
+=== NewInventoryEntry-runtime-001 — PID 15424 — started 2026-11-09T15:24:43.409Z — programmer prompt; user then ran D ^XUP and option ENINVNEW
+0.000000:     START
+              STACK [ 0] X - @ +0
+11.885252:    CALL
+              ARG [ 0] STR (len=3): "XUP"
+11.885290:      GloRef, ^rOBJ("XUP")
+11.885308:      GloRef, ^rOBJ("XUP")
+11.898658:      RtnLoad ^XUP
+11.898680:      GloRef at +6^XUP, ^%ZOSF("TYPE-AHEAD")
+                src:  X ^%ZOSF("TYPE-AHEAD")
+11.939195:      QUIT at +39^XUP
+                src:  EXIT ;Clean-up and exit
+11.939661:    QUIT at +18^XUP
+              src:  I $G(DUZ)>0 D DUZ(DUZ)
+11.939661:    RtnLoad ^%ZIS3
+11.939663:    QUIT at +18^%ZIS3
+              src:  Q  ;Return to %ZIS1
+11.939664:    RtnLoad ^%ZIS1
+24.634070:    CALL at +97^DIC1
+              src:  I DIY?1.N.1".".N D  I DIY,DIY'>DD,$G(DS(DIY)) S Y=+DS(DIY) D GOT S DS(0)=1_"^"_+Y Q
+24.634088:    GloRef at +137^DIC1, ^DIC(19,28,0)
+              src:  I DIY(DIY)="" S DIY(DIY)=$P($G(@(DIC_"Y,0)")),U)
+24.634101:    CALL at +146^DIC1
+              src:  D C^DIC2 Q
+
+=== NewInventoryEntry-runtime-002 — PID 15424 — started 2026-11-09T15:38:28.298Z — Equipment menu (no sign-on)
+0.000000:               START at ^DIR
+              STACK [ 0] X - @ +1
+              STACK [ 1] D - ZIS2+9^XUP +3
+              STACK [ 2] D - R+2^XQ1 +1
+              STACK [ 3] D - EQMAD+14^ENEQ1 +2
+              STACK [ 4] D - A+2^DIR +1
+              STACK [ 5] D - DIRB+2^DIR +1
+0.003473:               QUIT at +51^DIR
+                        src:  Q
+0.003481:             CALL at +23^DIR
+                      src:  X I X'?1."?" K DDQ D ^DIR1 D
+0.003483:               RtnLoad ^DIR1
+0.003503:               CALL at ^DIR1
+              ARG [ 0] STR (len=1): "E"
+0.003507:                 QUIT at +98^DIR1
+                          src:  Q
+0.003509:               QUIT at +10^DIR1
+                        src:  S:X?.E1C.E %E=1 Q:'%E!(X'?.E1L.E)!(%A["S")!(%A["Y")!((%T=1)&((%B["P")!(%B["S")))!(%A["P")
+0.003509:             RtnLoad ^DIR
+0.003515:             RtnLoad ^DIRQ
+0.003518:             QUIT at +10^DIRQ
+                      src:  Q
+0.003522:           RtnLoad ^ENEQ1
+0.003525:           QUIT at +56^ENEQ1
+                    src:  Q
+0.003526:         RtnLoad ^XQ1
+9.893050:         QUIT at +22676^XQ1
+                HALT
+
+=== SelfTest-control-001 — PID 22380 — started 2026-11-09T15:43:18.520Z — background job started by the probe: 40 × $$GET1^DIQ(6914,487,5) and $D(^ENG(6914,"FC")) over 20 s
+0.000000:     START at ^Harness.Experiment.RuntimeTrace.1
+              STACK [ 0] D - zWorker+3^Harness.Experiment.RuntimeTrace.1 +1
+20.287284:    QUIT at +157^Harness.Experiment.RuntimeTrace.1
+              src:  Quit
+              HALT
+

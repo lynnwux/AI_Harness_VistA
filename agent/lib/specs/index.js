@@ -33,7 +33,13 @@ const designHash = apiSpec => sha({ graph: apiSpec.inputs.graph, decisions: apiS
 // The orchestrator hash excludes aiQuestions and implemented.ai, so AI-layer decisions and a finished AI build never
 // make it look stale (one-way rule).
 // The AI hash adds the inventory because the spec depends on it.
-function inputHashes(layer, { graph, record, implemented, inventory }) {
+// Discovery candidates are evidence awaiting promotion in the Decide chat; no spec reads them, so they never stale a build.
+const specGraph = g => g && Array.isArray(g.capabilities)
+  ? { ...g, capabilities: g.capabilities.map(({ discoveryCandidates: _dc, ...c }) => c) }
+  : g;
+
+function inputHashes(layer, { graph: fullGraph, record, implemented, inventory }) {
+  const graph = specGraph(fullGraph);
   if (layer === "api") return { graph: sha(graph), decisions: sha(api.dataSlice(graph, record)), implemented: sha(apiServices(implemented)) };
   if (layer === "orchestrator") {
     const { aiQuestions: _aq, ...recordWithout } = record;

@@ -265,8 +265,8 @@ const EMBED = {
           "role": "Prompt serial; duplicate-check via FC cross-reference",
           "calls": [
             "^DIR",
-            "$UP^XLFSTR",
-            "$GET1^DIQ"
+            "$$UP^XLFSTR",
+            "$$GET1^DIQ"
           ],
           "meta": {
             "provenance": "observed",
@@ -386,7 +386,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": true
         },
         {
           "id": "FLD.serial",
@@ -402,13 +403,16 @@ const EMBED = {
             "confidence": 0.97,
             "evidence": [
               "ENEQ1 ADDEQ: DIE=\"^ENG(6914,\" DR=\"5////\"_ENSERIAL",
-              "live 6914,455 SERIAL_=10001"
+              "live 6914,455 SERIAL_=10001",
+              "ENEQ1 ASKSER lines 78-95: optional prompt + FC soft-dedup with override (routine source, 2026-09-29)"
             ],
             "workflows": [
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false,
+          "legacyInput": "OPTIONAL — ASKSER lets the clerk press <return> to skip. On a matching canonical serial (FC index: uppercased, spaces and punctuation stripped, one trailing space appended, cut to 30 characters) it lists existing matches and asks to reconfirm (default NO); a duplicate is ALLOWED on override. Not enforced-unique."
         },
         {
           "id": "FLD.serialC",
@@ -430,7 +434,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.enteredBy",
@@ -451,7 +456,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.dateEntered",
@@ -472,7 +478,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "XREF.B",
@@ -527,7 +534,7 @@ const EMBED = {
             "provenance": "observed",
             "confidence": 0.92,
             "evidence": [
-              "ENEQ1 ASKSER: ENX=$UP^XLFSTR($TR(ENSERIAL,...)) ; $O(^ENG(6914,\"FC\",ENX,ENI))"
+              "ENEQ1 ASKSER: ENX=$$UP^XLFSTR($TR(ENSERIAL,...)) ; $O(^ENG(6914,\"FC\",ENX,ENI))"
             ],
             "workflows": [
               "WF.EquipmentMgmt.NewInventoryEntry"
@@ -601,7 +608,12 @@ const EMBED = {
             "conditions": []
           },
           "lookupTable": "MANUFACTURER_LIST_FILE6912",
-          "lookupCount": 5175
+          "lookupCount": 5175,
+          "required": false,
+          "sample": {
+            "value": "1",
+            "label": "Sargent & Greenleaf, Inc."
+          }
         },
         {
           "id": "FLD.mfgrEquipmentName",
@@ -622,7 +634,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.model",
@@ -643,7 +656,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.equipmentCategory",
@@ -668,7 +682,12 @@ const EMBED = {
             "conditions": []
           },
           "lookupTable": "EQUIPMENT_CATEGORY6911",
-          "lookupCount": 600
+          "lookupCount": 600,
+          "required": false,
+          "sample": {
+            "value": "1",
+            "label": "X-RAY GENERATOR #A201"
+          }
         },
         {
           "id": "FLD.typeOfEntry",
@@ -691,7 +710,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.acquisitionMethod",
@@ -714,7 +734,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.acquisitionDate",
@@ -736,7 +757,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.vendorPointer",
@@ -761,7 +783,12 @@ const EMBED = {
             "conditions": []
           },
           "lookupTable": "VENDOR440",
-          "lookupCount": 2627
+          "lookupCount": 2627,
+          "required": false,
+          "sample": {
+            "value": "1",
+            "label": "OMNIS COMPUTER SUPPLIES"
+          }
         },
         {
           "id": "FLD.totalAssetValue",
@@ -785,7 +812,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.warrantyExpDate",
@@ -807,7 +835,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.replacingEntryNumber",
@@ -832,7 +861,12 @@ const EMBED = {
             "conditions": []
           },
           "lookupTable": "EQUIPMENT_INV_6914",
-          "lookupCount": 289
+          "lookupCount": 289,
+          "required": false,
+          "sample": {
+            "value": "6",
+            "label": "AUTOMATIC DOOR"
+          }
         },
         {
           "id": "FLD.categoryStockNumber",
@@ -857,7 +891,12 @@ const EMBED = {
             "conditions": []
           },
           "lookupTable": "CATEGORY_STOCK_NUMBER6917",
-          "lookupCount": 4013
+          "lookupCount": 4013,
+          "required": false,
+          "sample": {
+            "value": "1",
+            "label": "1005-000667"
+          }
         },
         {
           "id": "FLD.servicePointer",
@@ -1100,7 +1139,12 @@ const EMBED = {
               "value": "1042",
               "label": "VOLUNTARY"
             }
-          ]
+          ],
+          "required": false,
+          "sample": {
+            "value": "1046",
+            "label": "ACCOUNTS RECEIVABLE"
+          }
         },
         {
           "id": "FLD.useStatus",
@@ -1123,7 +1167,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.parentSystem",
@@ -1148,7 +1193,12 @@ const EMBED = {
             "conditions": []
           },
           "lookupTable": "EQUIPMENT_INV_6914",
-          "lookupCount": 289
+          "lookupCount": 289,
+          "required": false,
+          "sample": {
+            "value": "6",
+            "label": "AUTOMATIC DOOR"
+          }
         },
         {
           "id": "FLD.location",
@@ -1173,7 +1223,12 @@ const EMBED = {
             "conditions": []
           },
           "lookupTable": "ENG_SPACE6928",
-          "lookupCount": 234
+          "lookupCount": 234,
+          "required": false,
+          "sample": {
+            "value": "33",
+            "label": "201 — OFFICE, PHYSICIAN"
+          }
         },
         {
           "id": "FLD.lockoutRequired",
@@ -1195,7 +1250,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.conditionCode",
@@ -1218,7 +1274,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.stationNumber",
@@ -1240,7 +1297,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.vaPmNumber",
@@ -1262,7 +1320,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.serviceContract",
@@ -1284,7 +1343,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.serviceContractCost",
@@ -1307,7 +1367,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.localIdentifier",
@@ -1329,7 +1390,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.physicalInventoryDate",
@@ -1351,7 +1413,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.jcaho",
@@ -1373,7 +1436,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.controlledItem",
@@ -1395,7 +1459,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.investmentCategory",
@@ -1419,7 +1484,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.fundControlPoint",
@@ -1441,7 +1507,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.fund",
@@ -1536,7 +1603,12 @@ const EMBED = {
               "value": "AMAFRE",
               "label": "Medical Research"
             }
-          ]
+          ],
+          "required": false,
+          "sample": {
+            "value": "2",
+            "label": "4014 — Canteen Service"
+          }
         },
         {
           "id": "FLD.budgetObjectCode",
@@ -1619,7 +1691,12 @@ const EMBED = {
               "value": "3160",
               "label": "EQUIPMENT UNDER CAPITAL LEASE"
             }
-          ]
+          ],
+          "required": false,
+          "sample": {
+            "value": "16",
+            "label": "2335 — SOFTWARE"
+          }
         },
         {
           "id": "FLD.standardGeneralLedger",
@@ -1670,7 +1747,12 @@ const EMBED = {
               "value": "6100",
               "label": "EXPENSED NX EQUIPMENT (ALL TYPES)"
             }
-          ]
+          ],
+          "required": false,
+          "sample": {
+            "value": "9",
+            "label": "1524 — PROPERTY PENDING DISPOSAL"
+          }
         },
         {
           "id": "FLD.equityAccount",
@@ -1693,7 +1775,8 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
-          }
+          },
+          "required": false
         },
         {
           "id": "FLD.subaccount",
@@ -1718,7 +1801,12 @@ const EMBED = {
             "conditions": []
           },
           "lookupTable": "BUDGET_OBJECT_CODE420_2",
-          "lookupCount": 325
+          "lookupCount": 325,
+          "required": false,
+          "sample": {
+            "value": "1001",
+            "label": "1001 Administrative Personnel not Otherwise Classified"
+          }
         }
       ],
       "businessRules": [
@@ -1812,7 +1900,31 @@ const EMBED = {
             "conditions": [
               "prompt gated by ^ENG(6910.2 'ASK INCOMING INSPECTION W.O.'"
             ]
-          }
+          },
+          "targetKind": "vistaWrite",
+          "legacyInvocation": "conditional",
+          "legacyEvidence": [
+            {
+              "routine": "ENEQ1",
+              "line": "ADDEQ",
+              "says": "The work-order prompt appears only if site parameter ASK INCOMING INSPECTION W.O. (file 6910.2) exists with piece 2 set; the default answer is YES when piece 2 = 2, otherwise NO. On YES it calls IIWO^ENWONEW3(ENNXL)."
+            },
+            {
+              "routine": "ENWONEW3",
+              "line": "IIWO (line 5)",
+              "says": "Shop: the site's incoming-inspection section (^DIC(6910,1,0) piece 13), else the item's responsible shop (^ENG(6914,ien,4)), else the temporary work-order section (piece 6). The clerk is asked if it is still blank or if they hold key ENEDPM (non-holders are restricted to receiving areas). No shop means no work order."
+            },
+            {
+              "routine": "ENWONEW3",
+              "line": "IIWO",
+              "says": "Creates the work order via WONUM^ENWONEW and WOFILL^ENWONEW, then files: 6 = Incoming Inspection, 17 = AVERAGE, 32 = PENDING for receiving shops (shop #100 > 89) else IN PROGRESS, 10 = TODAY for receiving shops, sub-file 6920.035 .01 = I1, 18 = the equipment IEN, 3 = the item's LOCATION (6914 fld 24)."
+            },
+            {
+              "routine": "ENWONEW3",
+              "line": "IIWO",
+              "says": "Clerk-entered fields: 16 technician (defaulted from the item's responsible technician), 7 contact, 8 phone, 40 comments."
+            }
+          ]
         },
         {
           "id": "SIDE.PMSchedule",
@@ -1834,7 +1946,26 @@ const EMBED = {
               "key ENEDPM",
               "user confirms"
             ]
-          }
+          },
+          "targetKind": "vistaWrite",
+          "legacyInvocation": "conditional",
+          "writes": {
+            "file": "6914.04",
+            "global": "^ENG(6914,ien,4,*)",
+            "access": "create"
+          },
+          "legacyEvidence": [
+            {
+              "routine": "ENEQ1",
+              "line": "ADDEQ",
+              "says": "Shown only to holders of key ENEDPM: 'Would you like to include this item in the PM program' (default YES). On YES it runs DINV^ENEQPMP3 when a PM schedule already exists, then XNPMSE^ENEQPMP."
+            },
+            {
+              "routine": "ENEQPMP",
+              "line": "lines 12–34",
+              "says": "Reads the item's EQUIPMENT CATEGORY (6914 node 1 piece 1). If that category has a standard PM schedule (^ENG(6911,cat,4)) the clerk is offered it and, on acceptance, it is copied onto the item (^ENG(6914,ien,4)). There is no asset-value or capitalization condition."
+            }
+          ]
         },
         {
           "id": "SIDE.FinancialAsset",
@@ -1856,7 +1987,46 @@ const EMBED = {
             "conditions": [
               "RULE.FinancialEligibility"
             ]
-          }
+          },
+          "targetKind": "vistaWrite",
+          "legacyInvocation": "conditional",
+          "writes": {
+            "file": "6915.2",
+            "global": "^ENG(6915.2,*)",
+            "access": "create"
+          },
+          "legacyEvidence": [
+            {
+              "routine": "ENEQ1",
+              "line": "ADDEQ",
+              "says": "Legacy POLICY: capitalized NX equipment is reported to FAP. Mechanism: for TYPE OF ENTRY = NX and INVESTMENT CATEGORY = 1 (CAPITALIZED/ACCOUNTABLE), the clerk holding key ENFACS is asked 'Do you wish to send an FA document to Austin' with default YES; YES runs ^ENFAACQ. Override: a NO — the bulletin then flags 'It was NOT reported to FAP' and the item can be reported later."
+            },
+            {
+              "routine": "DD 6914",
+              "line": "fld 61 BUDGET OBJECT CODE",
+              "says": "Only capitalized assets are to be recorded in the Fixed Assets Package."
+            },
+            {
+              "routine": "ENFAACQ",
+              "line": "VALEQ (line 32)",
+              "says": "Validates the equipment via ^ENFAVAL into temporary global ^TMP($J,\"BAD\",ien); any problem aborts with 'No action taken. Database unchanged.'"
+            },
+            {
+              "routine": "ENFAACQ",
+              "line": "ADDFA (line 37)",
+              "says": "Creates an FA DOCUMENT LOG entry in file 6915.2 (field 1 = NOW, 1.5 = DUZ)."
+            },
+            {
+              "routine": "ENFAACQ",
+              "line": "UPDATE (line 59)",
+              "says": "Updates the equipment record: fills STATION NUMBER (node 9 piece 5) from the FA site if blank, normalizes TOTAL ASSET VALUE (fld 12, node 2 piece 3) to two decimals, defaults day 01 on acquisition and replacement dates; stores TOTAL ASSET VALUE on the code sheet (^ENG(6915.2,ien,200)) and adjusts the FAP balance (ADJBAL^ENFABAL)."
+            },
+            {
+              "routine": "ENFAACQ",
+              "line": "UPDATE (line 83)",
+              "says": "Transmits the code sheet to FAP via ^ENFAXMT; an adjustment voucher may also be created ($$AVP^ENFAAV)."
+            }
+          ]
         },
         {
           "id": "SIDE.Bulletin",
@@ -1874,6 +2044,97 @@ const EMBED = {
               "WF.EquipmentMgmt.NewInventoryEntry"
             ],
             "conditions": []
+          },
+          "targetKind": "notification",
+          "legacyInvocation": "unconditional",
+          "legacyEvidence": [
+            {
+              "routine": "ENEQ1",
+              "line": "ADDEQ",
+              "says": "S DA=ENNXL D BULL^ENEQ3 — runs unconditionally after every new entry."
+            },
+            {
+              "routine": "ENEQ3",
+              "line": "EQMAS (line 56)",
+              "says": "S DA=ENNXL D BULL — the multiple-entry copy also sends it unconditionally for every additional item."
+            },
+            {
+              "routine": "ENEQ3",
+              "line": "BULL (line 60)",
+              "says": "Recipients: mail group 'EN NEW EQUIPMENT <station number>' if it exists with at least one member (CHKMGRP, MAIL GROUP file 3.8), otherwise 'EN NEW EQUIPMENT' on the same test. If neither qualifies, no bulletin is sent and nothing is reported."
+            },
+            {
+              "routine": "ENEQ3",
+              "line": "BULL",
+              "says": "Sends MailMan bulletin EN NEW EQUIPMENT from sender AEMS/MERS with: 1 equipment IEN, 2 the entering user's name (from DUZ), 3 MFGR. EQUIPMENT NAME (node 0 piece 2), 4 category, 5 service, 6 station number, 7 'Item is [NOT] capitalized NX.' plus, when capitalized NX, 'It was [NOT] reported to FAP.' Missing 4–6 are sent as MISSING."
+            },
+            {
+              "routine": "XMB",
+              "line": "lines 12–16",
+              "says": "MailMan delivers a bulletin to the XMY recipients the caller sets AND to the members of the mail groups listed on the bulletin's own entry in file 3.6."
+            }
+          ],
+          "messageTemplate": {
+            "source": "BULLETIN file 3.6 · EN NEW EQUIPMENT (IEN 114)",
+            "sender": "AEMS/MERS",
+            "subject": "NEW EQUIPMENT: ENTRY #|1|",
+            "body": [
+              "A new equipment record has been added to the AEMS/MERS database.",
+              "The ENTRY NUMBER is |1|.",
+              "It was entered by |2|.",
+              "The MFGR EQUIPMENT NAME is |3|.",
+              "The EQUIPMENT CATEGORY is |4|.",
+              "The SERVICE is |5|.",
+              "The STATION NUMBER is |6|.",
+              "",
+              "|7|"
+            ],
+            "params": [
+              {
+                "n": 1,
+                "value": "the equipment IEN (ENTRY NUMBER, fld .01)",
+                "source": "ien"
+              },
+              {
+                "n": 2,
+                "value": "the entering user's name — NEW PERSON (file 200) .01 for DUZ",
+                "dependsOn": "operatorIdentity",
+                "source": "operatorIdentity"
+              },
+              {
+                "n": 3,
+                "value": "MFGR. EQUIPMENT NAME (fld 3, node 0 piece 2)",
+                "field": "3"
+              },
+              {
+                "n": 4,
+                "value": "the EQUIPMENT CATEGORY name (fld 6 → file 6911)",
+                "ifBlank": "MISSING",
+                "field": "6",
+                "pointer": true
+              },
+              {
+                "n": 5,
+                "value": "the SERVICE POINTER name (fld 21, node 3 piece 2 → file 49)",
+                "ifBlank": "MISSING",
+                "field": "21",
+                "pointer": true
+              },
+              {
+                "n": 6,
+                "value": "STATION NUMBER (fld 60), else the site default (file 6910 fld 1)",
+                "ifBlank": "MISSING",
+                "field": "60"
+              },
+              {
+                "n": 7,
+                "value": "ENEQ3 lines 92–96: 'Item is [NOT] capitalized NX.' (capitalized NX = TYPE OF ENTRY = NX and INVESTMENT CATEGORY = 1); for capitalized NX items adds 'It was [NOT] reported to FAP.' from $$CHKFA^ENFAUTL (an FA document exists)",
+                "dependsOn": "SIDE.FinancialAsset",
+                "capitalizedNX": [{ "field": "7", "equals": "NX" }, { "field": "34", "equals": "1" }],
+                "text": { "capitalized": "Item is capitalized NX.", "notCapitalized": "Item is NOT capitalized NX.", "reported": "It was reported to FAP.", "notReported": "It was NOT reported to FAP." }
+              }
+            ],
+            "recipients": "members of mail group 'EN NEW EQUIPMENT <station>' if it has any, otherwise 'EN NEW EQUIPMENT' (CHKMGRP), plus the members of the groups listed on the bulletin itself (XMB lines 12–16): CLICKAAH. Nothing is sent if neither EN group qualifies."
           }
         }
       ],
@@ -1947,7 +2208,10 @@ const EMBED = {
             "provenance": "observed",
             "confidence": 0.85,
             "evidence": [
-              "ENEQ1 ADDEQ FA block: for NX + capitalized items the ENFACS key holder is prompted with default YES (policy: report); NO is a clerk override", "DD fld 61 BUDGET OBJECT CODE: Only capitalized assets are to be recorded in the Fixed Assets Package", "ENEQ3 BULL lines 93-96: the bulletin flags a capitalized NX item that was not sent: 'It was NOT reported to FAP'", "ENFAACQ header: also called from ENEQ2, ENEQ3, ENFADEL, ENFAXMTM and in batch by CMR or station (report later)"
+              "ENEQ1 ADDEQ FA block: for NX + capitalized items the ENFACS key holder is prompted with default YES (policy: report); NO is a clerk override",
+              "DD fld 61 BUDGET OBJECT CODE: Only capitalized assets are to be recorded in the Fixed Assets Package",
+              "ENEQ3 BULL lines 93-96: the bulletin flags a capitalized NX item that was not sent: 'It was NOT reported to FAP'",
+              "ENFAACQ header: also called from ENEQ2, ENEQ3, ENFADEL, ENFAXMTM and in batch by CMR or station (report later)"
             ],
             "workflows": [
               "WF.EquipmentMgmt.NewInventoryEntry"
@@ -2069,7 +2333,7 @@ const EMBED = {
             "provenance": "observed",
             "confidence": 0.95,
             "evidence": [
-              "FILE^DICN, ^DIE, $GET1^DIQ, ^DIR in ENEQ1"
+              "FILE^DICN, ^DIE, $$GET1^DIQ, ^DIR in ENEQ1"
             ],
             "workflows": [
               "WF.EquipmentMgmt.NewInventoryEntry"
@@ -2080,12 +2344,12 @@ const EMBED = {
         {
           "id": "DEP.XLFSTR",
           "target": "XLFSTR",
-          "why": "serial canonicalization ($UP)",
+          "why": "serial canonicalization ($$UP)",
           "meta": {
             "provenance": "observed",
             "confidence": 0.9,
             "evidence": [
-              "$UP^XLFSTR in ASKSER"
+              "$$UP^XLFSTR in ASKSER"
             ],
             "workflows": [
               "WF.EquipmentMgmt.NewInventoryEntry"
@@ -2213,6 +2477,428 @@ const EMBED = {
             "OQ.FAConfirmation"
           ],
           "note": "Post-save prompts after the record is filed; not a ScreenMan form screen."
+        }
+      ],
+      "discoveryCandidates": [
+        {
+          "id": "DC.SEC.ENEDSPEX",
+          "kind": "securityRule",
+          "name": "Key ENEDSPEX is required to edit SPEX (specifications)",
+          "finding": "Screen ENEQ2 holds a field-level security rule in its definition, not in a routine: after COMMENTS, a user without key ENEDSPEX jumps past SPEX; landing on SPEX without the key shows a message and moves on. No EN* routine references ENEDSPEX, so XINDEX cannot see it. COMMENTS and SPEX (word-processing fields 6914.01 / 6914.03) are not in the graph.",
+          "source": [
+            "screen-action-survey",
+            "tmp-sampler"
+          ],
+          "evidence": [
+            "6910.9 screen 20 (ENEQ2) entry 18 COMMENTS(W), post-action: I '$D(^XUSEC(\"ENEDSPEX\",DUZ)) S DJNX=20",
+            "6910.9 screen 20 (ENEQ2) entry 19 SPEX(W), pre-action: I '$D(^XUSEC(\"ENEDSPEX\",DUZ)) W !,\"You must hold key ENEDSPEX to edit this field.\",... S DJNX=20",
+            "sampled run (PID 24468, 2026-11-09 16:20:24 UTC): routine ENJINJ3, last global reference ^XUSEC(\"ENEDSPEX\",1)"
+          ],
+          "relatesTo": [
+            "SEC.ENFACS",
+            "SEC.ENEDPM"
+          ],
+          "suggestedAs": "a security item SEC.ENEDSPEX, next to SEC.ENFACS and SEC.ENEDPM",
+          "status": "candidate",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.99,
+            "evidence": [
+              "experiments/screen-actions/raw/entries.json: screen 20 entries 18-19",
+              "experiments/tmp-sampler/README.md: 16:20:24 row"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.RULE.FALockedFields",
+          "kind": "businessRule",
+          "name": "Capitalized assets: nine fields can be changed only through an FAP / FR / FD document",
+          "finding": "When the equipment has a FAP log entry ($D(^ENG(6915.2,\"B\",DA))) and $$CHKFA^ENFAUTL(DA) says it is capitalized, the screen skips the field and tells the clerk which document type is needed. ENEQ1: CSN (FAP), CMR (FAP), ACQ. METHOD (FAP). ENEQ2: DISP METHOD (FAP, message in DISPW^ENLIB3). ENEQ3: INVESTMENT CATEGORY (FD, to make it non-capitalized), FUND, FCP, BOC (FR), SGL ACCOUNT, A/O (FAP). CMR (fld 19) and DISP METHOD are not in the graph. On a new entry no FAP log exists yet, so the rule applies when the same screens edit an existing record.",
+          "source": [
+            "screen-action-survey"
+          ],
+          "evidence": [
+            "6910.9 screen 19 entry 5 CSN, pre-action: I $D(^ENG(6915.2,\"B\",DA)) S X=$$CHKFA^ENFAUTL(DA) I $P(X,U) W !,\"Since this item is capitalized NX, CSN may be edited only via an FAP document.\" ... S DJNX=6",
+            "6910.9 screen 19 entry 8 CMR, pre-action: ... I $P(X,U)=1 W \"Capitalized asset. CMR may only be edited via FAP documents.\" ... S DJNX=9",
+            "6910.9 screen 19 entry 11 ACQ. METHOD, pre-action: ... \"Capitalized asset. ACQ METHOD edits require an FAP document.\" ... S DJNX=12",
+            "6910.9 screen 20 entry 15 DISP METHOD, pre-action: ... I $P(X,U) D DISPW^ENLIB3 S DJNX=17; DISPW^ENLIB3: \"Capitalized asset. DISP METHOD may be edited only by means of FAP documents.\"",
+            "6910.9 screen 27 entries 2-7, pre-actions: INVESTMENT CATEGORY \"...non-capitalized only after an FD document.\"; FUND / FCP / BOC \"...require an FR document.\"; SGL ACCOUNT / A/O \"...require an FAP document.\"; all S DJNX=8"
+          ],
+          "relatesTo": [
+            "FLD.categoryStockNumber",
+            "FLD.acquisitionMethod",
+            "FLD.investmentCategory",
+            "FLD.fund",
+            "FLD.fundControlPoint",
+            "FLD.budgetObjectCode",
+            "FLD.standardGeneralLedger",
+            "FLD.subaccount",
+            "SIDE.FinancialAsset",
+            "RULE.FinancialEligibility"
+          ],
+          "suggestedAs": "a business rule RULE.FALockedFields: on a capitalized asset these fields change only through the named FA document",
+          "status": "candidate",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.95,
+            "evidence": [
+              "experiments/screen-actions/raw/entries.json: screens 19, 20, 27 pre-actions calling CHKFA^ENFAUTL",
+              "experiments/xindex/_src/ENLIB3.int.txt: DISPW"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.RULE.LeaseAndAssetValue",
+          "kind": "businessRule",
+          "name": "ACQ. METHOD gates ASSET VALUE and LEASE COST, and the screen clears them directly in the global",
+          "finding": "ASSET VALUE (TOTAL ASSET VALUE, fld 12, node 2 piece 3) is skipped when ACQ. METHOD (node 3 piece 4) is L (lease), and an existing value is cleared. LEASE COST (node 2 piece 12) is offered only for L or M (capital lease), otherwise skipped and cleared. VENPRE^ENLIB, the VENDOR pre-action, repeats both clears because the acquisition post-action does not run on deletes. All clears are naked sets $P(^(2),U,n)=\"\" on ^ENG(6914,DA,2): they bypass FileMan, so no input transform, cross-reference or audit runs. LEASE COST is not in the graph.",
+          "source": [
+            "screen-action-survey",
+            "xindex"
+          ],
+          "evidence": [
+            "6910.9 screen 19 entry 14 ASSET VALUE, pre-action: I $P($G(^ENG(6914,DA,3)),U,4)=\"L\" S DJNX=15 I $P($G(^(2)),U,3)]\"\" S V(14)=\"\",$P(^(2),U,3)=\"\",DJSV=V D N^ENJDPL S V=DJSV",
+            "6910.9 screen 19 entry 13 LEASE COST, pre-action: I \"^L^M^\"'[(U_$P($G(^ENG(6914,DA,3)),U,4)_U) S DJNX=14 I $P($G(^(2)),U,12)]\"\" S V(13)=\"\",$P(^(2),U,12)=\"\",...",
+            "6910.9 screen 19 entry 12 VENDOR, pre-action: S V(12)=$$GET1^DIQ(6914,DA,10) D VENPRE^ENLIB",
+            "VENPRE+4^ENLIB: ;clear asset value if LEASE; VENPRE+5^ENLIB: ;clear lease cost if not LEASE or CAPITAL LEASE; VENPRE+2: \"Needed because post-action on acquisition won't execute on deletes\""
+          ],
+          "relatesTo": [
+            "FLD.acquisitionMethod",
+            "FLD.totalAssetValue"
+          ],
+          "suggestedAs": "a business rule RULE.AcquisitionMethodGates on FLD.totalAssetValue and a new lease-cost field; the API should clear through FileMan, not the global",
+          "status": "candidate",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.95,
+            "evidence": [
+              "experiments/screen-actions/raw/entries.json: screen 19 entries 12-14",
+              "experiments/xindex/_src/ENLIB.int.txt: VENPRE"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.RULE.CMRChangeCheck",
+          "kind": "businessRule",
+          "name": "A CMR change is backed out when the equipment has an active IT assignment",
+          "finding": "The CMR post-action CMRDJPS^ENTIDD compares the new CMR with the value before the edit and calls $$CMRCHK^ENTIDD. The change is prevented when the equipment has an active IT assignment (^ENG(6916.3,\"AEA\",DA)), unless the new CMR is IT-tracked (6914.1 node 0 piece 9) or its name starts with 99. A prevented change is refiled to the old value with FILE^DIE and the cursor returns to CMR. CMRCHK is also the CMR field's input transform. CMR (fld 19) is not in the graph.",
+          "source": [
+            "screen-action-survey",
+            "xindex"
+          ],
+          "evidence": [
+            "6910.9 screen 19 entry 8 CMR, post-action: D CMRDJPS^ENTIDD",
+            "CMRDJPS^ENTIDD: S ENX=$$CMRCHK^ENTIDD(DA,ENNEW) ... S ENFDA(6914,DA_\",\",19)=ENOLD D FILE^DIE(\"\",\"ENFDA\") ... S DJNX=8",
+            "CMRCHK^ENTIDD: called by EQUIPMENT INV. file CMR field Input Transform; Q:'$D(^ENG(6916.3,\"AEA\",ENDA)); Q:$P(ENY,\"^\",9); Q:$E($P(ENY,\"^\"),1,2)=\"99\"; \"Equipment has an active IT assignment.\""
+          ],
+          "relatesTo": [
+            "DC.RULE.FALockedFields"
+          ],
+          "suggestedAs": "a field (CMR, fld 19) and a business rule RULE.CMRAssignment enforced by the API",
+          "status": "candidate",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.95,
+            "evidence": [
+              "experiments/screen-actions/raw/entries.json: screen 19 entry 8",
+              "experiments/xindex/_src/ENTIDD.int.txt: CMRDJPS, CMRCHK"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.DEP.ScreenActionRoutines",
+          "kind": "dependency",
+          "name": "Routines called only from screen definitions, out of XINDEX's reach",
+          "finding": "Screen pre/post-action code is FileMan data run by indirection, so XINDEX does not follow it. The screens call: LAST^ENEQ3 (MANUFACTURER, shows the last service episode when editing an existing entry), VENPRE^ENLIB, CMRDJPS^ENTIDD, DISPM^ENLIB3 and DISPW^ENLIB3, $$CHKFA^ENFAUTL, $$GET1^DIQ, and N^ENJDPL (ScreenMan redisplay). Other screen code only fills derived displays: CSN post-action re-reads MFGR EQPT NAME, BOC post-action shows SGL (fld 38), LIFE EXPECTANCY / REPLACEMENT DATE / SOURCE pre-actions show stored values, PARENT SYSTEM post-action copies node 9 piece 12 into V(21).",
+          "source": [
+            "screen-action-survey"
+          ],
+          "evidence": [
+            "6910.9 screen 19 entry 2 MANUFACTURER, pre-action: I $D(ENDA),$G(XGRT)=\"\" S DA=ENDA D LAST^ENEQ3",
+            "6910.9 screen 19 entry 12 VENDOR: D VENPRE^ENLIB; entry 8 CMR: D CMRDJPS^ENTIDD",
+            "6910.9 screen 20 entry 15 DISP METHOD: D:$G(V(V))]\"\" DISPM^ENLIB3 ... D DISPW^ENLIB3",
+            "6910.9 screen 20 entry 2 PARENT SYSTEM, post-action: I $G(X)?1.N,$P($G(^ENG(6914,DA,9)),U,12)]\"\" S DJNX=3,V(21)=$P(^(9),U,12),DJSV=V D N^ENJDPL S V=DJSV",
+            "6910.9 screen 27 entry 5 BOC, post-action: S V(6)=$$GET1^DIQ(6914,DA,38)"
+          ],
+          "relatesTo": [
+            "DC.RULE.FALockedFields",
+            "DC.RULE.CMRChangeCheck",
+            "DC.RULE.LeaseAndAssetValue"
+          ],
+          "suggestedAs": "routines ENLIB, ENLIB3, ENTIDD and LAST^ENEQ3 in the routines list, marked 'called from screen 6910.9'",
+          "status": "candidate",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.99,
+            "evidence": [
+              "experiments/screen-actions/raw/entries.json: 21 of 53 entries on screens 19, 20, 27 carry code"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.SIDE.FAPBalances",
+          "kind": "sideEffect",
+          "name": "The FA side effect also writes FAP BALANCES (6915.9), reads two more files, and has a compensating delete",
+          "finding": "ADJBAL^ENFABAL sets FAP BALANCES ^ENG(6915.9) through UPDATE^DIE: a second persistent write of the financial-asset side effect. The FA path reads FAP DOCUMENT COUNTERS ^ENG(6915.1) and FD DOCUMENT LOG ^ENG(6915.5). DEL^ENFAACQ removes the FA log entry with DIK when the document is not completed.",
+          "source": [
+            "xindex"
+          ],
+          "evidence": [
+            "ADJBAL+18..31^ENFABAL: sets ^ENG(6915.9) through UPDATE^DIE",
+            "SETUP+5^ENFAACQ reads ^ENG(6915.1); CHKFA+8^ENFAUTL reads ^ENG(6915.5)",
+            "DEL^ENFAACQ calls DIK"
+          ],
+          "relatesTo": [
+            "SIDE.FinancialAsset"
+          ],
+          "suggestedAs": "a second write (file 6915.9) and a compensating action on SIDE.FinancialAsset",
+          "status": "candidate",
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.9,
+            "evidence": [
+              "experiments/xindex/README.md: 'What it adds', SIDE.FinancialAsset rows"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.SEAM.FAValidation",
+          "kind": "serviceSeam",
+          "name": "FA validation hands its problem list through ^TMP($J,\"BAD\") — a candidate service seam",
+          "finding": "^ENFAVAL → BAD^ENFAACQ writes ^TMP($J,\"BAD\",<equipment DA>,n) and a count; VALEQ checks the count; LISTP^ENFAXMTM shows the list and kills ^TMP($J). The graph's evidence mentions VALEQ and ^TMP; this adds the producer and the consumer. A modern service would be 'validate equipment for an FA document → list of problems', reproducing ENFAVAL's checks rather than reading ^TMP.",
+          "source": [
+            "xindex"
+          ],
+          "evidence": [
+            "^ENFAVAL → BAD^ENFAACQ: sets ^TMP($J,\"BAD\",DA,n) and its count",
+            "VALEQ: checks the count; LISTP^ENFAXMTM: reads, displays, kills ^TMP($J)"
+          ],
+          "relatesTo": [
+            "SIDE.FinancialAsset",
+            "RULE.FinancialEligibility"
+          ],
+          "suggestedAs": "a modernization candidate: a validate-for-FA service returning the problem list",
+          "status": "candidate",
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.85,
+            "evidence": [
+              "experiments/xindex/README.md: SIDE.FinancialAsset INTERMEDIATE_VIEW row"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.SIDE.BulletinAsync",
+          "kind": "asyncBoundary",
+          "name": "The bulletin is handed to TaskMan (XMB^XMB → TASK^XMXBULL) and only sent when TaskMan runs",
+          "finding": "BULL^ENEQ3 hands off with XMB^XMB at BULL+38, which queues TaskMan task TASK^XMXBULL. BULL reads NEW PERSON ^VA(200), SERVICE/SECTION ^DIC(49) and ^ENG(6911); CHKMGRP resolves the mail group with FIND1^DIC / LIST^DIC. TaskMan on VADEMO is not running tasks, so the legacy bulletin is queued and never sent there (tasks 6002674-6002676 stayed at status 1).",
+          "source": [
+            "xindex",
+            "tmp-sampler",
+            "runtime-trace"
+          ],
+          "evidence": [
+            "BULL+38^ENEQ3: XMB^XMB",
+            "BULL^ENEQ3 reads ^VA(200), ^DIC(49), ^ENG(6911); CHKMGRP: FIND1^DIC, LIST^DIC",
+            "task 6002676 TASK^XMXBULL queued for record 489, status 1, not run (2026-11-09)"
+          ],
+          "relatesTo": [
+            "SIDE.Bulletin"
+          ],
+          "suggestedAs": "an async-boundary note on SIDE.Bulletin; the orchestrator's direct email does not depend on TaskMan",
+          "status": "candidate",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.95,
+            "evidence": [
+              "experiments/xindex/README.md: SIDE.Bulletin row",
+              "experiments/tmp-sampler/README.md: state after the run"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.SIDE.WorkOrderDeps",
+          "kind": "dependency",
+          "name": "The work order reads ENGINEERING SECTION LIST, the employee file and NEW PERSON",
+          "finding": "IIWO^ENWONEW3 reads ENGINEERING SECTION LIST ^DIC(6922), ^ENG(\"EMP\") and NEW PERSON ^VA(200), and writes with UPDATE^DIE / WP^DIE; WONUM^ENWONEW numbers it with %DT and FILE^DICN. In the sampled run FileMan (DIED) then edited the new work order ^ENG(6920,5439).",
+          "source": [
+            "xindex",
+            "tmp-sampler"
+          ],
+          "evidence": [
+            "IIWO^ENWONEW3: reads ^DIC(6922), ^ENG(\"EMP\"), ^VA(200); UPDATE^DIE, WP^DIE",
+            "WONUM^ENWONEW: %DT, FILE^DICN",
+            "sampled run 16:20:46 UTC: routine DIED, last global reference ^ENG(6920,5439,1)"
+          ],
+          "relatesTo": [
+            "SIDE.WorkOrder"
+          ],
+          "suggestedAs": "look-up files and APIs on SIDE.WorkOrder",
+          "status": "candidate",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.9,
+            "evidence": [
+              "experiments/xindex/README.md: SIDE.WorkOrder row",
+              "experiments/tmp-sampler/README.md: 16:20:46 row"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.SIDE.PMScheduleOnRecord",
+          "kind": "sideEffect",
+          "name": "The PM schedule is written on the equipment record itself",
+          "finding": "XNPMSE^ENEQPMP sets ^ENG(6914) at XNPMSE+3: the PM schedule lives in a multiple of the equipment record (the graph's 6914.04). The path also uses ENEQPMP1 and MNTH^ENLIB1 and reads ^ENG(6914.2) and ^DIC(6922).",
+          "source": [
+            "xindex"
+          ],
+          "evidence": [
+            "XNPMSE+3^ENEQPMP: sets ^ENG(6914)",
+            "ENEQPMP1, MNTH^ENLIB1; reads ^ENG(6914.2), ^DIC(6922)"
+          ],
+          "relatesTo": [
+            "SIDE.PMSchedule"
+          ],
+          "suggestedAs": "write-location and look-up evidence on SIDE.PMSchedule",
+          "status": "candidate",
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.9,
+            "evidence": [
+              "experiments/xindex/README.md: SIDE.PMSchedule row"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.ENTRY.MultipleInventoryEntry",
+          "kind": "entryPoint",
+          "name": "A second workflow, Multiple Inventory Entry (EQMAD^ENEQ1), reaches the same save",
+          "finding": "Option ENIN-ENTER-MULTI (19 IEN 363, 'Multiple Inventory Entry') runs EQMAD^ENEQ1, a sibling of EQAD in the same routine. It asks 'Enter multiple equipment inventory items' and converges on ASKSER / ADDEQ, with EQMAS^ENEQ3 for the bulletin. It is the first case of two workflows converging on CAP.CreateEquipment.",
+          "source": [
+            "runtime-trace",
+            "xindex"
+          ],
+          "evidence": [
+            "VISTA.OPTION19 IEN 363: NAME ENIN-ENTER-MULTI, MENU_TEXT Multiple Inventory Entry, ROUTINE EQMAD^ENEQ1 (Atelier SQL, 2026-11-09)",
+            "ENEQ1 EQMAD: ;Multiple Inventory Entry Point; S DIR(\"A\")=\"Enter multiple equipment inventory items\"",
+            "trace run 2 stack: R+2^XQ1 → EQMAD+14^ENEQ1 → A+2^DIR"
+          ],
+          "relatesTo": [],
+          "suggestedAs": "a second workflow WF.EquipmentMgmt.MultipleInventoryEntry sharing CAP.CreateEquipment",
+          "status": "candidate",
+          "meta": {
+            "provenance": "verified",
+            "confidence": 0.95,
+            "evidence": [
+              "experiments/runtime-trace/comparison.md: EQMAD row",
+              "experiments/runtime-trace/_src-ENEQ1.int.txt: EQMAD"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.INFRA.ScreenMan",
+          "kind": "infrastructure",
+          "name": "The ScreenMan engine (EN^ENJ) and its ^TMP form buffer; which screens ran",
+          "finding": "EN^ENJ drives ENJC2, ENJDPL, ENJINJ, ENJINJ1-3, ENJINQ and ENJPARAM; it reads the screens ^ENG(6910.9), ^DD and terminal types ^%ZIS(2). ^TMP($J,\"DJ\",<screen IEN>,<entry #>) is the form buffer, one node per displayed entry (word-processing fields excluded); ^TMP($J,\"DJST\") is its stack, killed on exit. In the sampled run the buffer held screen 19 (ENEQ1, 20 nodes) and screen 20 (ENEQ2, 23 nodes): ENEQ3 (27) was never displayed.",
+          "source": [
+            "xindex",
+            "tmp-sampler"
+          ],
+          "evidence": [
+            "EN^ENJ → ENJC2, ENJDPL, ENJINJ, ENJINJ1, ENJINJ2, ENJINJ3, ENJINQ, ENJPARAM; reads ^ENG(6910.9), ^DD, ^%ZIS(2)",
+            "sampled run 16:20:16 UTC: ^TMP(24468,\"DJ\",19) 20 nodes; 16:20:42 UTC: \"DJ\" 19 + 20 = 43 nodes; no \"DJ\",27"
+          ],
+          "relatesTo": [],
+          "suggestedAs": "an infrastructure dependency DEP.ENJ; screen coverage as a check in each workflow's discovery",
+          "status": "candidate",
+          "meta": {
+            "provenance": "observed",
+            "confidence": 0.95,
+            "evidence": [
+              "experiments/xindex/README.md: DEP.ENJ row",
+              "experiments/tmp-sampler/README.md: Structures"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
+        },
+        {
+          "id": "DC.INFRA.BoundaryAPIs",
+          "kind": "infrastructure",
+          "name": "FileMan, Kernel and MailMan APIs the workflow depends on",
+          "finding": "The reached code calls DIE, DIC, DICN, DIK, DIQ, DIR, DIWP, DIALOG, %DT, %ZIS, %ZISS, XMB and XLFSTR: the legacy integration surface a service replaces or wraps.",
+          "source": [
+            "xindex"
+          ],
+          "evidence": [
+            "boundary calls in the XINDEX closure of EQAD^ENEQ1: DIE, DIC, DICN, DIK, DIQ, DIR, DIWP, DIALOG, %DT, %ZIS, %ZISS, XMB, XLFSTR"
+          ],
+          "relatesTo": [
+            "SIDE.Bulletin",
+            "SIDE.WorkOrder",
+            "SIDE.FinancialAsset",
+            "SIDE.PMSchedule"
+          ],
+          "suggestedAs": "boundary entries in dependencies",
+          "status": "candidate",
+          "meta": {
+            "provenance": "derived",
+            "confidence": 0.95,
+            "evidence": [
+              "experiments/xindex/README.md: Boundaries row",
+              "experiments/xindex/static-index.json"
+            ],
+            "workflows": [
+              "WF.EquipmentMgmt.NewInventoryEntry"
+            ],
+            "conditions": []
+          }
         }
       ]
     }

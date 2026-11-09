@@ -1,0 +1,539 @@
+{
+ "surveyedAtUTC": "2026-11-09T18:18:39.717Z",
+ "screens": [
+  {
+   "ID": "19",
+   "NAME": "ENEQ1"
+  },
+  {
+   "ID": "20",
+   "NAME": "ENEQ2"
+  },
+  {
+   "ID": "27",
+   "NAME": "ENEQ3"
+  }
+ ],
+ "entries": 53,
+ "entriesWithCode": 21,
+ "keys": [
+  "ENEDSPEX"
+ ],
+ "calls": [
+  "LAST^ENEQ3",
+  "CHKFA^ENFAUTL",
+  "CMRDJPS^ENTIDD",
+  "GET1^DIQ",
+  "VENPRE^ENLIB",
+  "N^ENJDPL",
+  "DISPM^ENLIB3",
+  "DISPW^ENLIB3"
+ ],
+ "directSets": [
+  "^(2) piece 12",
+  "^(2) piece 3",
+  "^(7) piece 2"
+ ],
+ "entriesList": [
+  {
+   "screen": "19 ENEQ1",
+   "entry": 2,
+   "label": "MANUFACTURER",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "LAST^ENEQ3"
+    ],
+    "directSets": [],
+    "reads": [],
+    "jumpsTo": [],
+    "message": null
+   },
+   "post": null,
+   "code": {
+    "pre": "I $D(ENDA),$G(XGRT)=\"\" S DA=ENDA D LAST^ENEQ3"
+   }
+  },
+  {
+   "screen": "19 ENEQ1",
+   "entry": 5,
+   "label": "CSN",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "CHKFA^ENFAUTL"
+    ],
+    "directSets": [],
+    "reads": [
+     "^ENG(6915.2,\"B\",DA)"
+    ],
+    "jumpsTo": [
+     6
+    ],
+    "message": "Since this item is capitalized NX, CSN may be edited only via an FAP document."
+   },
+   "post": {
+    "keys": [],
+    "calls": [],
+    "directSets": [],
+    "reads": [],
+    "jumpsTo": [],
+    "message": null
+   },
+   "code": {
+    "pre": "I $D(^ENG(6915.2,\"B\",DA)) S X=$$CHKFA^ENFAUTL(DA) I $P(X,U) W !,\"Since this item is capitalized NX, CSN may be edited only via an FAP document.\",!,\"Press <RETURN> to continue...\" R X:DTIME S DJNX=6",
+    "post": "S V(7)=$P(^ENG(6914,DA,0),U,2)"
+   }
+  },
+  {
+   "screen": "19 ENEQ1",
+   "entry": 6,
+   "label": "LIFE EXPECTANCY",
+   "pre": {
+    "keys": [],
+    "calls": [],
+    "directSets": [],
+    "reads": [
+     "^ENG(6914,DA,2)"
+    ],
+    "jumpsTo": [],
+    "message": null
+   },
+   "post": null,
+   "code": {
+    "pre": "I $D(^ENG(6914,DA,2)),$P(^(2),U,6)]\"\" S V(6)=$P(^(2),U,6)"
+   }
+  },
+  {
+   "screen": "19 ENEQ1",
+   "entry": 8,
+   "label": "CMR",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "CHKFA^ENFAUTL"
+    ],
+    "directSets": [],
+    "reads": [
+     "^ENG(6915.2,\"B\",DA)"
+    ],
+    "jumpsTo": [
+     9
+    ],
+    "message": "Capitalized asset. CMR may only be edited via FAP documents."
+   },
+   "post": {
+    "keys": [],
+    "calls": [
+     "CMRDJPS^ENTIDD"
+    ],
+    "directSets": [],
+    "reads": [],
+    "jumpsTo": [],
+    "message": null
+   },
+   "code": {
+    "pre": "I $D(^ENG(6915.2,\"B\",DA)) S X=$$CHKFA^ENFAUTL(DA) I $P(X,U)=1 W \"Capitalized asset. CMR may only be edited via FAP documents.\",!,\"Press <RETURN> to continue...\" R X:DTIME S DJNX=9",
+    "post": "D CMRDJPS^ENTIDD"
+   }
+  },
+  {
+   "screen": "19 ENEQ1",
+   "entry": 11,
+   "label": "ACQ. METHOD",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "CHKFA^ENFAUTL"
+    ],
+    "directSets": [],
+    "reads": [
+     "^ENG(6915.2,\"B\",DA)"
+    ],
+    "jumpsTo": [
+     12
+    ],
+    "message": "Capitalized asset. ACQ METHOD edits require an FAP document."
+   },
+   "post": null,
+   "code": {
+    "pre": "I $D(^ENG(6915.2,\"B\",DA)) S X=$$CHKFA^ENFAUTL(DA) I $P(X,U) W !,\"Capitalized asset. ACQ METHOD edits require an FAP document.\",!,\"Press <RETURN> to continue...\" R X:DTIME S DJNX=12"
+   }
+  },
+  {
+   "screen": "19 ENEQ1",
+   "entry": 12,
+   "label": "VENDOR",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "GET1^DIQ",
+     "VENPRE^ENLIB"
+    ],
+    "directSets": [],
+    "reads": [],
+    "jumpsTo": [],
+    "message": null
+   },
+   "post": null,
+   "code": {
+    "pre": "S V(12)=$$GET1^DIQ(6914,DA,10) D VENPRE^ENLIB"
+   }
+  },
+  {
+   "screen": "19 ENEQ1",
+   "entry": 13,
+   "label": "LEASE COST",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "N^ENJDPL"
+    ],
+    "directSets": [
+     "^(2) piece 12"
+    ],
+    "reads": [
+     "^ENG(6914,DA,3)"
+    ],
+    "jumpsTo": [
+     14
+    ],
+    "message": null
+   },
+   "post": null,
+   "code": {
+    "pre": "I \"^L^M^\"'[(U_$P($G(^ENG(6914,DA,3)),U,4)_U) S DJNX=14 I $P($G(^(2)),U,12)]\"\" S V(13)=\"\",$P(^(2),U,12)=\"\",DJSV=V D N^ENJDPL S V=DJSV"
+   }
+  },
+  {
+   "screen": "19 ENEQ1",
+   "entry": 14,
+   "label": "ASSET VALUE",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "N^ENJDPL"
+    ],
+    "directSets": [
+     "^(2) piece 3"
+    ],
+    "reads": [
+     "^ENG(6914,DA,3)"
+    ],
+    "jumpsTo": [
+     15
+    ],
+    "message": null
+   },
+   "post": null,
+   "code": {
+    "pre": "I $P($G(^ENG(6914,DA,3)),U,4)=\"L\" S DJNX=15 I $P($G(^(2)),U,3)]\"\" S V(14)=\"\",$P(^(2),U,3)=\"\",DJSV=V D N^ENJDPL S V=DJSV"
+   }
+  },
+  {
+   "screen": "19 ENEQ1",
+   "entry": 17,
+   "label": "REPLACEMENT DATE",
+   "pre": {
+    "keys": [],
+    "calls": [],
+    "directSets": [],
+    "reads": [
+     "^ENG(6914,DA,2)"
+    ],
+    "jumpsTo": [],
+    "message": null
+   },
+   "post": null,
+   "code": {
+    "pre": "I $D(^ENG(6914,DA,2)),$P(^(2),U,10)]\"\" S Y=$P(^(2),U,10) X ^DD(\"DD\") S V(17)=Y"
+   }
+  },
+  {
+   "screen": "19 ENEQ1",
+   "entry": 18,
+   "label": "SOURCE",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "GET1^DIQ"
+    ],
+    "directSets": [],
+    "reads": [],
+    "jumpsTo": [],
+    "message": null
+   },
+   "post": null,
+   "code": {
+    "pre": "S V(18)=$$GET1^DIQ(6914,DA,13.5)"
+   }
+  },
+  {
+   "screen": "20 ENEQ2",
+   "entry": 2,
+   "label": "PARENT SYSTEM",
+   "pre": null,
+   "post": {
+    "keys": [],
+    "calls": [
+     "N^ENJDPL"
+    ],
+    "directSets": [],
+    "reads": [
+     "^ENG(6914,DA,9)"
+    ],
+    "jumpsTo": [
+     3
+    ],
+    "message": null
+   },
+   "code": {
+    "post": "I $G(X)?1.N,$P($G(^ENG(6914,DA,9)),U,12)]\"\" S DJNX=3,V(21)=$P(^(9),U,12),DJSV=V D N^ENJDPL S V=DJSV"
+   }
+  },
+  {
+   "screen": "20 ENEQ2",
+   "entry": 10,
+   "label": "CONTRACT COST",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "N^ENJDPL"
+    ],
+    "directSets": [
+     "^(7) piece 2"
+    ],
+    "reads": [
+     "^ENG(6914,DA,7)"
+    ],
+    "jumpsTo": [
+     11
+    ],
+    "message": null
+   },
+   "post": null,
+   "code": {
+    "pre": "S:'$D(^ENG(6914,DA,7)) DJNX=11 I $D(^ENG(6914,DA,7)),$P(^(7),U,1)'=\"Y\" S DJNX=11 I $P(^(7),U,2)]\"\" S V(10)=\"\",$P(^(7),U,2)=\"\" S DJSV=V D N^ENJDPL S V=DJSV"
+   }
+  },
+  {
+   "screen": "20 ENEQ2",
+   "entry": 15,
+   "label": "DISP METHOD",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "DISPM^ENLIB3",
+     "CHKFA^ENFAUTL",
+     "DISPW^ENLIB3"
+    ],
+    "directSets": [],
+    "reads": [
+     "^ENG(6915.2,\"B\",DA)"
+    ],
+    "jumpsTo": [
+     17
+    ],
+    "message": null
+   },
+   "post": null,
+   "code": {
+    "pre": "D:$G(V(V))]\"\" DISPM^ENLIB3 I $D(^ENG(6915.2,\"B\",DA)) S X=$$CHKFA^ENFAUTL(DA) I $P(X,U) D DISPW^ENLIB3 S DJNX=17"
+   }
+  },
+  {
+   "screen": "20 ENEQ2",
+   "entry": 18,
+   "label": "COMMENTS(W)",
+   "pre": null,
+   "post": {
+    "keys": [
+     "ENEDSPEX"
+    ],
+    "calls": [],
+    "directSets": [],
+    "reads": [
+     "^XUSEC(\"ENEDSPEX\",DUZ)"
+    ],
+    "jumpsTo": [
+     20
+    ],
+    "message": null
+   },
+   "code": {
+    "post": "I '$D(^XUSEC(\"ENEDSPEX\",DUZ)) S DJNX=20"
+   }
+  },
+  {
+   "screen": "20 ENEQ2",
+   "entry": 19,
+   "label": "SPEX(W)",
+   "pre": {
+    "keys": [
+     "ENEDSPEX"
+    ],
+    "calls": [],
+    "directSets": [],
+    "reads": [
+     "^XUSEC(\"ENEDSPEX\",DUZ)"
+    ],
+    "jumpsTo": [
+     20
+    ],
+    "message": "You must hold key ENEDSPEX to edit this field."
+   },
+   "post": null,
+   "code": {
+    "pre": "I '$D(^XUSEC(\"ENEDSPEX\",DUZ)) W !,\"You must hold key ENEDSPEX to edit this field.\",!,\"Press <RETURN> to continue\" R X:DTIME S DJNX=20"
+   }
+  },
+  {
+   "screen": "27 ENEQ3",
+   "entry": 2,
+   "label": "INVESTMENT CATEGORY",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "CHKFA^ENFAUTL"
+    ],
+    "directSets": [],
+    "reads": [
+     "^ENG(6915.2,\"B\",DA)"
+    ],
+    "jumpsTo": [
+     8
+    ],
+    "message": "Capitalized asset. It can be made non-capitalized only after an FD document."
+   },
+   "post": null,
+   "code": {
+    "pre": "I $D(^ENG(6915.2,\"B\",DA)) S X=$$CHKFA^ENFAUTL(DA) I $P(X,U) W !,\"Capitalized asset. It can be made non-capitalized only after an FD document.\",!,\"Press <RETURN> to continue...\" R X:DTIME S DJNX=8"
+   }
+  },
+  {
+   "screen": "27 ENEQ3",
+   "entry": 3,
+   "label": "FUND",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "CHKFA^ENFAUTL"
+    ],
+    "directSets": [],
+    "reads": [
+     "^ENG(6915.2,\"B\",DA)"
+    ],
+    "jumpsTo": [
+     8
+    ],
+    "message": "Capitalized asset. FUND edits require an FR document."
+   },
+   "post": null,
+   "code": {
+    "pre": "I $D(^ENG(6915.2,\"B\",DA)) S X=$$CHKFA^ENFAUTL(DA) I $P(X,U) W !,\"Capitalized asset. FUND edits require an FR document.\",!,\"Press <RETURN> to continue...\" R X:DTIME S DJNX=8"
+   }
+  },
+  {
+   "screen": "27 ENEQ3",
+   "entry": 4,
+   "label": "FCP",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "CHKFA^ENFAUTL"
+    ],
+    "directSets": [],
+    "reads": [
+     "^ENG(6915.2,\"B\",DA)"
+    ],
+    "jumpsTo": [
+     8
+    ],
+    "message": "Capitalized asset. FCP changes require an FR document."
+   },
+   "post": null,
+   "code": {
+    "pre": "I $D(^ENG(6915.2,\"B\",DA)) S X=$$CHKFA^ENFAUTL(DA) I $P(X,U) W !,\"Capitalized asset. FCP changes require an FR document.\",!,\"Press <RETURN> to continue...\" R X:DTIME S DJNX=8"
+   }
+  },
+  {
+   "screen": "27 ENEQ3",
+   "entry": 5,
+   "label": "BOC",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "CHKFA^ENFAUTL"
+    ],
+    "directSets": [],
+    "reads": [
+     "^ENG(6915.2,\"B\",DA)"
+    ],
+    "jumpsTo": [
+     8
+    ],
+    "message": "Capitalized asset. BOC changes require an FR document."
+   },
+   "post": {
+    "keys": [],
+    "calls": [
+     "GET1^DIQ"
+    ],
+    "directSets": [],
+    "reads": [],
+    "jumpsTo": [],
+    "message": null
+   },
+   "code": {
+    "pre": "I $D(^ENG(6915.2,\"B\",DA)) S X=$$CHKFA^ENFAUTL(DA) I $P(X,U) W !,\"Capitalized asset. BOC changes require an FR document.\",!,\"Press <RETURN> to continue...\" R X:DTIME S DJNX=8",
+    "post": "S V(6)=$$GET1^DIQ(6914,DA,38)"
+   }
+  },
+  {
+   "screen": "27 ENEQ3",
+   "entry": 6,
+   "label": "SGL ACCOUNT",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "CHKFA^ENFAUTL"
+    ],
+    "directSets": [],
+    "reads": [
+     "^ENG(6915.2,\"B\",DA)"
+    ],
+    "jumpsTo": [
+     8
+    ],
+    "message": "Capitalized asset. Changes to SGL require an FAP document."
+   },
+   "post": null,
+   "code": {
+    "pre": "I $D(^ENG(6915.2,\"B\",DA)) S X=$$CHKFA^ENFAUTL(DA) I $P(X,U) W !,\"Capitalized asset. Changes to SGL require an FAP document.\",!,\"Press <RETURN> to continue...\" R X:DTIME S DJNX=8"
+   }
+  },
+  {
+   "screen": "27 ENEQ3",
+   "entry": 7,
+   "label": "A/O",
+   "pre": {
+    "keys": [],
+    "calls": [
+     "CHKFA^ENFAUTL"
+    ],
+    "directSets": [],
+    "reads": [
+     "^ENG(6915.2,\"B\",DA)"
+    ],
+    "jumpsTo": [
+     8
+    ],
+    "message": "Capitalized asset. A/O edits require an FAP document."
+   },
+   "post": null,
+   "code": {
+    "pre": "I $D(^ENG(6915.2,\"B\",DA)) S X=$$CHKFA^ENFAUTL(DA) I $P(X,U) W !,\"Capitalized asset. A/O edits require an FAP document.\",!,\"Press <RETURN> to continue...\" R X:DTIME S DJNX=8"
+   }
+  }
+ ]
+}

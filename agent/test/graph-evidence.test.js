@@ -61,6 +61,24 @@ test("each bulletin placeholder says where its value comes from, so the producti
   assert.deepEqual(p(7).text, { capitalized: "Item is capitalized NX.", notCapitalized: "Item is NOT capitalized NX.", reported: "It was reported to FAP.", notReported: "It was NOT reported to FAP." });
 });
 
+test("each discovery candidate names its discovery method, cites evidence and links only to items in the graph", () => {
+  const dc = c.discoveryCandidates;
+  assert.ok(Array.isArray(dc) && dc.length > 0, "discoveryCandidates present");
+  const ids = new Set();
+  JSON.stringify(c, (k, v) => { if (k === "id" && typeof v === "string") ids.add(v); return v; });
+  const methods = ["xindex", "screen-action-survey", "tmp-sampler", "runtime-trace"];
+  assert.equal(new Set(dc.map(d => d.id)).size, dc.length, "ids are unique");
+  for (const d of dc) {
+    assert.match(d.id, /^DC\./);
+    assert.equal(d.status, "candidate", d.id);
+    assert.ok(d.kind && d.name && d.finding && d.suggestedAs, d.id + " text");
+    assert.ok(d.source.length > 0 && d.source.every(s => methods.includes(s)), d.id + " source");
+    assert.ok(d.evidence.length > 0 && d.meta.evidence.length > 0, d.id + " evidence");
+    for (const r of d.relatesTo) assert.ok(ids.has(r), `${d.id} relatesTo ${r}`);
+  }
+  assert.ok(dc.find(d => d.id === "DC.SEC.ENEDSPEX").evidence.some(e => /\^XUSEC\("ENEDSPEX",DUZ\)/.test(e)));
+});
+
 test("the implemented-services file has the expected shape", () => {
   // Phase 1 service ids live in the module, not the file (which starts empty after a reset)
   assert.deepEqual(PHASE1_SERVICES.map(s => s.id), ["write:6914", "read:next-ien", "read:lookup"]);
